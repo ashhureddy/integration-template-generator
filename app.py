@@ -1240,8 +1240,11 @@ if run:
 
     if scope_lines:
         st.subheader("📋 Scope of work summary")
-        st.code("\n".join(scope_lines), language=None)
-        st.caption("Tab-separated — paste directly into Excel/Notepad and it will land in columns.")
+        readable_lines = [line.replace("\t", "    ") for line in scope_lines]
+        st.code("\n".join(readable_lines), language=None)
+        with st.expander("📋 Copy tab-separated version for Excel/Notepad"):
+            st.text_area("Tab-separated (select all, copy, paste into Excel — lands in columns)",
+                          "\n".join(scope_lines), height=150, key="sow_raw")
 
     if outputs:
         st.subheader("📄 Generated output")
