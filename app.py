@@ -453,7 +453,7 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
     controller_edp_found: dict of {controller_id: bool} — False means the 6610 shows in the CIQ
     but isn't published in EDP yet."""
     lines = []
-    for node, cells in classification["added"].items():
+    for node, cells in classification.get("added", {}).items():
         labels = dedupe_labels(cells)
         lines.append(f"Integration:\t{'/'.join(labels)}\t{node}")
 
@@ -465,7 +465,7 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
             lines.append(f"6610 Controller Integration:\tEDP is not published for the controller\t{ctrl_id}")
 
     moved_by_pair = {}
-    for m in classification["moved"]:
+    for m in classification.get("moved", []):
         key = (m["from_node"], m["to_node"])
         moved_by_pair.setdefault(key, []).append(m["cell"])
     WHOLE_BAND_SET = {"Alpha", "Beta", "Gamma"}
@@ -484,14 +484,14 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
         sectors_str = "" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
         lines.append(f"Moved Sectors:\t{label_str}{sectors_str}\tFrom:\t{from_node}\tTo:\t{to_node}")
 
-    for node in classification["deleted_nodes"]:
+    for node in classification.get("deleted_nodes", []):
         lines.append(f"Deleted Node from ENM:\t{node}")
 
-    for node, cells in classification["deleted_sectors"].items():
+    for node, cells in classification.get("deleted_sectors", {}).items():
         labels = dedupe_labels(cells)
         lines.append(f"Deleted Sector:\t{'/'.join(labels)}\t{node}")
 
-    for r in classification["retuned"]:
+    for r in classification.get("retuned", []):
         lines.append(f"Retune on:\t{r['label']}\tFrom:\t{r['from']}\tTo:\t{r['to']}")
 
     # Step 1: group by physical radio (co-location) — gives the correct set of bands per unit
@@ -1465,7 +1465,7 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
 
     # CRAN has no Carrier ADD/Delete/Move "checks" per the blueprint — only 6610 and DSS ride along here
     radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
-    scope_of_work_lines = format_scope_of_work({"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": []}, controller_objs, dss_labels, controller_edp_found, radio_swaps)
+    scope_of_work_lines = format_scope_of_work({"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": [], "retuned": []}, controller_objs, dss_labels, controller_edp_found, radio_swaps)
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
