@@ -195,7 +195,9 @@ def extract_pre_hw(text, node_name):
     if not text or not node_name:
         return None
     esc = re.escape(node_name)
-    m = re.search(esc + r"\s+1\s+UNLOCKED\s+OFF\s+STEADY_ON\s+ENABLED\s+([A-Za-z0-9 ]+?)\s+\d{6,8}", text, re.I)
+    # some Pre-checks PDF versions insert an extra ISO-timestamp token between ENABLED and the
+    # actual product name (seen on newer AAS/5216-style hardware rows) — (?:\S+\s+)? skips it if present
+    m = re.search(esc + r"\s+1\s+UNLOCKED\s+OFF\s+STEADY_ON\s+ENABLED\s+(?:\S+\s+)?([A-Za-z0-9 ]+?)\s+\d{6,8}", text, re.I)
     if not m:
         return None
     # take the LAST token as the model number — handles "Baseband 6630", "RAN Processor 6651",
@@ -357,9 +359,29 @@ def extract_precheck_sectors(text):
 # CARRIER ADD / DELETE / MOVE / RETUNE CLASSIFICATION
 # ============================================================
 
+def build_node_alias_map(mm_objs):
+    """A node's secondary identity (eNodeB or gNodeB name) can appear in Sector Del_Movement's
+    Source/Target columns instead of its Primary ID — happens specifically when the moving cell's
+    own technology matches the secondary identity (e.g. a 5G cell moving into a dual-identity node
+    records the target using that node's gNodeB name, not its Primary 'Node to be built as')."""
+    alias = {}
+    for row in mm_objs:
+        primary = row.get("Node to be built as")
+        if not primary:
+            continue
+        for secondary in (row.get("eNodeB Name"), row.get("gNodeB Name")):
+            if secondary and str(secondary).strip() and str(secondary).strip() != str(primary).strip():
+                alias[str(secondary).strip()] = str(primary).strip()
+    return alias
+
+
 def classify_carriers(ciq_wb, mm_objs, precheck_text):
     """Returns a dict: added (per node), moved, deleted_sectors, deleted_nodes, retuned."""
     result = {"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": [], "retuned": [], "node_band_sectors": {}}
+    alias_map = build_node_alias_map(mm_objs)
+
+    def normalize(name):
+        return alias_map.get(str(name).strip(), name) if name else name
 
     pre_pairs, pre_nodes = extract_precheck_sectors(precheck_text)
     pre_cells = {cell for (_, cell) in pre_pairs}
@@ -379,8 +401,9 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
     handled_cells = set()
 
     for r in delmove_objs:
-        src_node, src_sector = r.get("Source Node name"), r.get("Source Sector")
-        tgt_node, tgt_sector = r.get("Target Node name"), r.get("Target Sector")
+        src_node, src_sector = normalize(r.get("Source Node name")), r.get("Source Sector")
+        tgt_node_raw, tgt_sector = r.get("Target Node name"), r.get("Target Sector")
+        tgt_node = tgt_node_raw if str(tgt_node_raw).strip().upper() == "DELETE" else normalize(tgt_node_raw)
         handled_cells.add(src_sector)
         if str(tgt_node).strip().upper() == "DELETE":
             result["deleted_sectors"].setdefault(src_node, []).append(src_sector)
@@ -1029,13 +1052,13 @@ def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_name
 
     # order: CIQ order first (so Pre and Post always list shared nodes in the same sequence),
     # then any Pre-only nodes (e.g. a fully vacated node) appended after
+    _, pre_nodes_set = extract_precheck_sectors(precheck_text)
     ordered_names = list(ciq_order) + [n for n in precheck_node_names if n not in ciq_order]
 
     pre_nodes = {}
     for name in ordered_names:
-        hw = pre_hw_string(precheck_text, name)
-        if hw:
-            pre_nodes[name] = hw
+        if name in pre_nodes_set:  # only include nodes actually confirmed present in Pre-checks
+            pre_nodes[name] = pre_hw_string(precheck_text, name) or "NOT FOUND"
 
     def lbl(n):
         return labels.get(n, n)
