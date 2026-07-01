@@ -52,9 +52,12 @@ TPL_DSS_3SECTOR = resolve_dss_template("stand")
 def load_workbook_any(file_bytes, filename):
     """openpyxl can only read real .xlsx (zip-based OOXML) — legacy .xls (OLE2/CFB binary) needs xlrd.
     Some files have a mismatched extension (e.g. an old .xls saved/renamed with a .xlsx name), so this
-    doesn't trust the filename alone: it tries openpyxl first, and falls back to the xlrd conversion
-    path on failure regardless of what the extension claims."""
-    import openpyxl
+    doesn't trust the filename alone: it tries the format the extension suggests first, then the other
+    one on failure. It also repairs a common 'could not read stylesheet' crash — some non-Microsoft
+    export tools produce a malformed xl/styles.xml even though the actual cell data is fine — by
+    swapping in a minimal valid stylesheet and retrying (verified against a deliberately-corrupted
+    styles.xml: openpyxl's read_only mode does NOT sidestep this, but replacing the styles part does)."""
+    import openpyxl, zipfile
 
     def via_xlrd():
         import pandas as pd
@@ -67,16 +70,40 @@ def load_workbook_any(file_bytes, filename):
                 ws.append(list(row))
         return out_wb
 
-    looks_like_xls = filename.lower().endswith(".xls") and not filename.lower().endswith(".xlsx")
-    try:
-        if looks_like_xls:
-            return via_xlrd()
+    def via_openpyxl():
         return openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-    except Exception as first_error:
+
+    def via_repaired_styles():
+        MINIMAL_STYLES = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
+<fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+</styleSheet>'''
+        zin = zipfile.ZipFile(io.BytesIO(file_bytes), "r")
+        repaired_buf = io.BytesIO()
+        zout = zipfile.ZipFile(repaired_buf, "w")
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "xl/styles.xml":
+                data = MINIMAL_STYLES
+            zout.writestr(item, data)
+        zout.close()
+        return openpyxl.load_workbook(io.BytesIO(repaired_buf.getvalue()), data_only=True)
+
+    looks_like_xls = filename.lower().endswith(".xls") and not filename.lower().endswith(".xlsx")
+    attempts = [via_xlrd, via_openpyxl, via_repaired_styles] if looks_like_xls else [via_openpyxl, via_repaired_styles, via_xlrd]
+
+    first_error = None
+    for attempt in attempts:
         try:
-            return via_xlrd() if not looks_like_xls else openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-        except Exception:
-            raise first_error  # surface the original, more likely relevant error
+            return attempt()
+        except Exception as e:
+            if first_error is None:
+                first_error = e
+    raise first_error  # surface the first (most likely relevant) error
 
 def sheet_objs(ws):
     rows = list(ws.iter_rows(values_only=True))
