@@ -125,7 +125,10 @@ def edp_get(edp_index, row, header_name):
     if idx is None or idx >= len(row):
         return None
     v = row[idx]
-    return None if v is None or str(v).strip() == "" else str(v).strip()
+    if v is None or (isinstance(v, float) and v != v):  # v != v is the standard NaN check
+        return None
+    s = str(v).strip()
+    return None if s == "" or s.lower() == "nan" else s
 
 
 def find_row_by_name(ciq_wb, sheet_name, name_header, name_value):
@@ -206,7 +209,7 @@ def push_controller_siad_row(rows, edp_index, controller_id):
     rows.append({
         "Node": controller_id,
         "SIAD CLLI": edp_get(edp_index, row, "SIAD_CLLI") or "NOT FOUND",
-        "Port Size": edp_get(edp_index, row, "SIAD_PORT_SIZE_BBU") or "NOT FOUND",
+        "Port Size": "1G",
         "Port Facing BBU": (edp_get(edp_index, row, "ANCEQ_SIAD_PORT") or "NOT FOUND") if found else "EDP not published for controller",
     })
     return found
