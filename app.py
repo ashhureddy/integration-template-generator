@@ -445,7 +445,7 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
     for m in classification["moved"]:
         key = (m["from_node"], m["to_node"])
         moved_by_pair.setdefault(key, []).append(m["cell"])
-    node_band_sectors = classification.get("node_band_sectors", {})
+    WHOLE_BAND_SET = {"Alpha", "Beta", "Gamma"}
     for (from_node, to_node), cells in moved_by_pair.items():
         labels = dedupe_labels(cells)
         label_str = labels[0] if len(labels) == 1 else f"[{'/'.join(labels)}]"
@@ -454,9 +454,9 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
             label, sector = band_label(c)
             if label and sector:
                 per_label_moved.setdefault(label, set()).add(sector)
-        is_whole = bool(per_label_moved) and all(
-            per_label_moved[l] == node_band_sectors.get((from_node, l), set()) for l in per_label_moved
-        )
+        # "whole" = every band in this move brought all of Alpha+Beta+Gamma together — not
+        # about what the source node happened to have historically, just this move itself
+        is_whole = bool(per_label_moved) and all(WHOLE_BAND_SET <= sset for sset in per_label_moved.values())
         sector_names = sorted({s for sset in per_label_moved.values() for s in sset}, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
         sectors_str = "" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
         lines.append(f"Moved Sectors:\t{label_str}{sectors_str}\tFrom:\t{from_node}\tTo:\t{to_node}")
@@ -1018,6 +1018,7 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
         else:
             summary_rows.append({"Item": f"Node: {site_id}", "Source": f"BBU Mode = {bbu_mode}", "Value": "skipped", "Note": "not MMBB or TMBB"})
             log(f"· {site_id}: BBU Mode = {bbu_mode}, skipped")
+            push_siad_row(siad_rows, edp_index, site_id)
 
     add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log)
     outputs += add_outputs
@@ -1057,6 +1058,12 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
         tpl = fill_node_template(tpl_cenm, row, edp_index, user_id, date_str, summary_rows, log)
         outputs.append((f"{site_id}_cENM_TMBB_Integration_Filled.txt", tpl))
         push_siad_row(siad_rows, edp_index, site_id)
+
+    for row in mm_objs:
+        if str(row.get("BBU Mode", "")).strip() != "TMBB":
+            site_id = row.get("Node to be built as")
+            summary_rows.append({"Item": f"Node: {site_id}", "Source": f"BBU Mode = {row.get('BBU Mode')}", "Value": "skipped for template", "Note": "not TMBB — still included in Pre/Post and SIAD"})
+            push_siad_row(siad_rows, edp_index, site_id)
 
     add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log)
     outputs += add_outputs
