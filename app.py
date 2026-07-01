@@ -455,6 +455,18 @@ def scope_lines_to_table(scope_lines):
     return rows
 
 
+def scope_lines_to_readable_text(scope_lines):
+    """Same parsed fields as scope_lines_to_table, but rendered as compact readable sentences —
+    single spaces, no raw tab characters (which jump to wide tab-stops in monospace display)."""
+    out = []
+    for row in scope_lines_to_table(scope_lines):
+        if row["From"] or row["To"]:
+            out.append(f"{row['Category']}: {row['Details']}  From: {row['From']}  To: {row['To']}")
+        else:
+            out.append(f"{row['Category']}: {row['Details']}")
+    return out
+
+
 # ============================================================
 # GENERATOR: shared node-template fill (used by MMBB / TMBB / CENM alike —
 # they all share the identical placeholder set, confirmed against the source templates)
@@ -1294,7 +1306,7 @@ if run:
 
     if scope_lines:
         st.subheader("📋 Scope of work summary")
-        st.dataframe(pd.DataFrame(scope_lines_to_table(scope_lines)), use_container_width=True, hide_index=True)
+        st.code("\n".join(scope_lines_to_readable_text(scope_lines)), language=None)
         with st.expander("📋 Copy tab-separated version for Excel/Notepad"):
             st.text_area("Tab-separated (select all, copy, paste into Excel — lands in columns)",
                           "\n".join(scope_lines), height=150, key="sow_raw")
