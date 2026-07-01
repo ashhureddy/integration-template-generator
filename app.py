@@ -49,6 +49,22 @@ TPL_DSS_3SECTOR = resolve_dss_template("stand")
 # SHARED HELPERS
 # ============================================================
 
+def load_workbook_any(file_bytes, filename):
+    """openpyxl can only read .xlsx — legacy .xls needs xlrd. Detect and convert transparently
+    so the rest of the app can keep using the openpyxl-style .sheetnames / [sheet].iter_rows() API."""
+    import openpyxl
+    if filename.lower().endswith(".xls") and not filename.lower().endswith(".xlsx"):
+        import pandas as pd
+        all_sheets = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None, engine="xlrd", header=None)
+        out_wb = openpyxl.Workbook()
+        out_wb.remove(out_wb.active)
+        for sheet_name, df in all_sheets.items():
+            ws = out_wb.create_sheet(title=str(sheet_name)[:31])  # Excel sheet name limit
+            for row in df.itertuples(index=False, name=None):
+                ws.append(list(row))
+        return out_wb
+    return openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+
 def sheet_objs(ws):
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
@@ -1177,9 +1193,8 @@ if run:
         )
         st.stop()
 
-    import openpyxl
     log("Reading CIQ workbook...")
-    ciq_wb = openpyxl.load_workbook(io.BytesIO(ciq_file.read()), data_only=True)
+    ciq_wb = load_workbook_any(ciq_file.read(), ciq_file.name)
     if "Mixed Mode Info" not in ciq_wb.sheetnames:
         st.error('Could not find a "Mixed Mode Info" tab in the CIQ.')
         st.stop()
@@ -1189,9 +1204,10 @@ if run:
     log("Reading EDP workbook...")
     edp_bytes = edp_file.read()
     try:
-        edp_wb = openpyxl.load_workbook(io.BytesIO(edp_bytes), data_only=True)
-    except Exception:
-        st.error("This EDP couldn't be read as .xlsx. If it's an old .xls file, make sure `xlrd` is in requirements.txt, or re-save it as .xlsx and re-upload.")
+        edp_wb = load_workbook_any(edp_bytes, edp_file.name)
+    except Exception as e:
+        st.error(f"This EDP couldn't be read (tried both .xlsx and legacy .xls handling). "
+                  f"Try re-saving it as .xlsx in Excel and re-uploading. Error detail: {e}")
         st.stop()
     edp_index = build_edp_index(edp_wb)
     if not edp_index:
