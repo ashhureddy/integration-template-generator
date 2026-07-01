@@ -1212,7 +1212,7 @@ with col_inputs:
     if top_scope == "CRAN":
         cran_sub = st.selectbox("CRAN scope", ["CRAN SA Rehome Trip 1", "CRAN SA Rehome Trip 2", "CRAN NSA Rehome"])
 
-    ciq_file = st.file_uploader("CIQ (.xlsx)", type=["xlsx", "xls"])
+    ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"])
     edp_file = st.file_uploader("EDP (.xlsx / .xls)", type=["xlsx", "xls"])
     pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
     c1, c2 = st.columns(2)
