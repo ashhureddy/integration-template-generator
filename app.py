@@ -448,7 +448,7 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
     return result
 
 
-def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None, controller_edp_found=None):
+def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None, controller_edp_found=None, radio_swaps=None):
     """Turn the classification dict into the confirmed display lines.
     controller_edp_found: dict of {controller_id: bool} — False means the 6610 shows in the CIQ
     but isn't published in EDP yet."""
@@ -493,6 +493,35 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
 
     for r in classification["retuned"]:
         lines.append(f"Retune on:\t{r['label']}\tFrom:\t{r['from']}\tTo:\t{r['to']}")
+
+    # Step 1: group by physical radio (co-location) — gives the correct set of bands per unit
+    by_physical_radio = {}
+    for r in (radio_swaps or []):
+        key = r.get("group_key", (r["from"], r["to"]))
+        by_physical_radio.setdefault(key, []).append(r)
+
+    physical_groups = []
+    for entries in by_physical_radio.values():
+        labels = []
+        for e in entries:
+            if e["label"] not in labels:
+                labels.append(e["label"])
+        sectors = sorted({e["sector"] for e in entries if e.get("sector")}, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
+        physical_groups.append({"labels": tuple(labels), "from": entries[0]["from"], "to": entries[0]["to"], "sectors": sectors})
+
+    # Step 2: merge physical-radio groups together when the swap signature (same bands, same From/To)
+    # is identical — e.g. Alpha's radio and Beta's radio both swapped the same way
+    merged = {}
+    for g in physical_groups:
+        sig = (g["labels"], g["from"], g["to"])
+        merged.setdefault(sig, set()).update(g["sectors"])
+
+    for (labels, from_radio, to_radio), sector_set in merged.items():
+        label_str = labels[0] if len(labels) == 1 else f"[{'|'.join(labels)}]"
+        sector_names = sorted(sector_set, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
+        is_whole = WHOLE_BAND_SET <= sector_set
+        sectors_str = "" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
+        lines.append(f"Radio Swap on:\t{label_str}{sectors_str}\tFrom:\t{from_radio}\tTo:\t{to_radio}")
 
     if dss_outputs_meta:
         lines.append(f"DSS Activation:\t{' & '.join(dss_outputs_meta)}")
@@ -966,7 +995,7 @@ def generate_final_connections(ciq_wb, mm_objs):
 # ============================================================
 
 DL_UL_LOSS_ROW_RE = re.compile(
-    r'(\S+)\s+Up\s+\d+\s+.*?((?:Baseband|XMU)\S*.*?Port\s+D\d)', re.DOTALL
+    r'(\S+)\s+(?:Up|Down)\s+\d+\s+.*?((?:Baseband|XMU)\S*.*?Port\s+D\d)', re.DOTALL
 )
 
 def extract_dl_ul_loss_rows(precheck_text):
@@ -1001,6 +1030,102 @@ def generate_pre_fibers(precheck_text):
     out_wb.save(buf)
     buf.seek(0)
     return buf.getvalue()
+
+
+# ============================================================
+# RADIO SWAP (universal — compares Pre-checks' DL/UL Loss radio type against the CIQ's RRU Type)
+# ============================================================
+
+RADIO_TYPE_RE = re.compile(r'RRU[-\w]*\s*\(([^,]+),')
+
+def extract_precheck_radio_types(precheck_text):
+    """Reuses the same DL/UL Loss row match as Pre Fibers, but pulls the radio product type
+    out of the captured DUS/XMU description instead."""
+    out = {}
+    if not precheck_text:
+        return out
+    for m in DL_UL_LOSS_ROW_RE.finditer(precheck_text):
+        cell, desc = m.group(1), m.group(2)
+        rm = RADIO_TYPE_RE.search(desc)
+        if rm:
+            out[cell] = rm.group(1).strip()
+    return out
+
+
+def ciq_radio_types(ciq_wb):
+    """CIQ-side radio type per cell: 5G Info's 'RRU Type' for 5G cells, eUtran Parameters'
+    'RRU type' for LTE cells."""
+    out = {}
+    if "5G Info" in ciq_wb.sheetnames:
+        for r in sheet_objs(ciq_wb["5G Info"]):
+            cell, rru = r.get("NRCellDU"), r.get("RRU Type")
+            if cell and is_populated(rru):
+                out[cell] = str(rru).strip()
+    if "eUtran Parameters" in ciq_wb.sheetnames:
+        for r in sheet_objs(ciq_wb["eUtran Parameters"]):
+            cell, rru = r.get("EutranCellFDDId"), r.get("RRU type")
+            if cell and is_populated(rru):
+                out[cell] = str(rru).strip()
+    return out
+
+
+def radio_family(radio_string):
+    """Extract just the leading model number (e.g. '32' from 'RRUS 32 B30', '4490' from
+    'Radio 4490HP 44B5 44B12A C') — the CIQ abbreviates radio names (no band suffix, no
+    descriptive extras) while Pre-checks is fully descriptive, so comparing full strings
+    produces false-positive swaps on formatting alone."""
+    m = re.search(r'\d{2,5}', str(radio_string or ''))
+    return m.group(0) if m else str(radio_string or '').strip().upper()
+
+
+def build_colocation_groups(ciq_wb):
+    """Cell -> canonical co-location group key, from eUtran Parameters' 'Co-Located Technology
+    Cell' column (lists peer cell names sharing the same physical radio, spans LTE+5G together).
+    'NA' or blank means the cell isn't co-located with anything else."""
+    groups = {}
+    if "eUtran Parameters" not in ciq_wb.sheetnames:
+        return groups
+    for r in sheet_objs(ciq_wb["eUtran Parameters"]):
+        cell = r.get("EutranCellFDDId")
+        colo_raw = r.get("Co-Located Technology Cell")
+        if not cell:
+            continue
+        if colo_raw and str(colo_raw).strip().upper() != "NA":
+            peers = {p.strip() for p in str(colo_raw).split(",") if p.strip()}
+            peers.add(cell)
+            groups[cell] = tuple(sorted(peers))
+        else:
+            groups[cell] = (cell,)
+    return groups
+
+
+def classify_radio_swaps(precheck_text, ciq_wb):
+    """Cells present in both Pre-checks and the CIQ where the radio family genuinely differs
+    (compared by model number, not exact string, to avoid false positives from naming-format
+    differences between the two sources). Follows Sector Del_Movement's rename mapping — a moved
+    cell can be renamed (e.g. WCL01699_7A_1 -> WCL09699_7A_1 on a different node), so the Pre-checks
+    value must be compared against the CIQ using the cell's NEW name, not its original one."""
+    pre_radios = extract_precheck_radio_types(precheck_text)
+    post_radios = ciq_radio_types(ciq_wb)
+    colo_groups = build_colocation_groups(ciq_wb)
+
+    rename_map = {}
+    if "Sector Del_Movement" in ciq_wb.sheetnames:
+        for r in sheet_objs(ciq_wb["Sector Del_Movement"]):
+            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
+            tgt_node = r.get("Target Node name")
+            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
+                rename_map[src_sector] = tgt_sector
+
+    swaps = []
+    for cell, pre_radio in pre_radios.items():
+        ciq_cell = rename_map.get(cell, cell)
+        post_radio = post_radios.get(ciq_cell)
+        if post_radio and radio_family(post_radio) != radio_family(pre_radio):
+            label, sector = band_label(cell)
+            group_key = colo_groups.get(ciq_cell, (ciq_cell,))
+            swaps.append({"label": label, "sector": sector, "from": pre_radio, "to": post_radio, "group_key": group_key})
+    return swaps
 
 
 # ============================================================
@@ -1119,7 +1244,8 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     pre_line, post_line = generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, pre_nodes_found | ciq_node_names)
 
     classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
-    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
+    radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
+    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1167,7 +1293,8 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     pre_line, post_line = generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, pre_nodes_found | ciq_node_names)
 
     classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
-    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
+    radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
+    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1313,7 +1440,8 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
         binary_outputs.append((f"Pre_Fibers_{target.get('Node to be built as','site')}.xlsx", pre_fibers_bytes))
 
     # CRAN has no Carrier ADD/Delete/Move "checks" per the blueprint — only 6610 and DSS ride along here
-    scope_of_work_lines = format_scope_of_work({"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": []}, controller_objs, dss_labels, controller_edp_found)
+    radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
+    scope_of_work_lines = format_scope_of_work({"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": []}, controller_objs, dss_labels, controller_edp_found, radio_swaps)
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
