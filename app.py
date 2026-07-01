@@ -13,15 +13,37 @@ st.set_page_config(page_title="Integration Template Generator", page_icon="📡"
 
 TDIR = Path(__file__).parent / "templates" / "MCA"
 
-TPL_MMBB = TDIR / "LTE+5G_MMBB_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V11.txt"
-TPL_TMBB = TDIR / "TRIMODE_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V10.txt"
-TPL_CENM = TDIR / "cENM_TRIMODE_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V4.txt"
-TPL_6610 = TDIR / "6610_Controller_Integration_Procedure_25Q3_Updated_V12.txt"
-TPL_CRAN_TRIP1 = TDIR / "CRAN_TO_CRAN_Rehome_Pre-integration_Trip-1_Procedure_for_SA_Sites_V2.txt"
-TPL_CRAN_TRIP2 = TDIR / "CRAN_TO_CRAN_Rehome_and_6673_Sidehaul_Change_With_MPST_Trip-2_Procedure_for_SA_Sites_V1.txt"
-TPL_CRAN_NSA = TDIR / "CRAN_TO_CRAN_Rehome_Integration_and_Cutover_Procedure_for_NSA_Sites_V2.txt"
-TPL_DSS_4SECTOR = TDIR / "standard.txt"
-TPL_DSS_3SECTOR = TDIR / "stand.txt"
+def resolve_template(exact_name, keyword):
+    """Prefer the exact expected filename; if it's missing (e.g. uploaded with a slightly
+    different name), fall back to any file in templates/MCA containing `keyword`."""
+    exact_path = TDIR / exact_name
+    if exact_path.exists():
+        return exact_path
+    if TDIR.exists():
+        candidates = [p for p in TDIR.glob("*.txt") if keyword.lower() in p.name.lower()]
+        if candidates:
+            return candidates[0]
+    return exact_path  # falls through to a clear FileNotFoundError naming what was expected
+
+TPL_MMBB = resolve_template("LTE+5G_MMBB_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V11.txt", "MMBB_Integration")
+TPL_TMBB = resolve_template("TRIMODE_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V10.txt", "TRIMODE_Integration")
+TPL_CENM = resolve_template("cENM_TRIMODE_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V4.txt", "cENM_TRIMODE")
+TPL_6610 = resolve_template("6610 Controller Integration Procedure_25Q3_Updated_V12.txt", "6610")
+TPL_CRAN_TRIP1 = resolve_template("CRAN_TO_CRAN_Rehome_Pre-integration_Trip-1_Procedure_for_SA_Sites_V2.txt", "Trip-1")
+TPL_CRAN_TRIP2 = resolve_template("CRAN_TO_CRAN_Rehome_and_6673_Sidehaul_Change_With_MPST_Trip-2_Procedure_for_SA_Sites_V1.txt", "Trip-2")
+TPL_CRAN_NSA = resolve_template("CRAN_TO_CRAN_Rehome_Integration_and_Cutover_Procedure_for_NSA_Sites_V2.txt", "NSA_Sites")
+
+def resolve_dss_template(exact_stem):
+    """stand/standard were uploaded with no .txt extension — try both forms.
+    Exact stem match only (no fuzzy 'contains' search) since 'stand' is a substring of
+    'standard' and a fuzzy match could silently load the wrong DSS template."""
+    for candidate in (TDIR / f"{exact_stem}.txt", TDIR / exact_stem):
+        if candidate.exists():
+            return candidate
+    return TDIR / f"{exact_stem}.txt"
+
+TPL_DSS_4SECTOR = resolve_dss_template("standard")
+TPL_DSS_3SECTOR = resolve_dss_template("stand")
 
 # ============================================================
 # SHARED HELPERS
@@ -1096,6 +1118,20 @@ def log(msg):
 log_box.code("Waiting for file upload...", language=None)
 
 if run:
+    _all_templates = {
+        "MMBB": TPL_MMBB, "TMBB": TPL_TMBB, "cENM": TPL_CENM, "6610": TPL_6610,
+        "CRAN Trip-1": TPL_CRAN_TRIP1, "CRAN Trip-2": TPL_CRAN_TRIP2, "CRAN NSA": TPL_CRAN_NSA,
+        "DSS 4-sector": TPL_DSS_4SECTOR, "DSS 3-sector": TPL_DSS_3SECTOR,
+    }
+    _missing = [f"{label}  (expected: `{path.name}`)" for label, path in _all_templates.items() if not path.exists()]
+    if _missing:
+        st.error(
+            "Some template files aren't in `templates/MCA/` in the repo — check the exact filenames match "
+            "(GitHub sometimes changes spacing/characters on manual upload):\n\n"
+            + "\n".join(f"- {m}" for m in _missing)
+        )
+        st.stop()
+
     import openpyxl
     log("Reading CIQ workbook...")
     ciq_wb = openpyxl.load_workbook(io.BytesIO(ciq_file.read()), data_only=True)
