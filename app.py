@@ -939,6 +939,48 @@ def generate_final_connections(ciq_wb, mm_objs):
 
 
 # ============================================================
+# PRE FIBERS (universal — pulled from Pre-checks' DL/UL Loss table)
+# ============================================================
+
+DL_UL_LOSS_ROW_RE = re.compile(
+    r'(\S+)\s+Up\s+\d+\s+.*?((?:Baseband|XMU)\S*.*?Port\s+D\d)', re.DOTALL
+)
+
+def extract_dl_ul_loss_rows(precheck_text):
+    if not precheck_text:
+        return []
+    seen, rows = set(), []
+    for m in DL_UL_LOSS_ROW_RE.finditer(precheck_text):
+        cell, dus_xmu_rru = m.group(1), m.group(2).strip()
+        if cell not in seen:
+            seen.add(cell)
+            rows.append({"Cells": cell, "DUS/XMU (S.No) - RRU": dus_xmu_rru})
+    return rows
+
+
+def generate_pre_fibers(precheck_text):
+    """One Excel file per CIQ: Cells + DUS/XMU (S.No) - RRU from Pre-checks' DL/UL Loss table,
+    plus a blank 'Pre fibers' column for manual fill-in."""
+    import openpyxl
+    rows = extract_dl_ul_loss_rows(precheck_text)
+    if not rows:
+        return None
+    out_wb = openpyxl.Workbook()
+    ws = out_wb.active
+    ws.title = "Sheet1"
+    ws.append(["Cells", "DUS/XMU (S.No) - RRU", "Pre fibers"])
+    for r in rows:
+        ws.append([r["Cells"], r["DUS/XMU (S.No) - RRU"], None])
+    ws.column_dimensions["A"].width = 24
+    ws.column_dimensions["B"].width = 90
+    ws.column_dimensions["C"].width = 14
+    buf = io.BytesIO()
+    out_wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ============================================================
 # GENERIC PRE/POST CONFIGURATION (MCA / CENM — any node set, not CRAN's fixed roles)
 # ============================================================
 
@@ -1045,6 +1087,9 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
+    pre_fibers_bytes = generate_pre_fibers(precheck_text)
+    if pre_fibers_bytes and mm_objs:
+        binary_outputs.append((f"Pre_Fibers_{mm_objs[0].get('Node to be built as','site')}.xlsx", pre_fibers_bytes))
 
     _, pre_nodes_found = extract_precheck_sectors(precheck_text)
     ciq_node_names = {r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")}
@@ -1090,6 +1135,9 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
+    pre_fibers_bytes = generate_pre_fibers(precheck_text)
+    if pre_fibers_bytes and mm_objs:
+        binary_outputs.append((f"Pre_Fibers_{mm_objs[0].get('Node to be built as','site')}.xlsx", pre_fibers_bytes))
 
     _, pre_nodes_found = extract_precheck_sectors(precheck_text)
     ciq_node_names = {r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")}
@@ -1237,6 +1285,9 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{target.get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))]
+    pre_fibers_bytes = generate_pre_fibers(precheck_text)
+    if pre_fibers_bytes:
+        binary_outputs.append((f"Pre_Fibers_{target.get('Node to be built as','site')}.xlsx", pre_fibers_bytes))
 
     # CRAN has no Carrier ADD/Delete/Move "checks" per the blueprint — only 6610 and DSS ride along here
     scope_of_work_lines = format_scope_of_work({"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": []}, controller_objs, dss_labels, controller_edp_found)
@@ -1392,7 +1443,7 @@ if run:
                 st.download_button("⬇ Download .txt", text, file_name=name, key=f"dl_{name}")
 
     if binary_outputs:
-        st.subheader("📊 Final connections")
+        st.subheader("📊 Excel outputs")
         for name, data in binary_outputs:
             st.download_button(f"⬇ Download {name}", data, file_name=name, key=f"dl_bin_{name}")
 
