@@ -139,7 +139,10 @@ def extract_pre_hw(text, node_name):
     m = re.search(esc + r"\s+1\s+UNLOCKED\s+OFF\s+STEADY_ON\s+ENABLED\s+([A-Za-z0-9 ]+?)\s+\d{6,8}", text, re.I)
     if not m:
         return None
-    return re.sub(r"^baseband\s+", "", m.group(1).strip(), flags=re.I)
+    # take the LAST token as the model number — handles "Baseband 6630", "RAN Processor 6651",
+    # "Baseband R503", or any future hardware family name, matching the CIQ side's bare model number
+    tokens = m.group(1).strip().split()
+    return tokens[-1] if tokens else None
 
 
 def extract_pre_xmu_count(text, node_name):
@@ -177,6 +180,22 @@ def push_siad_row(rows, edp_index, node_built_as):
     })
 
 
+def push_controller_siad_row(rows, edp_index, controller_id):
+    """6610 controller rows in EDP use a different column set (ANCEQ_*) than regular BBU nodes —
+    same SITE_NAME match, but the port lives in ANCEQ_SIAD_PORT, not SIAD_PORT_FACING_BBU.
+    Returns True if the controller was actually found published in EDP, False otherwise."""
+    row = edp_row_for(edp_index, controller_id)
+    anceq_type = edp_get(edp_index, row, "ANCEQ_TYPE")
+    found = row is not None and anceq_type and "6610" in str(anceq_type)
+    rows.append({
+        "Node": controller_id,
+        "SIAD CLLI": edp_get(edp_index, row, "SIAD_CLLI") or "NOT FOUND",
+        "Port Size": edp_get(edp_index, row, "SIAD_PORT_SIZE_BBU") or "NOT FOUND",
+        "Port Facing BBU": (edp_get(edp_index, row, "ANCEQ_SIAD_PORT") or "NOT FOUND") if found else "EDP not published for controller",
+    })
+    return found
+
+
 def highlight_unresolved(text):
     cands = re.findall(r"xx[A-Za-z0-9_]+xx|(?<!#)##[A-Za-z0-9_]+##(?!#)", text)
     return sorted(set(c for c in cands if not re.fullmatch(r"x+", c, re.I)))
@@ -192,6 +211,7 @@ def has_6610(controller_objs):
 # ============================================================
 
 SECTOR_NAME = {'A': 'Alpha', 'B': 'Beta', 'C': 'Gamma', 'D': 'Delta', 'E': 'Epsilon', 'F': 'Foxtrot'}
+SECTOR_ORDER = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Foxtrot']
 
 def lte_band_label(cell_name):
     """e.g. ECL00043_2A_1 -> ('AWS_1', 'Alpha') ; DXL04049_7A_2_F -> ('FNET', 'Alpha')"""
@@ -338,8 +358,10 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
     return result
 
 
-def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None):
-    """Turn the classification dict into the confirmed display lines."""
+def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None, controller_edp_found=None):
+    """Turn the classification dict into the confirmed display lines.
+    controller_edp_found: dict of {controller_id: bool} — False means the 6610 shows in the CIQ
+    but isn't published in EDP yet."""
     lines = []
     for node, cells in classification["added"].items():
         labels = dedupe_labels(cells)
@@ -347,7 +369,10 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None)
 
     ctrl_rows = [r for r in controller_objs if str(r.get("Controller", "")).strip() == "6610"]
     for r in ctrl_rows:
-        lines.append(f"6610 Controller Integration:\t{r.get('Controller ID')}")
+        ctrl_id = r.get('Controller ID')
+        lines.append(f"6610 Controller Integration:\t{ctrl_id}")
+        if controller_edp_found is not None and controller_edp_found.get(ctrl_id) is False:
+            lines.append(f"6610 Controller Integration:\tEDP is not published for the controller\t{ctrl_id}")
 
     moved_by_pair = {}
     for m in classification["moved"]:
@@ -355,7 +380,10 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None)
         moved_by_pair.setdefault(key, []).append(m["cell"])
     for (from_node, to_node), cells in moved_by_pair.items():
         labels = dedupe_labels(cells)
-        lines.append(f"Moved Sectors:\t{'/'.join(labels)}\tFrom:\t{from_node}\tTo:\t{to_node}")
+        label_str = labels[0] if len(labels) == 1 else f"[{'/'.join(labels)}]"
+        sector_names = sorted({band_label(c)[1] for c in cells if band_label(c)[1]}, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
+        sectors_str = f" {', '.join(sector_names)}" if sector_names else ""
+        lines.append(f"Moved Sectors:\t{label_str}{sectors_str}\tFrom:\t{from_node}\tTo:\t{to_node}")
 
     for node in classification["deleted_nodes"]:
         lines.append(f"Deleted Node from ENM:\t{node}")
@@ -820,8 +848,10 @@ def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_name
         return str(primary)
 
     post_nodes, labels = {}, {}
+    ciq_order = []
     for row in mm_objs:
         primary = row.get('Node to be built as')
+        ciq_order.append(primary)
         labels[primary] = node_label(row)
         e_name, g_name = row.get('eNodeB Name'), row.get('gNodeB Name')
         is_lte_primary = str(primary).strip().upper() == str(e_name or '').strip().upper()
@@ -830,8 +860,12 @@ def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_name
             r = find_row_by_name(ciq_wb, 'eNB Info', 'eNodeB Name', e_name) or find_row_by_name(ciq_wb, 'gNB Info', 'gNodeB Name', g_name)
         post_nodes[primary] = hw_string(r) or 'NOT FOUND'
 
+    # order: CIQ order first (so Pre and Post always list shared nodes in the same sequence),
+    # then any Pre-only nodes (e.g. a fully vacated node) appended after
+    ordered_names = list(ciq_order) + [n for n in precheck_node_names if n not in ciq_order]
+
     pre_nodes = {}
-    for name in precheck_node_names:
+    for name in ordered_names:
         hw = pre_hw_string(precheck_text, name)
         if hw:
             pre_nodes[name] = hw
@@ -844,9 +878,17 @@ def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_name
     return " + ".join(pre_parts), " + ".join(post_parts)
 
 
-# ============================================================
-# GENERATOR: MCA (auto-detects MMBB vs TMBB per node in Mixed Mode Info)
-# ============================================================
+def push_all_controller_siad_rows(siad_rows, edp_index, controller_objs):
+    """For every 6610 controller in the CIQ's Controller Info, add its SIAD row (ANCEQ_* columns)
+    and track whether EDP actually has it published. Returns {controller_id: bool}."""
+    found_status = {}
+    for r in controller_objs:
+        if str(r.get("Controller", "")).strip() == "6610":
+            ctrl_id = r.get("Controller ID")
+            found_status[ctrl_id] = push_controller_siad_row(siad_rows, edp_index, ctrl_id)
+    return found_status
+
+
 
 def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str, precheck_text, log):
     summary_rows, siad_rows, outputs = [], [], []
@@ -874,6 +916,7 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
+    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
 
@@ -882,7 +925,7 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     pre_line, post_line = generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, pre_nodes_found | ciq_node_names)
 
     classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
-    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels)
+    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -912,6 +955,7 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
+    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
 
@@ -920,7 +964,7 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     pre_line, post_line = generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, pre_nodes_found | ciq_node_names)
 
     classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
-    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels)
+    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1058,11 +1102,12 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
+    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{target.get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))]
 
     # CRAN has no Carrier ADD/Delete/Move "checks" per the blueprint — only 6610 and DSS ride along here
-    scope_of_work_lines = format_scope_of_work({"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": []}, controller_objs, dss_labels)
+    scope_of_work_lines = format_scope_of_work({"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": []}, controller_objs, dss_labels, controller_edp_found)
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
