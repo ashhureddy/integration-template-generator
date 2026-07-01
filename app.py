@@ -50,10 +50,13 @@ TPL_DSS_3SECTOR = resolve_dss_template("stand")
 # ============================================================
 
 def load_workbook_any(file_bytes, filename):
-    """openpyxl can only read .xlsx — legacy .xls needs xlrd. Detect and convert transparently
-    so the rest of the app can keep using the openpyxl-style .sheetnames / [sheet].iter_rows() API."""
+    """openpyxl can only read real .xlsx (zip-based OOXML) — legacy .xls (OLE2/CFB binary) needs xlrd.
+    Some files have a mismatched extension (e.g. an old .xls saved/renamed with a .xlsx name), so this
+    doesn't trust the filename alone: it tries openpyxl first, and falls back to the xlrd conversion
+    path on failure regardless of what the extension claims."""
     import openpyxl
-    if filename.lower().endswith(".xls") and not filename.lower().endswith(".xlsx"):
+
+    def via_xlrd():
         import pandas as pd
         all_sheets = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None, engine="xlrd", header=None)
         out_wb = openpyxl.Workbook()
@@ -63,7 +66,17 @@ def load_workbook_any(file_bytes, filename):
             for row in df.itertuples(index=False, name=None):
                 ws.append(list(row))
         return out_wb
-    return openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+
+    looks_like_xls = filename.lower().endswith(".xls") and not filename.lower().endswith(".xlsx")
+    try:
+        if looks_like_xls:
+            return via_xlrd()
+        return openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    except Exception as first_error:
+        try:
+            return via_xlrd() if not looks_like_xls else openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+        except Exception:
+            raise first_error  # surface the original, more likely relevant error
 
 def sheet_objs(ws):
     rows = list(ws.iter_rows(values_only=True))
@@ -1247,7 +1260,13 @@ if run:
         st.stop()
 
     log("Reading CIQ workbook...")
-    ciq_wb = load_workbook_any(ciq_file.read(), ciq_file.name)
+    try:
+        ciq_wb = load_workbook_any(ciq_file.read(), ciq_file.name)
+    except Exception as e:
+        st.error(f"This CIQ couldn't be read as either .xlsx or legacy .xls. "
+                  f"It may be corrupted, or its content doesn't match its extension — try re-saving "
+                  f"it as .xlsx in Excel and re-uploading. Error detail: {e}")
+        st.stop()
     if "Mixed Mode Info" not in ciq_wb.sheetnames:
         st.error('Could not find a "Mixed Mode Info" tab in the CIQ.')
         st.stop()
