@@ -1,0 +1,785 @@
+############ 6610 Controller Integration Procedure ###########
+###########################################################################################################################
+############                                        Process                                                     ###########
+###########################################################################################################################
+##Controller_id## 			-- SiteName from Controller Info tab in CIQ Column B
+xxUserIDxx 			-- Rename with the UserID				****** Eg: au651d
+xDatex				--	mmddyyyy format ## Eg: 03312023
+
+
+##########################
+## Start of the Process ##
+##########################
+
+cmedit get xSite_IDx ComConnectivityInformation.* 
+cmedit get xSite_IDx NetworkElement=xSite_IDx,CmFunction=1
+cmedit get xSite_IDx networkelement.*
+
+####### Ideally, the command would return "0 instance(s)" response.
+If any exception output "1 instance(s)" is received, verify that parameters are set as per required values. Also, the NE would be in UNSYNCHRONIZED state at this stage.#######
+
+#################################################################################################################################################
+## In case if you find any instance for the above mentioned commands for the NSB 6610 controller please stop there and reach out to the leads  ##
+#################################################################################################################################################
+
+                  ####################################################################################################################
+#################### Check the SIAD Provisioning Status for 6610 controller. For all the new additional nodes and for the NSB sites ###############################
+##                ####################################################################################################################                           ##
+##                                                                                                                                                               ##
+## Checks under Canopi Worklist                                                                                                                                  ##
+## 1. Check the USID, Site Name, SIAD CLLI, SIAD Port to Cabinet, SIAD OAM IPv6 IP, SIAD Bearer IPv6 IP, OAM Vlan ID, Bearer Vlan ID in the System Info tab.     ##
+## 2. Check the PTU  Status & Progress [Automation Status should be Complete and Progress should be 100%]                                                        ##
+## Checks under PTU Troubleshooter Search                                                                                                                        ##
+## 3. Ensure all the task under the Canopi Task List should be in Completed state. In case if any task is shouwing as "Complete Task" Get the task completed.    ##
+## 4. Specifically for the "RWK-ETTCS C&E" task Status should be in “COMPLETED" state.                                                                           ##
+## 5. Any further issues run the PTU Troubleshooter and check with leads accordingly.                                                                            ##
+###################################################################################################################################################################
+
+
+################# If 6610 controller node has no connectivity and is not built in ENM and needs to be built newly #################
+
+
+##############################################################################################################################################################
+##   Creating Node in ENM and Site Integration scripts [Download LKF and Import it in ENM(SHM/LICENSE ADMINISTRATION/IMPORT KEY FILES) before proceeding]   ##
+##############################################################################################################################################################
+
+#### LKF Import: ####
+Download LKF and Import it in ENM [SHM/LICENSE ADMINISTRATION/IMPORT KEY FILES) before proceeding]
+
+#### Site Install Script generation: ####
+
+Drag and Drop the Apfile of 6610 controller in the respective ENM and execute below commands to generate Site Install File
+
+ap order file:##Controller_id##_Radionode_Project.zip
+
+ap status -p ##Controller_id##
+ap view -n ##Controller_id##
+ap status -n ##Controller_id##
+ap download -o -n ##Controller_id##
+
+##################################################################################################
+## Share the downloaded Site install file to FE and ask him to load to the BBU                  ##
+## Status should be : Integration Completed at this point, Once FE loaded Site install file     ##
+##################################################################################################
+
+###########################################################################################################################################################################################################################
+If Zero Touch Script is shared to FE and FE has loaded the Zero touch script, then just import the LKF in ENM and Drag and drop the Apfile and proceed with below commands to establish connectivity to the node
+###########################################################################################################################################################################################################################
+
+ap order file:##Controller_id##_Radionode_Project.zip
+
+ap status -p ##Controller_id##
+ap view -n ##Controller_id##
+ap status -n ##Controller_id##
+
+### At this Point connectivity will be established ###
+
+####################################################################################################################  IMPORTANT ##################################################################################################################################
+IMPORTANT : Post Getting the connectivity to the 6610 Controller and If 6610 Controller is found to be on lower SW version, Please proceed to upgrade the 6610 controller to the latest SW version and then proceed with Integration
+NOTE : From 03/18/2026 All 6610 controller should be integrated on 25.Q3 SW version
+#####################################################################################################################################################################################################################################################################
+
+###########################################################################################################################
+Setting supervision to true once Scripts is loaded and node is Ready for service and has connectivity 
+###########################################################################################################################
+
+## Setting supervision to true ##
+
+cmedit get NetworkElement=##Controller_id##,CmNodeHeartbeatSupervision=1 
+cmedit set NetworkElement=##Controller_id##,CmNodeHeartbeatSupervision=1 active=true 
+
+cmedit get NetworkElement=##Controller_id##, FmAlarmSupervision=1 
+cmedit set NetworkElement=##Controller_id##,FmAlarmSupervision=1 active=true
+
+cmedit get NetworkElement=##Controller_id##, InventorySupervision=1 
+cmedit set NetworkElement=##Controller_id##,InventorySupervision=1 active=true 
+
+cmedit get NetworkElement=##Controller_id##,PmFunction=1 
+cmedit set NetworkElement=##Controller_id##,PmFunction=1 pmEnabled=true 
+
+cmedit get NetworkElement=##Controller_id##,CmFunction=1
+cmedit action NetworkElement=##Controller_id##,CmFunction=1 sync 
+cmedit get NetworkElement=##Controller_id##,CmFunction=1
+
+## Status should be : SYNCHRONIZED at this point ##
+
+#######################################
+To update node login credentials in ENM
+#######################################
+
+secadm credentials update --secureusername rbs --secureuserpassword StArW@r$1977# -n ##Controller_id##
+
+
+cmedit get ##Controller_id## networkelement.* -t
+
+####### Verify the FDN parameters are as per required managementState=Normal, nodeModelIdentity==ossModelIdentity #######
+
+################################## IMPORTANT ##########################################################################################################################################################################################################################################
+In ENM check if the managementState in networkelement is set to NORMAL once we have connectivity and controller is in synchronized state and if managementState is found to be IN MAINTENANCE, then execute the below commands to set managementState in networkelement to set to NORMAL
+########################################################################################################################################################################################################################################################################################
+
+cmedit get ##Controller_id## networkelement.*
+
+cmedit set ##Controller_id## networkelement managementState=NORMAL
+
+cmedit get ##Controller_id## networkelement.*
+
+##############################################
+Example:
+cmedit get DXDC306368_C001 networkelement.*
+FDN : NetworkElement=DXDC306368_C001
+failedSoftwareSyncsCount : 0
+lastSuccessfulSoftwareSync : Fri Feb 27 02:03:20 CST 2026
+managedBy : null
+managementState : NORMAL
+neProductVersion : [{identity=CXP2010233/2, revision=R26C12}]
+networkElementId : DXDC306368_C001
+networkFunctions : [SITECONTROL]
+neType : Controller6610
+nodeModelIdentity : 1408-107-382
+ossModelIdentity : 1408-107-382
+ossPrefix : SubNetwork=ONRM_ROOT_MO,MeContext=DXDC306368_C001
+platformType : null
+release : 25.Q3
+softwareSyncStatus : AS_IS
+technologyDomain : []
+timeZone : US/Central
+userLabel : C6610
+utcOffset : -06:00
+
+
+1 instance(s)
+##############################################
+
+
+#################################################################################
+#####			CHECK IF THE USERLABEL IS UPDATED      		    #####
+#################################################################################
+
+cmedit get ##Controller_id## networkelement.userlabel
+
+####### If userLabel is blank or wrong, Set the Userlabel as per the site configuration #######
+
+cmedit set ##Controller_id## networkelement=##Controller_id## userlabel=C6610
+
+cmedit get ##Controller_id## networkelement.userlabel
+
+##############################################
+Example:
+cmedit get ##Controller_id## networkelement.userlabel
+FDN : NetworkElement=##Controller_id##
+userLabel : C6610
+
+Please implement the below mentioned commands once the connectivity is established for the 6610 controller,
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Ssh=1 selectedCiphers=[aes256-ctr,aes192-ctr,aes128-ctr,aes256-gcm@openssh.com,aes128-gcm@openssh.com]
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Ssh=1 selectedMacs=[hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha2-256,hmac-sha2-512]
+
+############
+Pre Int CV
+############
+
+cmedit action ##Controller_id## BrmBackupManager=1 createBackup.(name="Pre_Integration_xDatex")
+cmedit get ##Controller_id## BrmBackup.* -t
+
+
+#####################################################################################
+#####		Proceed with creating SAU and Create SAU Alarmport	        #####
+#####################################################################################
+
+***SAU creation/Reference update*****
+
+st field
+
+get . ecbus
+
+cmedit get ##Controller_id## FieldReplaceableUnit.(administrativeState,operationalState) -t
+ 
+cmedit get ##Controller_id## EcBus.(ecBusId,ecBusConnectionType,ecBusConnectorRef,equipmentSupportFunctionRef,reservedBy) -t
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1 FieldReplaceableUnitId=SAU-1
+  
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,EcBus=1 EcBusId:1,ecBusConnectorRef:"SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=Controller6610",ecBusConnectionType:SAU
+ 
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,EcPort=1 EcPortId=1
+ 
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,EcPort=1 ecBusRef:"SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,EcBus=1"
+  
+cmedit set ##Controller_id## FieldReplaceableUnit.FieldReplaceableUnitId==SAU* administrativeState:UNLOCKED --force
+ 
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,EquipmentSupportFunction=1 supportSystemControl=true --force
+ 
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,EcPort=1 cascadingOrder:0 
+
+
+################################################################################################################################################################
+Check with FE for SAU connections and if all connections are good and references are built SAU should be enabled at this point
+################################################################################################################################################################
+
+cmedit get ##Controller_id## FieldReplaceableUnit.(administrativeState,operationalState) -t
+
+st field
+
+########################################
+SAU Alarm Port creation
+########################################
+
+######################## Alarm Port Creation ########################
+cmedit set ##Controller_id## AlarmPort.alarmPortId==* filterAlgorithm=AUTO
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=1 AlarmPortId=1;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=2 AlarmPortId=2;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+     
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=3 AlarmPortId=3;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=4 AlarmPortId=4;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=5 AlarmPortId=5;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=6 AlarmPortId=6;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=7 AlarmPortId=7;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+   
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=8 AlarmPortId=8;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+  
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=9 AlarmPortId=9;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+   
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=10 AlarmPortId=10;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+ 
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=11 AlarmPortId=11;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+     
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=12 AlarmPortId=12;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+ 
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=13 AlarmPortId=13;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+	 
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=14 AlarmPortId=14;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+   
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=15 AlarmPortId=15;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+   
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=16 AlarmPortId=16;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=17 AlarmPortId=17;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=18 AlarmPortId=18;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=19 AlarmPortId=19;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=20 AlarmPortId=20;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=21 AlarmPortId=21;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=22 AlarmPortId=22;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=23 AlarmPortId=23;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=24 AlarmPortId=24;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=25 AlarmPortId=25;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=26 AlarmPortId=26;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=27 AlarmPortId=27;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=28 AlarmPortId=28;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=29 AlarmPortId=29;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=30 AlarmPortId=30;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=31 AlarmPortId=31;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=32 AlarmPortId=32;administrativeState=LOCKED;alarmSlogan=<empty>;normallyOpen=false;perceivedSeverity=MINOR
+
+
+############################################################
+External alarm scripting
+############################################################
+
+####################################################################################################################################################################################################################################################################
+Once SAU Alarm Ports are created proceed with scripting External alarms on 6610 controller as per the external alarm sheet shared by FE or as per Master standard for WIC or WUC based on markets and info given by FE if site in indoor or outdoor
+Reach to leads for assistance and also for external alarm scripts
+######################################################################################################################################################################################################
+
+##############################################################
+START OF GS CHECK for 6610 controller with SW 24.Q2
+##############################################################
+
+
+********** Step 1: FeatureState=CXC4040010 check *************
+########################################################################
+IMPORTANT Feature state ACTIVATION and MO CREATION on 6610 Node
+########################################################################
+
+####################################################
+FeatureState=CXC4040010 Should be ACTIVATED on Site
+####################################################
+
+cmedit get ##Controller_id## FeatureState=CXC4040010 featurestate 
+
+######### IF found DEACTIVATED ,Run Below command to activate the feature on Node #########
+cmedit set  ##Controller_id## FeatureState=CXC4040010 featurestate=ACTIVATED 
+
+
+cmedit get ##Controller_id## FeatureState=CXC4040010 featurestate 
+
+
+
+********  Step 2: RTSEL Check ****************************
+
+####################################################
+Define RTSEL
+####################################################
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=SecurityLog,LogPushTransfer=UDP 
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=AuditTrailLog,LogPushTransfer=UDP
+
+cmedit get ##Controller_id## LogPushTransfer.operationalState
+
+####################################################
+Below will be the Sample Output Reference
+
+logPushTransferId : UDP
+operationalState : ENABLED         <<< operationalState Should be enabled >>>
+password : null                    <<< password will be NULL >>>
+transferType : STREAM              <<< transferType Should be STREAM >>>
+uri : syslog://107.76.131.26:6515   <<< URI is for node with IPV4 >>>
+uri : syslog://[2600:308:0:5::12]:6515  <<< URI is for node with IPV6 >>>
+####################################################
+
+####################################### IMPORTANT  NOTE ################################################
+If MOs are not created and had 0 Instances proceed to create the MO's based on IP version of the node
+Reach to Leads if any Doubts on IP version
+########################################################################################################
+
+########################### Define RTSEL on IPV6 ###########################
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=SecurityLog,LogPushTransfer=UDP 
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=AuditTrailLog,LogPushTransfer=UDP
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=SecurityLog,LogPushTransfer=UDP logPushTransferId=UDP,uri="syslog://[2600:308:0:5::12]:6515",transferType="STREAM"
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=AuditTrailLog,LogPushTransfer=UDP logPushTransferId=UDP,uri="syslog://[2600:308:0:5::12]:6515",transferType="STREAM"
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=SecurityLog,LogPushTransfer=UDP 
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=AuditTrailLog,LogPushTransfer=UDP
+
+cmedit get ##Controller_id## LogPushTransfer.operationalState
+ 
+########################### Define RTSEL on IPV4 ###########################
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=SecurityLog,LogPushTransfer=UDP 
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=AuditTrailLog,LogPushTransfer=UDP
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=AuditTrailLog,LogPushTransfer=UDP logPushTransferId=UDP,uri="syslog://107.76.131.26:6515",transferType="STREAM"
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=SecurityLog,LogPushTransfer=UDP logPushTransferId=UDP,uri="syslog://107.76.131.26:6515",transferType="STREAM"             
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=SecurityLog,LogPushTransfer=UDP 
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,LogM=1,Log=AuditTrailLog,LogPushTransfer=UDP
+
+cmedit get ##Controller_id## LogPushTransfer.operationalState      
+
+
+*************  Step 3 : CliTls=1 Check *******************************
+
+get SystemFunctions=1,SysM=1,CliTls=1
+
+############################################################################################################################################################
+Below will be the Sample Output Reference (Verify the O/P on node)
+
+administrativeState : UNLOCKED
+nodeCredential : SecM=1,CertM=1,NodeCredential=oamNodeCredential         
+port : 9830                    
+trustCategory : SecM=1,CertM=1,TrustCategory=oamTrustCategory      
+        
+######################################################## SystemFunctions=1,SysM=1,CliTls=1 Unlock Commands #################################################
+If MO is found to be kept locked ,Please proceed to unlock the SystemFunctions=1,SysM=1,CliTls=1 by using below unlock commands
+If any other parameter mismatch reach out to leads
+############################################################################################################################################################
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SysM=1,CliTls=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SysM=1,CliTls=1 administrativeState=UNLOCKED
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SysM=1,CliTls=1
+############################################################################################################################################################
+
+********* Step 4: Https Check **********************
+####################################################
+get SystemFunctions=1,SysM=1,HttpM=1,Https=1
+
+############################################################################################################################################################
+Below will be the Sample Output Reference (Verify the O/P on node)
+
+nodeCredential : SecM=1,CertM=1,NodeCredential=oamNodeCredential         
+trustCategory : SecM=1,CertM=1,TrustCategory=oamTrustCategory              
+############################################################################################################################################################
+
+********* Step 5: Ldap Check **********************
+Below commands needs to be executed in ENM CLI
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,UserManagement=1,LdapAuthenticationMethod=1,Ldap=1
+
+###################################################### Verification Only ##################################################################################
+Below will be the Sample Output Reference (Verify the O/P on node for nodeCredential and trustCategory if Present)
+
+nodeCredential : SubNetwork=ONRM_ROOT_MO,MeContext=DTFC054197_C001,ManagedElement=DTFC054197_C001,SystemFunctions=1,SecM=1,CertM=1,NodeCredential=oamNodeCredential
+trustCategory : SubNetwork=ONRM_ROOT_MO,MeContext=DTFC054197_C001,ManagedElement=DTFC054197_C001,SystemFunctions=1,SecM=1,CertM=1,TrustCategory=oamTrustCategory
+
+
+********* Step 6 : netconfssh Check **********************
+
+get SystemFunctions=1,SysM=1,NetconfSsh=1
+
+############################################################################################################################################################
+Below will be the Sample Output Reference (Verify the O/P on node)
+
+administrativeState                  UNLOCKED
+netconfSshId                         1
+port                                 830
+
+########################################## UNLOCK NetconfSsh=1 if Found LOCKED by using Below commands #####################################################
+If any other parameter mismatch please reach out to leads
+############################################################################################################################################################
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SysM=1,NetconfSsh=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SysM=1,NetconfSsh=1 administrativeState=UNLOCKED
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SysM=1,NetconfSsh=1
+
+############################################################################################################################################################
+
+
+*********  Step 7: NetconfTls check ***********************
+
+get  SystemFunctions=1,SysM=1,NetconfTls=1
+
+############################################################################################################################################################
+Below will be the Sample Output Reference (Verify the O/P on node)
+
+
+administrativeState                  UNLOCKED
+netconfTlsId                         1
+nodeCredential                       SecM=1,CertM=1,NodeCredential=oamNodeCredential
+port                                 6513
+trustCategory                        SecM=1,CertM=1,TrustCategory=oamTrustCategory
+
+###################################################### UNLOCK NetconfTls=1 if Found LOCKED by using Below commands ##############################################
+If any other parameter mismatch please reach out to leads
+############################################################################################################################################################
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SysM=1,NetconfTls=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SysM=1,NetconfTls=1 administrativeState=UNLOCKED
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SysM=1,NetconfTls=1
+
+
+*********  Step 8: NodeCredential=oamNodeCredential check ***********************
+
+Below commands needs to be executed in ENM CLI
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,CertM=1,NodeCredential=oamNodeCredential
+
+############################################################################################################################################################
+Below 5 Output parameters needs to be verified in the executed above command (Verify the O/P on node in ENM and should match as per GS)
+
+enrollmentAuthority : SubNetwork=ONRM_ROOT_MO,MeContext=DTFC054197_C001,ManagedElement=DTFC054197_C001,SystemFunctions=1,SecM=1,CertM=1,EnrollmentAuthority=1
+enrollmentServerGroup : SubNetwork=ONRM_ROOT_MO,MeContext=DTFC054197_C001,ManagedElement=DTFC054197_C001,SystemFunctions=1,SecM=1,CertM=1,EnrollmentServerGroup=1
+enrollmentTimer : 60
+expiryAlarmThreshold : 30
+renewalMode : AUTOMATIC
+
+####################################### expiryAlarmThreshold check and update command if found mismatch ####################################################
+
+**** Check the value of expiryAlarmThreshold in the above executed commands if value is found to be 90 please proceed to set is to 30 as per GS value ***********
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,CertM=1,NodeCredential=oamNodeCredential
+ 
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,CertM=1,NodeCredential=oamNodeCredential expiryAlarmThreshold=30
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,CertM=1,NodeCredential=oamNodeCredential
+
+
+*********  Step 9: SystemFunctions=1,SecM=1,Ssh=1 check ***********************
+Below commands needs to be executed in ENM CLI
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Ssh=1
+
+############################################################################################################################################################
+Below 3 Output parameters needs to be verified in the executed above command (Verify the O/P on node in ENM and should match as per GS)
+
+selectedCiphers : [aes256-ctr, aes192-ctr, aes128-ctr, aes256-gcm@openssh.com, aes128-gcm@openssh.com]
+selectedKeyExchanges : [ecdh-sha2-nistp256, ecdh-sha2-nistp384, diffie-hellman-group-exchange-sha256, ecdh-sha2-nistp521, diffie-hellman-group14-sha256, diffie-hellman-group16-sha512, diffie-hellman-group18-sha512, curve25519-sha256, curve25519-sha256@libssh.org, curve448-sha512]
+selectedMacs : [hmac-sha2-256-etm@openssh.com, hmac-sha2-512-etm@openssh.com, hmac-sha2-256, hmac-sha2-512]
+
+
+####################################### selectedMacs check and update command if found mismatch ####################################################
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Ssh=1
+ 
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Ssh=1 selectedMacs : [hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha2-256,hmac-sha2-512]
+
+####################################### selectedCiphers check and update command if found mismatch ####################################################
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Ssh=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Ssh=1 selectedCiphers : [aes256-ctr, aes192-ctr, aes128-ctr, aes256-gcm@openssh.com, aes128-gcm@openssh.com]
+
+####################################### selectedKeyExchanges check and update command if found mismatch ####################################################
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Ssh=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Ssh=1 selectedKeyExchanges : [ecdh-sha2-nistp256, ecdh-sha2-nistp384, diffie-hellman-group-exchange-sha256, ecdh-sha2-nistp521, diffie-hellman-group14-sha256, diffie-hellman-group16-sha512, diffie-hellman-group18-sha512, curve25519-sha256, curve25519-sha256@libssh.org, curve448-sha512]
+
+
+*********  Step 10: SystemFunctions=1,SecM=1,Tls=1 check ***********************
+Below commands needs to be executed in ENM CLI
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Tls=1
+
+###################################################### Verification Only cipherFilter for 24.Q4 SW Controller #######################################################################
+
+
+Below 1 Output parameters needs to be verified in the executed above command (Verify the O/P on node in ENM and should match as per GS)
+
+cipherFilter : ALL:TLSv1_3:TLSv1_2:!3DES-EDE-CBC:!RC4-128:!DES-CBC:!ECDHE-ECDSA-AES-256-CBC-SHA:!ECDHE-RSA-AES-256-CBC-SHA:!ECDHE-ECDSA-AES-128-CBC-SHA:!ECDHE-RSA-AES-128-CBC-SHA:!RSA-AES-256-GCM-SHA384:!RSA-AES-256-CBC-SHA256:!RSA-AES-128-GCM-SHA256:!RSA-AES-128-CBC-SHA256:!RSA-AES-256-CBC-SHA:!RSA-AES-128-CBC-SHA
+
+
+####################################### cipherFilter check and update command if found mismatch ####################################################
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Tls=1
+ 
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,SystemFunctions=1,SecM=1,Tls=1 cipherFilter : "ALL:TLSv1_3:TLSv1_2:!3DES-EDE-CBC:!RC4-128:!DES-CBC:!ECDHE-ECDSA-AES-256-CBC-SHA:!ECDHE-RSA-AES-256-CBC-SHA:!ECDHE-ECDSA-AES-128-CBC-SHA:!ECDHE-RSA-AES-128-CBC-SHA:!RSA-AES-256-GCM-SHA384:!RSA-AES-256-CBC-SHA256:!RSA-AES-128-GCM-SHA256:!RSA-AES-128-CBC-SHA256:!RSA-AES-256-CBC-SHA:!RSA-AES-128-CBC-SHA"
+
+
+############################################################################################################################################################
+
+###########################################################
+***** Setting the TimeZone and Dateandtime offset     *****
+###########################################################
+Based on the location of the site, set the time zone. ##### Refer to Column N "Timezone" under Mixed Mode Info tab in CIQ #####
+
+********************************************************************************
+***** Setting the TimeZone and Dateandtime offset if not set initially      *****
+*********************************************************************************
+
+Based on the location of the site, set the time zone.
+
+cmedit get xSite_IDx DateAndTime.TimeZone -t
+ 
+Eastern Sites 
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Eastern"
+ 
+Central Sites 
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Central"
+ 
+Mountain Sites 
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Mountain"
+ 
+Arizona Sites 
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Arizona"
+ 
+Pacific Sites
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Pacific"
+
+cmedit get xSite_IDx DateAndTime.TimeZone -t
+
+get DateandTime
+ 
+********************************************************
+
+cmedit get xSite_IDx TimeSettings.*
+
+Eastern Sites 
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-05:00"
+ 
+Central Sites 
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-06:00"
+ 
+Mountain Sites 
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-07:00"
+ 
+Arizona Sites 
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-07:00"
+ 
+Pacific Sites
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-08:00"
+ 
+cmedit get xSite_IDx TimeSettings.*
+
+get TimeSettings=1
+ 
+
+#################################################### IMPORTANT ############################################################################################
+ 
+Commands to update networkelement timeZone to same as Node timezone in the ENM
+ 
+********** Please ensure to set the networkelement timeZone to same as Node timezone in the ENM with out fail  **********
+********** Use this below commands to set networkelement timeZone                                              **********
+ 
+###########################################################################################################################################################
+
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
+
+Eastern Sites 
+cmedit set xSite_IDx networkelement timeZone:"US/Eastern"
+
+Central Sites 
+cmedit set xSite_IDx networkelement timeZone:"US/Central"
+
+Mountain Sites 
+cmedit set xSite_IDx networkelement timeZone:"US/Mountain"
+ 
+Arizona Sites 
+cmedit set xSite_IDx networkelement timeZone:"US/Arizona"
+
+Pacific Sites
+cmedit set xSite_IDx networkelement timeZone:"US/Pacific"
+ 
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
+
+##########################################################################################################
+Both ENM and Node end to have same timeZone when checked with below get commands upon setting the timezone
+##########################################################################################################
+
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
+
+cmedit get *xSite_IDx* DateAndTime.TimeZone -t
+
+##############################################################################################################################################################
+ 
+*********  Step 11: daylightSavingTimeStartDate & daylightSavingTimeEndDate check ***********************
+ 
+########  daylightSavingTimeStartDate and daylightSavingTimeEndDate set commands ########
+ 
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSite_IDx,ManagedElement=xSite_IDx,NodeSupport=1,TimeSettings=1 daylightSavingTimeStartDate:{dayRule="Sun>=8",month=MARCH,time="02:00"} --force
+ 
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSite_IDx,ManagedElement=xSite_IDx,NodeSupport=1,TimeSettings=1 daylightSavingTimeEndDate:{dayRule="Sun>=1",month=NOVEMBER,time="02:00"} --force
+
+Note: For Arizona/Hawaii sites,  daylightSavingTimeOffset should be 0 since there is no daylightsaving observed.Please verify on site
+
+###################################################################################
+Once TimeZone & Offsets are set correctly, ensure to share a snapshot in Ryver chat
+###################################################################################
+
+cmedit action ##Controller_id## BrmBackupManager=1 createBackup.(name="Post_Time_Set_xDatex")
+cmedit get ##Controller_id## BrmBackup.* -t
+
+############################################################################################################################################################
+
+*********  Step 12: admOperatingMode check ***********************
+
+#########  For DRAN 6610 Sites #############
+Below commands needs to be executed in ENM CLI
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Transport=1,EthernetPort=TN_A
+
+############################################################################################################################################################
+Below Output parameters needs to be verified in the executed above command (Verify the O/P on node in ENM and should match as per GS)
+
+administrativeState : UNLOCKED
+admOperatingMode : 100M_FULL
+autoNegEnable    : FALSE
+
+If any discrepancy is found, please reach out to lead. Do Not set any admOperatingMode until confirmation.
+############################################################################################################################################################
+
+#########  For CRAN 6610 Sites #############
+Below commands needs to be executed in ENM CLI
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Transport=1,EthernetPort=TN_A
+
+############################################################################################################################################################
+Below Output parameters needs to be verified in the executed above command (Verify the O/P on node in ENM and should match as per GS)
+
+administrativeState : UNLOCKED
+admOperatingMode : 1G_FULL
+autoNegEnable    : TRUE
+
+If any discrepancy is found, please reach out to lead. Do Not set any admOperatingMode until confirmation.
+############################################################################################################################################################
+
+                                         IMPORTANT                                                  
+
+***************************** LOCKING OF EXTERNAL ALARMS ON 6610 CONTROLLER  ******************************************************************************
+
+Scenario 1:
+The External Alarms will need to be kept locked on controller until the C6610 cutover is not entirely completed and is set to Monitored.
+ 
+Scenario 2:
+For active alarms where FE is using the Loop to clear and pass the AREA, we need to lock those External Alarm Ports once the C6610 is set to Monitored and until the crew returns to Troubleshoot and fix the active external alarms on node
+
+
+Command to lock the Alarmports where there are active external alarms and meets the above criteria to keep the ports locked
+Replace with respective AlarmPortId for which it needs to be locked in the below command
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=XXX administrativeState=LOCKED
+
+
+Note: If 6610 is in monitored state already and once crew troubleshoots and fix the active external alarms ,those ports which were kept in locked state needs to be left in unlocked state if no alarms
+
+###################################################################################################################
+Unlock commands for respective AlarmPortId that needs to be unlocked
+Replace with respective AlarmPortId for which it needs to be unlocked in the below command
+###################################################################################################################
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,Equipment=1,FieldReplaceableUnit=SAU-1,AlarmPort=XXX administrativeState=UNLOCKED
+
+hget AlarmPort activeExternalAlarm|administrativeState|alarmSlogan|normallyOpen|perceivedSeverity|operationalState
+
+##############################################################################################################################################
+
+############ Before FINAL Restart CV Creation ############
+
+cmedit action ##Controller_id## BrmBackupManager=1 createBackup.(name="Pre_Restart_xDatex")
+cmedit get ##Controller_id## BrmBackup.* -t
+
+############ RESTART OF Controller ############
+
+cmedit action ##Controller_id##  FieldReplaceableUnit=1 restartUnit.(restartrank=RESTART_COLDWTEST,restartreason=PLANNED_RECONFIGURATION) --force
+
+############ Status check ############
+
+lt all
+st field
+alt
+get . ecbus
+get LogPushTransfer
+st sau
+get FeatureState=CXC4040010
+hget AlarmPort activeExternalAlarm|administrativeState|alarmSlogan|normallyOpen|perceivedSeverity|operationalState
+get NetconfSsh=1
+get NetconfTls=1
+get https=
+get CliTls=1
+get SecM=1,CertM=1,NodeCredential=oamNodeCredential
+[oamNodeCredential should be loaded with the respective ENM]
+####### If No output is received, check from ENM CLI #######
+
+## Make sure enrollmentProgress for the below mentioned menus are verified as per the below standard ## 
+## >>> 5.progressPercentage = 100
+## >>> 6.result = 1 (SUCCESS)
+## >>> 7.resultInfo = SystemFunctions=1,SecM=1,CertM=1,NodeCredential=oamNodeCredential
+## >>> 8.state = 3 (FINISHED)
+## >>> Make sure the Certificate files are loaded with the right ENM where the site is built.
+
+ENM CLI Command
+--------------- 
+cmedit get xSite_IDx NodeCredential.(subjectName) -t
+
+
+############
+Final CV
+############
+
+cmedit action ##Controller_id## BrmBackupManager=1 createBackup.(name="Post_Integration_xDatex")
+cmedit get ##Controller_id## BrmBackup.* -t
+
+
+########################################### END #########################################
