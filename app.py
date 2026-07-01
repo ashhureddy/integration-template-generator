@@ -942,6 +942,22 @@ def generate_final_connections(ciq_wb, mm_objs):
 # GENERIC PRE/POST CONFIGURATION (MCA / CENM — any node set, not CRAN's fixed roles)
 # ============================================================
 
+def pre_node_label(precheck_text, node_name):
+    """Determine a node's (P)/(S) identity pairing as it existed in Pre-checks — independent from
+    the CIQ, since a node can genuinely convert LTE-only <-> MMBB/TMBB between Pre and Post (5G
+    sectors moving onto or off of it as part of the same scope)."""
+    pre_pairs, _ = extract_precheck_sectors(precheck_text)
+    node_cells = [cell for (node, cell) in pre_pairs if node == node_name]
+    if not node_cells:
+        return node_name
+    fiveg_cells = [c for c in node_cells if is_5g_cell(c)]
+    lte_cells = [c for c in node_cells if not is_5g_cell(c)]
+    if fiveg_cells and lte_cells:
+        m = re.match(r"^(.+?)_N\d{3}[A-F]_\d+$", fiveg_cells[0])
+        secondary = m.group(1) if m else fiveg_cells[0]
+        return f"{node_name}(P)/{secondary}(S)"
+    return node_name
+
 def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_names):
     """Pre = nodes actually found in Pre-checks. Post = nodes actually found in CIQ Mixed Mode Info.
     Each shown only on the side it's actually present — no 'vacated'/'new' padding.
@@ -982,7 +998,7 @@ def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_name
     def lbl(n):
         return labels.get(n, n)
 
-    pre_parts = [f"{lbl(n)}({hw})" for n, hw in pre_nodes.items()]
+    pre_parts = [f"{pre_node_label(precheck_text, n)}({hw})" for n, hw in pre_nodes.items()]
     post_parts = [f"{lbl(n)}({hw})" for n, hw in post_nodes.items()]
     return " + ".join(pre_parts), " + ".join(post_parts)
 
