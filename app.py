@@ -1004,8 +1004,9 @@ def extract_dl_ul_loss_rows(precheck_text):
     seen, rows = set(), []
     for m in DL_UL_LOSS_ROW_RE.finditer(precheck_text):
         cell, dus_xmu_rru = m.group(1), m.group(2).strip()
-        if cell not in seen:
-            seen.add(cell)
+        key = (cell, dus_xmu_rru)  # dedupe by cell+description, not cell alone — a dual-band
+        if key not in seen:        # radio cell can legitimately have two distinct entries (Port D1/D2)
+            seen.add(key)
             rows.append({"Cells": cell, "DUS/XMU (S.No) - RRU": dus_xmu_rru})
     return rows
 
@@ -1040,7 +1041,9 @@ RADIO_TYPE_RE = re.compile(r'RRU[-\w]*\s*\(([^,]+),')
 
 def extract_precheck_radio_types(precheck_text):
     """Reuses the same DL/UL Loss row match as Pre Fibers, but pulls the radio product type
-    out of the captured DUS/XMU description instead."""
+    out of the captured DUS/XMU description instead. A cell can legitimately appear more than
+    once (a dual-band radio unit serving one sector through two physical radios/ports) — every
+    distinct radio type seen for that cell is kept, not just the first or last."""
     out = {}
     if not precheck_text:
         return out
@@ -1048,7 +1051,10 @@ def extract_precheck_radio_types(precheck_text):
         cell, desc = m.group(1), m.group(2)
         rm = RADIO_TYPE_RE.search(desc)
         if rm:
-            out[cell] = rm.group(1).strip()
+            radio = rm.group(1).strip()
+            out.setdefault(cell, [])
+            if radio not in out[cell]:
+                out[cell].append(radio)
     return out
 
 
@@ -1070,12 +1076,18 @@ def ciq_radio_types(ciq_wb):
 
 
 def radio_family(radio_string):
-    """Extract just the leading model number (e.g. '32' from 'RRUS 32 B30', '4490' from
-    'Radio 4490HP 44B5 44B12A C') — the CIQ abbreviates radio names (no band suffix, no
-    descriptive extras) while Pre-checks is fully descriptive, so comparing full strings
-    produces false-positive swaps on formatting alone."""
-    m = re.search(r'\d{2,5}', str(radio_string or ''))
-    return m.group(0) if m else str(radio_string or '').strip().upper()
+    """Extract just the RRU type — the token right after 'RRUS'/'Radio', ignoring the band suffix
+    entirely (e.g. 'RRUS A2 B4' -> 'A2', 'RRUS 12 B4' -> '12', 'Radio 4890HP 48B2/B25 48B66 M01' ->
+    '4890', 'RRUS 4890' -> '4890'). Handles both digit-leading types (strips trailing letters like
+    'HP') and letter-leading alphanumeric types (kept as-is, e.g. 'A2')."""
+    s = str(radio_string or "").strip()
+    tokens = s.split()
+    if len(tokens) >= 2 and tokens[0].upper() in ("RRUS", "RADIO"):
+        type_token = tokens[1]
+        m = re.match(r"^(\d+)", type_token)
+        return m.group(1) if m else type_token.upper()
+    m = re.search(r"\d{2,5}", s)
+    return m.group(0) if m else s.upper()
 
 
 def build_colocation_groups(ciq_wb):
@@ -1101,10 +1113,11 @@ def build_colocation_groups(ciq_wb):
 
 def classify_radio_swaps(precheck_text, ciq_wb):
     """Cells present in both Pre-checks and the CIQ where the radio family genuinely differs
-    (compared by model number, not exact string, to avoid false positives from naming-format
-    differences between the two sources). Follows Sector Del_Movement's rename mapping — a moved
-    cell can be renamed (e.g. WCL01699_7A_1 -> WCL09699_7A_1 on a different node), so the Pre-checks
-    value must be compared against the CIQ using the cell's NEW name, not its original one."""
+    (compared by RRU type only — ignoring band suffix — to avoid false positives from naming-
+    format differences between the two sources). Follows Sector Del_Movement's rename mapping —
+    a moved cell can be renamed, so the Pre-checks value must be compared against the CIQ using
+    the cell's NEW name. A cell with multiple distinct Pre-checks radios (dual-band radio unit)
+    shows all of them combined with '+' in the From field."""
     pre_radios = extract_precheck_radio_types(precheck_text)
     post_radios = ciq_radio_types(ciq_wb)
     colo_groups = build_colocation_groups(ciq_wb)
@@ -1118,13 +1131,24 @@ def classify_radio_swaps(precheck_text, ciq_wb):
                 rename_map[src_sector] = tgt_sector
 
     swaps = []
-    for cell, pre_radio in pre_radios.items():
+    for cell, pre_radio_list in pre_radios.items():
         ciq_cell = rename_map.get(cell, cell)
         post_radio = post_radios.get(ciq_cell)
-        if post_radio and radio_family(post_radio) != radio_family(pre_radio):
+        if not post_radio:
+            continue
+        post_type = radio_family(post_radio)
+        pre_types = []
+        for r in pre_radio_list:
+            t = radio_family(r)
+            if t not in pre_types:
+                pre_types.append(t)
+        if post_type not in pre_types:
             label, sector = band_label(cell)
+            pre_types_sorted = sorted(pre_types, key=lambda t: (not t[0].isdigit(), t))
+            from_str = "RRU " + "+".join(pre_types_sorted)
+            to_str = f"RRU {post_type}"
             group_key = colo_groups.get(ciq_cell, (ciq_cell,))
-            swaps.append({"label": label, "sector": sector, "from": pre_radio, "to": post_radio, "group_key": group_key})
+            swaps.append({"label": label, "sector": sector, "from": from_str, "to": to_str, "group_key": group_key})
     return swaps
 
 
