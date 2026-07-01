@@ -1,0 +1,1362 @@
+##############    CRAN TO CRAN Rehome and 6673 Sidehaul Change With MPST Trip-2 Procedure  for SA Sites         ##############
+##############################################################################################################################
+##############################################################################################################################
+NOTE:                                                                                                             ############
+PLEASE BE EXTRA CAREFUL WHEN PERFORMING THE CRAN TO CRAN Rehome.                                                  ############
+PLEASE MAKE SURE WE ARE CHECKING SOURCE NODE MOVING POLE IS SA OR NSA.                                            ############
+RUN CSI TOOL TO CHECK SOURCE POLE IS SA OR NSA.                                                                   ############
+CHECK GRANITE PATH FOR MOVING POLE WITH TARGET NODE ID.                                                           ############
+CHECK GRANITE PATH FOR SIDEHAUL CHANGE AND TARGET NODE.                                                           ############
+IF MOVING SOURCE POLE IS NAS FOLLOW BELOW TEMPLATE IF NOT REACH OUT LEADS.                                        ############
+ENSURE AFTER CHECKING EXISTING POLE SA OR NSA THEN ONLY WE ARE FOLLOWING BELOW TEMPLATE.                          ############
+##############################################################################################################################
+##############################################################################################################################
+
+xxSource_SiteIdxx 			          - From CIQ Sector Del_Movement tab Column A
+xxSource_SiteIdxx_Pole_N077A_1        - From CIQ Sector Del_Movement  Column B
+xxSource_SiteIdxx_Pole_N077B_1        - From CIQ Sector Del_Movement  Column B
+xxSource_SiteIdxx_Pole_N077C_1        - From CIQ Sector Del_Movement  Column B
+xxSource_SiteIdxx_Pole_N077A_2        - From CIQ Sector Del_Movement  Column B
+xxSource_SiteIdxx_Pole_N077B_2        - From CIQ Sector Del_Movement  Column B
+xxSource_SiteIdxx_Pole_N077C_2        - From CIQ Sector Del_Movement  Column B
+xxTarget_SiteIdxx 			          - From CIQ Mixed Mode info Column A
+xxTarget_5G_IPV6_ENODEB_BEARER_IPxx   - From EDP column EE
+xxTarget_5G_gNBIdxx                   - From CIQ Mixed Mode info Column D
+xxTarget_SiteIdxx_Pole_N077A_1        - From CIQ 5G Info  Column D
+xxTarget_SiteIdxx_Pole_N077B_1        - From CIQ 5G Info  Column D
+xxTarget_SiteIdxx_Pole_N077C_1        - From CIQ 5G Info  Column D
+xxTarget_SiteIdxx_Pole_N077A_2        - From CIQ 5G Info  Column D
+xxTarget_SiteIdxx_Pole_N077B_2        - From CIQ 5G Info  Column D
+xxTarget_SiteIdxx_Pole_N077C_2        - From CIQ 5G Info  Column D
+xxMacro_MMBB_SiteIdxx			      - From CIQ Sector Del_Movement tab Column A
+xxMacro_MMBB_gNB_Namexx               - From CIQ Mixed Mode info Column E
+xxMacro_MMBB_gNBIdxx                    - From CIQ Mixed Mode info Column D
+xxLTE_SiteIdxx			              - From CIQ Sector Del_Movement tab Column A
+xxUserIDxx                            - Rename with the UserID		****** Eg: VV640M
+xxDatexx		                      - mmddyyyy format ## Eg: 05172026
+####################################################################################################################################
+Template for  CRAN TO CRAN Rehome and 6673 Sidehaul Change With MPST  Procedure on Source CRAN, LTE/MMBB nodes  and Target CRAN node.
+#####################################################################################################################################
+Step 1:
+#####################
+###  Pre Checks    ###
+#####################
+
+#####################
+Prechecks (Putty Commands) -  Please make sure all putty logs are getting saved in putty logs folder in local machine before executing the prechecks commands in putty session
+Prechecks (CLI Commands) -    Please make sure ENM session is recorded before executing the CLI commands as part of prechecks in ENM CLI.
+#####################
+
+Login to the Source CRAN, LTE/MMBB nodes  and Target CRAN node and execute the below precheck commands in Putty  and in ENM                     ########
+If any Cells are in disabled state,Any Service affecting alarm please reach out to leads before executing Prechecks and send Ongoing to PM's    ########
+########################################################################################################################################################
+amos xxTarget_SiteIdxx
+lt all
+s+
+
+##############################
+## Software Version check ##
+##############################
+cvcu
+
+##############################
+## Sample SW Verification   ##
+##############################
+
+===========================================================================================
+260505-17:29            BackupName                                      SwVersion
+===========================================================================================
+LastCreatedBackup:      Post_Final_Audit_05052026                       CXP2010174/2_R38D30
+LastRestoredBackup:
+-------------------------------------------------------------------------------------------
+Current SwVersion:      CXP2010174/2_R38D30 (25.Q4)
+BrmHouseKeeping:        ENABLED (max: 20 backups)
+BrmFailSafe:            IDLE
+RestoreEscalationList:  s[1] = Auto integration backup - SITE_CONFIG_COMPLETE
+===========================================================================================
+
+Note: 
+Please make sure Software Version is making on all Source CRAN, LTE/MMBB nodes  and Target CRAN node.
+If you observed Software Version mismtach don't proceed please reachout leads.
+
+########################################
+## Putty Prechecks get commands ##
+########################################
+
+alt
+hget ^EUtranCell.DD cellBarred|sectorCarrierRef|primaryPlmnReserved|state|additionalPlmnReservedList
+hget ^EUtranCell.DD availabilityStatus|cellrange|administrativeState|operationalState|primaryPlmnReserved|^tac|^CellId|earfcndl|earfcnul|dlChannelBandwidth|physicalLayerCellId|physicalLayerCellIdGroup|physicalLayerSubCellId|rachRootSequence|transmissionmode$|freqband$|Cellrange
+hget ^NRCellDU nRCellDUId|administrativeState|^state|cellBarred|cellRange|cellReservedForOperator|nRSectorCarrierRef|operationalState|serviceState
+hget ^NRCellDU sectorCarrierRef|primaryPlmnReserved|nCGI|nCI|nRPCI|nRSectorCarrier|nRTAC|arfcn$|cellLocalId|pointAArfcnUlFdd|ssbDuration|ssbDurationAutoSelected|ssbFrequency|ssbOffset|ssbOffsetAutoSelected
+hget ^NRCellCU cellLocalId|nCI|nRTAC
+hget ^NRCellCU ueMCCellProfileRef|pmUeIntraFreqCellProfileRef|nrdcMnCellProfileRef|mcpcPSCellProfileRef|mcpcPCellProfileRef
+####### Ensure that all Profiles are Created #######
+hget ^NRCellCU smtcOffset|smtcDuration|serviceState|sNSSAIList|reservedBy|primaryPLMNId|pLMNIdList|nRTAC|nRFrequencyRef|nRCellCUId|nCI|cellState
+hget ^Sector state|configuredMaxTxPower|availableHwOutputPower|noof[rt]x|sectorFunctionRef|bSChannelBw.L|arfcn|txDirection
+hget NbIotCell cellid|freqBand|tac|NbIotCellType
+hget TermPointToENB administrativeState|Operationalstate
+hget TermPointToGNB administrativeState|Operationalstate
+hget TermPointToGnodeb administrativeState|Operationalstate
+hget ^FieldReplaceableUnit administrativeState|operationalState|productData
+hget ^NRSectorCarrier administrativeState|arfcnDL|arfcnUL|bSChannelBwDL|bSChannelBwUL|configuredMaxTxPower|noOfRxAntennas|noOfTxAntennas|operationalState|txDirection|txPowerState
+hget SectorEquipmentFunction administrativeState|availableHwOutputPower|operationalState
+hget SectorCarrier configuredMaxTxPower|noOfRxAntenna|noOfTxAntennas|operationalState|sectorFunctionRef
+hget riport administrativeState|operationalState
+hget RfBranch rfPortRef
+hget AntennaNearUnit rfPortRef
+hget RfPort rfPortId
+hget RiLink riPortRef1|riPortRef2|operationalState|transportType|fronthaulDeviceLineRate|availabilityStatusRiLinkId
+hget RfBranch dlAttenuation|ulAttenuation|ulTrafficDelay|dlTrafficDelay
+sdir
+
+###############
+##RET Checks##
+###############
+lst near
+hget AntennaNearUnit UniqueId|rfPortRef|State|iuantDeviceType|productNumber
+hget RetSubUnit State|userLabel|reservedby
+hget RetSubUnit iuantBaseStationId|iuantSectorId|electricalAntennaTilt|maxTilt|minTilt|iuantAntennaBearing
+hget TmaSubUnit tmaType|ulTrafficDelay|dlTrafficDelay|dlAttenuation|state|ulGain|reservedBy
+
+##############################
+## Termpoint checks##
+##############################
+
+st TermPointToENB
+st TermPointToGNB
+st TermPointToGNodeB
+st TermPointToMme
+st termpoint
+st TermPointToGNBCUCP
+st TermPointToAmf
+
+##############################
+## System Constants check ##
+##############################
+
+scg
+
+##############################
+## NGS Checks ##
+##############################
+
+hget rru|aas isSharedWithExternalMe
+get Synchronization=1,RadioEquipmentClock freqDeviationThreshold
+st NodeGroupSyncMember=1
+get NodeGroupSyncMember=1
+st sync
+get . clockstate
+sts
+
+##############################
+## GPS Checks ##
+##############################
+
+gpsstatus | grep Product
+hget GnssInfo ReceiverStatus|noOf|tude
+st TimeSyncIO
+st RadioEquipmentClockReference
+
+################################################################
+## Sctp Profile checks ON MMBB/SOURCE CRAN AND TARGET CRAN NODE##
+#################################################################
+
+lpr Transport=1,Router=
+lpr Transport=1,SctpEndpoint=
+st sctp
+hget Transport=1,SctpEndpoint= localIpAddress|operationalState|reservedBy|sctpProfile
+get EndpointResource=1,LocalSctpEndpoint=
+get LocalIpEndpoint=1
+get EndpointResource=1,LocalSctpEndpoint=
+get . sctpEndpointRef
+hget SctpEndpoint localIpAddress|portNumber|sctpprofile
+hget addressipv6 address
+hget NextHop address
+get . upIpAddressRef
+get . encapsulation
+get . vlanId
+
+######################################################
+## 5G Check ON MMBB/SOURCE CRAN AND TARGET CRAN NODE##
+######################################################
+
+hget ^NRCell|syncsignal cellBarred|^state|cellRange|cellState|nRSectorCarrier|cellReservedForOperator
+hget ^NRCell|syncsignal sectorCarrierRef|primaryPlmnReserved|nCGI|nCI|nRPCI|nRSectorCarrier|nRTAC|arfcn$|cellLocalId
+
+##############################
+## Traffic check ##
+pget . pmendcsetupue|pmmacvoldldrb$
+##############################
+
+###############################################################
+## IDLe/IDLy checks ON MMBB/SOURCE CRAN AND TARGET CRAN NODE ##
+###############################################################
+
+st EthernetPort
+get . ^VlanPort
+get . caVlanPortRef
+get . eranVlanPortRef
+get . ExtGNBDUPartnerFunction
+
+####### Additional Check Commands #######
+cvls
+hget ExternalGUtranCell cellState
+hget GUtranFreqRelation gUtranSyncSignalFrequencyRef
+hget ExternalGUtranCell physicalLayerCellIdGroup|physicalLayerSubCellId
+
+##############################
+## PTP  Checks              ##
+##############################
+
+st ptp
+hget InterfaceIPv4 encapsulation                                                           
+hget Transport=1,Router=ptp,InterfaceIPv4=1,AddressIPv4=1 address                          
+hget Router=ptp,RouteTableIPv4Static=1,Dst=1,NextHop=1 address                             
+hget Transport=1,Ptp=1,BoundaryOrdinaryClock=1,PtpBcOcPort=1 associatedGrandmaster         
+ 
+lpr Router=ptp
+lpr Ptp=1
+lpr RadioEquipmentClockReference=ptp
+
+########################################################################
+check for recurring alarms (please make a note to run in a separate tab)
+########################################################################
+
+lgaesvmr
+lga
+lgo
+
+########################################
+## llog -1 Description ##
+########################################
+
+Check for any BB Crash by below command
+
+llog -l
+
+*********************************************************
+From the output, pls check for any instance of BBU restart or program crash and inform the leads immediately if we observe any restarts. 
+*********************************************************
+
+******************************************************************************************
+******************************************************************************************
+In the output generated, please check the following - 
+Under Program/Extra section : If you see any BB Restart with any Crash signature, Please inform the lead immediately. 
+
+For example,
+
+Extra:    BB Restart: Emca 1:DSP 10: "LPP_send to invalid virtual pidnpid: 0xf1" OR "BB Restart: Data Plane Processing Fault"
+Extra:    "BB Restart: Data Plane Processing Fault"
+Extra:    Recovery action initiated by BB via BCI, faultId: 0x301 (SwError), faultDescription: Emca 1:DSP 26: "LPP_send to invalid virtual pidnpid 
+          /local/lmr-lm-builds_gmake_small_fem111/workspace/LM_BUILD_lratBbomAasArmLm/bbmc/bbOmMeBl/bbOmMeRcsSwU/src/bbomme_svc_basic_handling_eh_rcs.cc:169
+******************************************************************************************
+
+###################################### Saving Prechecks logs ####################################################
+
+Putty session in which putty prechecks commands are executed needs to be saved with below standard naming convention
+
+xxSource_SiteIdxx_Prechecks_xxDatexx_Putty_Logs
+xxTarget_SiteIdxx_Prechecks_xxDatexx_Putty_Logs
+xxMacro_MMBB_SiteIdxx_Prechecks_xxDatexx_Putty_Logs
+xxLTE_SiteIDxx_Prechecks_xxDatexx_Putty_Logs
+
+
+CLI session in which CLI prechecks commands are executed needs to be saved with below standard naming convention
+
+xxSource_SiteIdxx_Prechecks_xxDatexx_ENM_Logs
+xxTarget_SiteIdxx_Prechecks_xxDatexx_ENM_Logs
+xxMacro_MMBB_SiteIdxx_Prechecks_xxDatexx_ENM_Logs
+xxLTE_SiteIDxx_Prechecks_xxDatexx_ENM_Logs
+
+** Recorded and Saved session of Prechecks logs from ENM and putty needs to be saved in Daily logs folder under Prechecks folder ***
+
+#################################################################################################################
+
+########################################
+##         KPI's  Description         ##
+########################################
+ 
+/////////////////////////////////////////////////////////////
+KPIs- Please copy the KPI output and save as Pre_Integration_KPI_MMDDYYYY.txt file and send it in RSF email chain as part of Prechecks
+/////////////////////////////////////////////////////////////
+ 
+###########################
+##  LTE & 5G KPI Checks  ##
+###########################
+ 
+ue print -admitted
+pmr -m .5 -r 403
+pmr -c /home/shared/common/att_cust_kpi/ATT_VOLTE_CONFIG.txt  -f /home/shared/common/att_cust_kpi/ATT_VOLTE_FORMULA_ERBS.txt -m .5 -r 1-3
+pmxh -m 3 cell pmRrcConnEstabSucc$|pmRrcConnEstabAtt$
+pmx . pmendcsetupue|pmmacvoldldrb$ -m 1
+lgg 3d | grep -v BXP
+pget . pmendcsetupue|pmmacvoldldrb$
+ 
+###################################################################################################################################################
+## After implementing the below KPI Checks. Make sure to share the logs in RSF and save in NAS                                                   ##
+## If KPI checks is not configured run the below command in putty once ENM ID is entered                                                         ##
+##  bash /home/shared/rp7608/myscript/RUN_FIRST_KPI_TOOL.sh                                                                                      ##
+## [Attention: Make sure this command is executed once ENM ID is entered in putty and Do not run this command after logging in to the node]      ##
+###################################################################################################################################################
+
+run /home/shared/common/bk199e/QIC/BBU_scripts/qic_bbu_script.mos
+
+Login to the node and type the keyword 'kpi' once the KPI tool menu appears then check for the below mentioned counters.
+ 
+10, 11 and 13 for LTE KPI,  38 is 5G ENDC and 39 is 5G KPI checks
+ 
+kpi
+10
+11
+13
+38
+39
+q
+  
+############
+ROP KPIs
+############
+ 
+pmr -m 3 -r 203,204 | egrep 'Acc_InitialERabEstabSuccRate|Acc_InitialErabSetupSuccRate|Acc_InitialUEContextEstabSuccRate|Acc_RrcConnSetupSuccRate|Acc_S1SigEstabSuccRate|Av_CellAvail|Int_DlThroughput_kbps|Int_UlThroughput_kbps|Mob_HoExecSuccRate|Mob_HoPrepSuccRate'
+ 
+**********************************************************************************************************************************************
+**	Acc_InitialERabEstabSuccRate 		>99%																								**
+**	Acc_InitialErabSetupSuccRate		>99%																								**
+**	Acc_InitialUEContextEstabSuccRate	>99%																								**
+**	Acc_RrcConnSetupSuccRate			>99%																								**
+**	Acc_S1SigEstabSuccRate				>99%																								**
+**	Av_CellAvail						100		- Should not be Negative if the Cell is Unlocked/Enabled									**
+**	Int_DlThroughput_kbps				>10000 (however depends on carrier)																	**
+**	Int_UlThroughput_kbps				~3000																								**
+**	Mob_HoExecSuccRate					>98																									**
+**	Mob_HoPrepSuccRate					>98																									**
+**********************************************************************************************************************************************
+ 
+VoLTE
+########
+voltepmr -m 3.00 -r 1,2,3
+########
+ 
+**************************************************************
+**	VAcc_ErabAttAdded				# of VoLTE Attempts		**
+**	VAcc_ErabAttInit				# of VoLTE Attempts		**
+**	VAcc_ErabSuccRate				>97-98%					**
+**	VRet_AbnormalEnodebRelAct		(as low as possible)	**
+**	VRet_AbnormalMmeRelAct			(as low as possible)	**
+**	VRet_ErabRetainability_ATT		>97-98%					**
+**	VRet_ErabRetainability_Eric		>97-98%					**
+**************************************************************
+ 
+############
+RRC Attempts
+############
+ 
+pmxh EutranCellfdd pmRrcConnEstabAtt$|pmRrcConnEstabSucc$|pmErabRelAbnormalMme$ -m 3.00
+ 
+**************************************************************************************************************************************************************
+**pmRrcConnEstabAtt		To check if Sectors taking traffic	- Should be the same as pre or not decreasing with time											**														**
+**pmRrcConnEstabSucc	To check if Sectors taking traffic	- Should be the same as pre or not decreasing with time	and comparable with pmRrcConnEstabAtt 	**															**
+**pmErabRelAbnormalMme  To check if there are no MME drops	- Should be the same as pre or not increasing with time											**
+**************************************************************************************************************************************************************
+
+********************************************************************************************************************************************************
+
+###################################### Saving Pre KPI logs ####################################################
+
+Putty session in which KPI prechecks commands are executed needs to be saved with below standard naming convention
+
+xxSource_SiteIdxx_Pre_KPI_xxDatexx_Putty_Logs
+xxTarget_SiteIdxx_Pre_KPI_xxDatexx_Putty_Logs
+xxMacro_MMBB_SiteIdxx_Pre_KPI_xxDatexx_Putty_Logs
+xxLTE_SiteIDxx_Pre_KPI_xxDatexx_Putty_Logs
+
+** Recorded and Saved session of KPI Prechecks logs from putty needs to be saved in Daily logs folder under KPI folder ***
+
+#################################################################################################################
+
+################################################################################################################################################
+
+#############################################*** QWEST 360 Pre checks *** ###########################################
+####################### Complete the Prechecks for Co-located nodes if any and also for Our Node  ###################
+######### Pre HC,Pre Kgetalls,Pre-MOM,SCG Files needs to be taken for Co-located nodes and also for Our Node ########
+QWEST 360 complete pre-post checks link                                                                      ########
+https://opqwest.quadgen.com:8012/qwest360                                                                    ########
+												                                                             ########
+QWEST 360 Pre-post HC link                                                                                   ########
+https://qwestprod.quadgen.com./att-projects                                                                  ########
+#####################################################################################################################
+
+#################################
+Save the QWEST Prechecks logs in below format
+
+xxTarget_SiteIdxx_QWEST_Prechecks_xxDatexx_Logs
+
+** Downloaded Prechecks QWEST logs needs to be saved in Daily logs folder under Prechecks folder ***
+
+#################################
+
+###########################################################################################################################################
+## Take a BackUp CV and FTP to your folder on OSS                                                                                        ##
+## Make sure to save the CV along with the logs in QWEST                                                                                 ##
+## Ensure Pre Backup CV are taken for all Nodes (Co-Located and our node)                                                                ##
+###########################################################################################################################################
+
+cmedit action xxSource_SiteIdxx  BrmBackupManager=1 createBackup.(name="Pre_Int_CV_xxDatexx")
+cmedit action xxTarget_SiteIdxx  BrmBackupManager=1 createBackup.(name="Pre_Int_CV_xxDatexx")
+cmedit action xxMacro_MMBB_SiteIdxx  BrmBackupManager=1 createBackup.(name="Pre_Int_CV_xxDatexx")
+cmedit action xxLTE_SiteIDxx  BrmBackupManager=1 createBackup.(name="Pre_Int_CV_xxDatexx")
+
+cmedit get xxSource_SiteIdxx BrmBackup.* -t
+cmedit get xxTarget_SiteIdxx BrmBackup.* -t
+cmedit get xxMacro_MMBB_SiteIdxx BrmBackup.* -t
+cmedit get xxLTE_SiteIDxx BrmBackup.* -t
+
+****  Process to Download Backup CV  ****
+1: Run QIC_Integration command in putty on all the node
+2: Type option 38 for CV Download from the Menu
+3: Provide the BrmBackup number of the CV that needs to be downloaded
+4: Tool will ask for the confirmation on the CV name that need to be download,Type Y if the CV name is correct
+5: Provide the ENM details and then tool will provide CLI command for exection.
+6: Execute the provide command in the ENM CLI and press Y key in the putty
+7: CV download will show successful,Please login to WINSCP on the respective ENM and download the CV from the path QIC/CVs in the home folder under respective attuid
+
+#################################
+Save the downloaded pre CV's in the folder with below naming 
+
+xxSource_SiteIdxx_Pre_Backup_xxDatexx_CVs
+xxTarget_SiteIdxx_Pre_Backup_xxDatexx_CVs
+xxMacro_MMBB_SiteIdxx_Pre_Backup_xxDatexx_CVs
+xxLTE_SiteIDxx_Pre_Backup_xxDatexx_CVs
+
+** Downloaded CV of the node needs to be saved in Daily logs folder under CV folder ***
+
+#################################
+
+######## SCRIPT CHECK ###########
+############################################################################################################################################################################################
+Check in RSF if all Source node moving pole deletion scripts are provided in RSF for the CRAN TO CRAN conversion,If any scripts found missing  request the same in RSF                            ############################################################################################################################################################################################
+
+Download script's and save in folder.
+
+####### END of Prechecks ########
+
+#####################
+(Putty Commands) -  Please make sure all putty logs are getting saved in putty logs folder in local machine before executing the prechecks commands in putty session
+(CLI Commands) -    Please make sure ENM session is recorded before executing the CLI commands as part of prechecks in ENM CLI.
+#####################
+
+NOTE:
+*********Important*********
+Once tech on site make sure we are NFSD ticket for both macro and HUB FA's.
+
+############ Share Sidehaul connections granite info to FE ####################
+############ Check with lead's for  Sidehaul connections for Source node and Target node with MMBB node Connections ##################
+
+################# Start locking Source node Moving pole ###################
+
+Note: we should not touch the any other pole cells on the source node.
+
+*** MOVING CRAN CBAND NRCELL LOCK and making Non - commercial ****
+
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077A_1) administrativeState=SHUTTINGDOWN --force
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077B_1) administrativeState=SHUTTINGDOWN --force
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077C_1) administrativeState=SHUTTINGDOWN --force
+
+### NRSectorCarrier
+
+cmedit set xxSource_SiteIdxx NRSectorCarrier.(NRSectorCarrierId==xxSource_SiteIdxx_Pole_N077A_1) administrativeState:LOCKED
+cmedit set xxSource_SiteIdxx NRSectorCarrier.(NRSectorCarrierId==xxSource_SiteIdxx_Pole_N077B_1) administrativeState:LOCKED
+cmedit set xxSource_SiteIdxx NRSectorCarrier.(NRSectorCarrierId==xxSource_SiteIdxx_Pole_N077C_1) administrativeState:LOCKED
+
+### SectorEquipmentFunction
+
+cmedit set xxSource_SiteIdxx SectorEquipmentFunction.(sectorEquipmentFunctionId==xxSource_SiteIdxx_Pole_N077A_1) administrativeState=LOCKED
+cmedit set xxSource_SiteIdxx SectorEquipmentFunction.(sectorEquipmentFunctionId==xxSource_SiteIdxx_Pole_N077B_1) administrativeState=LOCKED
+cmedit set xxSource_SiteIdxx SectorEquipmentFunction.(sectorEquipmentFunctionId==xxSource_SiteIdxx_Pole_N077C_1) administrativeState=LOCKED
+
+### Radio 
+cmedit set xxSource_SiteIdxx FieldReplaceableUnit.(FieldReplaceableUnitId==AAS-Pole_N077A_1) administrativeState=LOCKED
+cmedit set xxSource_SiteIdxx FieldReplaceableUnit.(FieldReplaceableUnitId==AAS-Pole_N077B_1) administrativeState=LOCKED
+cmedit set xxSource_SiteIdxx FieldReplaceableUnit.(FieldReplaceableUnitId==AAS-Pole_N077C_1) administrativeState=LOCKED
+
+### Make cells non commercials
+
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077A_1) cellBarred=BARRED;cellReservedForOperator=RESERVED  --force
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077B_1) cellBarred=BARRED;cellReservedForOperator=RESERVED  --force
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077C_1) cellBarred=BARRED;cellReservedForOperator=RESERVED  --force
+
+*** IF ANY DOD MOVING CRAN DOD NRCELL LOCK and making Non - commercial ****
+
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077A_2) administrativeState=SHUTTINGDOWN --force
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077B_2) administrativeState=SHUTTINGDOWN --force
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077C_2) administrativeState=SHUTTINGDOWN --force
+
+### NRSectorCarrier
+
+cmedit set xxSource_SiteIdxx  NRSectorCarrier.(NRSectorCarrierId==xxSource_SiteIdxx_Pole_N077A_2) administrativeState:LOCKED
+cmedit set xxSource_SiteIdxx  NRSectorCarrier.(NRSectorCarrierId==xxSource_SiteIdxx_Pole_N077B_2) administrativeState:LOCKED
+cmedit set xxSource_SiteIdxx  NRSectorCarrier.(NRSectorCarrierId==xxSource_SiteIdxx_Pole_N077C_2) administrativeState:LOCKED
+
+### SectorEquipmentFunction
+
+cmedit set xxSource_SiteIdxx SectorEquipmentFunction.(sectorEquipmentFunctionId==xxSource_SiteIdxx_Pole_N077A_2) administrativeState=LOCKED
+cmedit set xxSource_SiteIdxx SectorEquipmentFunction.(sectorEquipmentFunctionId==xxSource_SiteIdxx_Pole_N077B_2) administrativeState=LOCKED
+cmedit set xxSource_SiteIdxx SectorEquipmentFunction.(sectorEquipmentFunctionId==xxSource_SiteIdxx_Pole_N077C_2) administrativeState=LOCKED
+
+### Radio 
+cmedit set xxSource_SiteIdxx FieldReplaceableUnit.(FieldReplaceableUnitId==AAS-Pole_N077A_2) administrativeState=LOCKED
+cmedit set xxSource_SiteIdxx FieldReplaceableUnit.(FieldReplaceableUnitId==AAS-Pole_N077B_2) administrativeState=LOCKED
+cmedit set xxSource_SiteIdxx FieldReplaceableUnit.(FieldReplaceableUnitId==AAS-Pole_N077C_2) administrativeState=LOCKED
+
+### Make cells non commercials
+
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077A_2) cellBarred=BARRED;cellReservedForOperator=RESERVED  --force
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077B_2) cellBarred=BARRED;cellReservedForOperator=RESERVED  --force
+cmedit set xxSource_SiteIdxx NRCellDU.(NRCellDUid==xxSource_SiteIdxx_Pole_N077C_2) cellBarred=BARRED;cellReservedForOperator=RESERVED  --force
+
+######### Check cells status on source node ###########
+Lt all
+s+
+st cell
+st sector
+st field
+hget ^NRCell|syncsignal cellBarred|state|cellRange|cellState|nRSectorCarrier|cellState|cellReservedForOperator
+
+########## Proceed with Trip 2 Step ##############
+
+Use "MasTec AT&T Ericsson SOP - CRAN C-Band Rehome" MOP for the deatils 
+
+MOP avaible in the webpage.
+
+############### Share Sidehaul connections and Target node moving pole granite info to FE #############################################
+############### Check with lead's for Target node moving pole, Sidehaul connections for Source node and Target node with MMBB node Connections ##################
+
+Note: Before MPST call ask FE to move the patch_panel_term_A connections as per target node.
+
+Run CSI tool with 6673 switch ID and check the existing switch and target switch connections.
+
+Step of Actions:
+
+Trip 2
+
+Physical Migration & SDH Port Handling.
+ 
+C-Band Radio Actions:
+
+1.	Before MPST joins the call, ask FE to Move cable from Existing patch_panel_term_A To target patch_panel_term_A at Hub end & check cells status, if they are UP.
+       Once cells Up check KPI, SA Traffic status.
+	  
+#################### Once Fiber cutover completed for CRAN cells physicaly, check the radios/sectors/cells status and traffic on target node ###############
+
+lt all
+st field
+st cell
+st sector
+alt
+pget . pmendcsetupue|pmmacvoldldrb$
+
+##################### Check Radio serical number are matching as per pre ###################################################################################
+
+hget field prod
+
+####### DO NOT USE wildcard commands to set all 5G cells to NOT_BARRED and Commercial at once, instead use individual TDD names to set to NOT_BARRED and Commercial for pre - existing commercials #######
+
+######## Commands to set 5G NR cells to NOT_BARRED and Commercial state for pre-existing commercial cells ####### ##################################################################################################################################################################################
+            Replace with respective sectors only in below commands
+- Please make sure we set the NR cells status to UNLOCKED/NOT_BARRED/NOT_RESERVED when making the 5G NR cells commercials  as per the latest update    ###########
+##########################################################################################################################################################################################################################################################
+
+hget ^NRCell|syncsignal cellBarred|state|cellState|nRSectorCarrier|cellState|cellReservedForOperator
+
+*** MOVING CRAN CBAND NRCELL UNLOCK and making commercial ****
+
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077A_1) administrativeState=SHUTTINGDOWN --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077B_1) administrativeState=SHUTTINGDOWN --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077C_1) administrativeState=SHUTTINGDOWN --force
+
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077A_1) cellBarred=NOT_BARRED;cellReservedForOperator=NOT_RESERVED  --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077B_1) cellBarred=NOT_BARRED;cellReservedForOperator=NOT_RESERVED  --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077C_1) cellBarred=NOT_BARRED;cellReservedForOperator=NOT_RESERVED  --force
+
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077A_1) administrativeState=UNLOCKED --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077B_1) administrativeState=UNLOCKED --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077C_1) administrativeState=UNLOCKED --force
+
+#########################
+*** DOD NRCELL UNLOCK and making commercial for pre-existing commercial cells and if clear to radiate****
+#########################
+
+###  IMPORTANT ###
+Please make sure spectrum clearing sheet or Radiation list is checked before DOD cells are unlocked 
+Only Unlock DOD cells and NRsectorcarrier if found to be clear in the Radiation list
+If seen partial clear or Not clear ,Please donot UNLOCK DOD cells at any point, Cells needs to be in locked state only along with NRsectorcarrier.
+
+######## Run below commands if clear to radiate only,if donot good to radiate skip the below commands  ########
+
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077A_2) administrativeState=SHUTTINGDOWN --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077B_2) administrativeState=SHUTTINGDOWN --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077C_2) administrativeState=SHUTTINGDOWN --force
+
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077A_2) cellBarred=NOT_BARRED;cellReservedForOperator=NOT_RESERVED  --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077B_2) cellBarred=NOT_BARRED;cellReservedForOperator=NOT_RESERVED  --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077C_2) cellBarred=NOT_BARRED;cellReservedForOperator=NOT_RESERVED  --force
+
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077A_2) administrativeState=UNLOCKED --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077B_2) administrativeState=UNLOCKED --force
+cmedit set xxTarget_SiteIdxx NRCellDU.(NRCellDUid==xxTarget_SiteIdxx_Pole_N077C_2) administrativeState=UNLOCKED --force
+
+hget ^NRCell|syncsignal cellBarred|state|cellState|nRSectorCarrier|cellState|cellReservedForOperator
+
+Note: Keep all newly added cells in LOCKED/BARRED/RESERVED state.
+
+lt all
+st field
+st cell
+st sector
+st TermPointToAmf
+st TermPointToGnodeb
+alt
+st TermPointToGNBCUCP
+
+##### Wait for MPST call to move the Sidehaul connections for MMBB node ########
+### Join call on time, make sure before join the cell CRAN rehome cells are UP in target node and taking traffic and loop placed on the target 6673 switch slot/port ###
+
+Below is the Responsibilities Of MPST team and MIC engineer after join the call
+
+SDH Connection:
+ 
+MIC Team Responsibilities:
+
+1.	During MPST call: Ask MPST to lock existing 6673 SDH port & to proceed with the removal of description.
+2.	Inform Technician to move fibers, shifting from existing patch panel to new patch panel (connect it to new slot and port).
+3.	Delete ExtGNBDUPartnerFunction on existing MMBB/C-Band node.
+4.	Inform MPST team once ExtGNBDUPartnerFunction on existing MMBB/C-Band node is Deleted.
+  
+MPST Team Responsibilities:
+
+1. The existing 6673 SDH port needs to be locked and its description to be removed.
+
+################ ExtGNBDUPartnerFunction Deletion on MMBB node and Source node follow below procees. ############################
+
+################# MMBB node  ##############
+
+############ Delete PartnerFunction with respect to source_node_id ##############
+
+cmedit action xxMacro_MMBB_SiteIdxx BrmBackupManager=1 createBackup.(name="Pre_PartnerFunction_Delete")
+cmedit get xxMacro_MMBB_SiteIdxx BrmBackup.* -t
+
+cmedit delete SubNetwork=ONRM_ROOT_MO,MeContext=xxMacro_MMBB_SiteIdxx,ManagedElement=xxMacro_MMBB_SiteIdxx,GNBDUFunction=1,ExtGNBDUPartnerFunction=xxSource_SiteIdxx --force 
+
+#### Once PartnerFunction is Delete with respect to source_node_id check the status in putty ####
+
+lt all
+st EthernetPort=ERAN
+get TnPort=
+st (Me|l|bb)link
+get vlanport=ERAN
+pr vlanport=
+pr ^ethernetport=
+get . caVlanPortRef
+get Transport=1,VlanPort=ERAN_NRCA
+get Transport=1,EthernetPort=ERAN_NRCA
+get GNBDUFunction=1,ExtGNBDUPartnerFunction=
+
+########################### Source node ##########################
+
+############ Delete PartnerFunction with respect to MMBB_node_id ################
+
+cmedit action xxSource_SiteIdxx BrmBackupManager=1 createBackup.(name="Pre_PartnerFunction_Delete")
+cmedit get xxSource_SiteIdxx BrmBackup.* -t
+
+cmedit delete SubNetwork=ONRM_ROOT_MO,MeContext=xxSource_SiteIdxx,ManagedElement=xxSource_SiteIdxx,GNBDUFunction=1,ExtGNBDUPartnerFunction=xxMacro_MMBB_gNB_Namexx --force 
+
+#### Once PartnerFunction is Delete with respect to MMBB_node_id check the status in putty ####
+
+lt all
+get TnPort=
+pr ^ethernetport=
+get Transport=1,VlanPort=ERAN_NRCA
+get Transport=1,EthernetPort=ERAN_NRCA
+st (Me|l|bb)link
+get . caVlanPortRef
+get GNBDUFunction=1,ExtGNBDUPartnerFunction=
+
+### Check SA Traffic once Intermelinks Up on the MMBB and target node while on MPST Call ###
+
+Check for SA KPI:
+
+/rc/nrat/ue list --bearers --state --time  --cell --apid --scells | grep -i PduSessions
+pmr -m .5 -r 409 | egrep 'Acc_NrSaNgSigEstabSuccRate|Acc_NrSaRrcConnSetupSuccRate|Mob_NrSaMobilitySuccRate|Acc_NrSaPduSessionSetupSuccRate|Acc_NrSaPduSessionEstabSuccRate|Mob_NrSaHoExecSuccRate|Mob_NrSaMobilitySuccRate|Mob_SuccRwrEps|Ret_NrSaPduSessionRelAbnormal|Ret_NrSaPduSessionRetainabilityRate'
+pget . pmRrcConnEstabSucc$|pmRrcConnEstabAtt$
+pdiff . pmRrcConnEstabSucc$|pmRrcConnEstabAtt$
+pdiff . pmCellDowntimeAuto|pmCellDowntimeMan
+pmxeh -m .5  cell Int_AvgRadioRecInterferencePower$|Int_AvgRadioRecInterferencePower_mW$
+pget . nrcelldu|pmMacVolDlScell$
+pmx . pmMacVolDlScell$ -m 3
+
+###### Post MPST call completed go head with deleting source moved pole  #############
+
+####### Script Execution #######
+
+(CLI Commands) -    Please make sure ENM session is recorded before executing the CLI commands as part of prechecks in ENM CLI.
+
+########################## Delete script ###########################################
+cmedit action xxSource_SiteIdxx BrmBackupManager=1 createBackup.(name="Pre_cband_Delete")
+cmedit get xxSource_SiteIdxx BrmBackup.* -t
+ 
+Delete script in txt format and drag to cli
+ 
+batch execute file: xxSource_SiteIdxx_cband_Delete_xxdatexx
+
+*** Verify Below command O/P if moving Cells Mos are deleted on source Node. *****
+
+lt all
+st cell
+st sector
+st field
+hget rilink=
+alt
+lpr xxSource_SiteIdxx_Pole
+
+######################
+Proceed with NL DELETE
+######################
+Note: 
+
+1. Execute NL Delete script in separate CLI session and start Recording before Execution.
+2. You are good to proceed rest all proccess in parllel during exection of NL Delete, Don't wait for finishing up NL Delete to proceed Integration process.
+
+########################################################################################################################################################################################################################
+########### Complete the NL DELETE if any cells are being moved/retuned or if there is any delete node scenario involved    ######       
+###########                          NL DELETE Script Generation process from QWEST 360                                     ######
+1: During Initiation of prechecks in QWEST 360 and if any moving cells or delete node is present check the NL DELETE option so scripts for NL DEL will be generated
+2: Once the cutover completed and cells are up in target node,Proceed with Execution of generated get script followed by Set/Delete script generated to have the NL DEL performed
+3: Once script execution of NL DEL is completed,rerun the get command script and check if any instances are present,if present check the reason for instance not being delete
+4: Possible issues where instances will be present is no connectivity to neighbour node or  they are unsynchronized state in ENM
+5: Send Ongoing to PM's if instances are not cleared even after final clean up due to  no connectivity to neighbour node or they are in unsynchronized state in ENM and proceed further
+6: Also ensure all the logs of NL DEL and generated scripts along with instances check commands needs to be shared in RSF and also saved in Qwest along with all Logs
+########################################################################################################################################################################################################################
+
+##########################
+- Save the Generated NL delete Scripts from the QWEST with below naming
+
+- xxSource_SiteIdxx_NL_Delete_Scripts_xxDatexx
+- Save the NL delete Execution logs from the CLI with below naming
+
+- xxSource_SiteIdxx_Delete_Execution_xxDatexx_ENM_Logs
+
+** Recorded CLI session and generated NL delete scripts or prepared NL delete scripts  for NL delete needs to be saved in Daily logs folder under NL delete folder ***
+
+##########################
+
+##########################
+## NL Delete Checks End ##
+##########################
+
+Post NL DELETE save logs in your Daily logs folder under Logs.
+
+###########################################################################################################################################
+## Take a BackUp CV and FTP to your folder on OSS                                                                                        ##
+## Make sure to save the CV along with the logs in QWEST                                                                                 ##
+## Ensure Post Backup CV are taken for all Nodes (Co-Located and our node)                                                                ##
+###########################################################################################################################################
+cmedit get xxSource_SiteIdxx BrmBackup.* -t
+
+cmedit action xxSource_SiteIdxx  BrmBackupManager=1 createBackup.(name="BackUp_Post_cband_Deletion_CV_xxSource_SiteIdxx")
+
+cmedit get xxSource_SiteIdxx BrmBackup.* -t
+
+****  Process to Download Backup CV  ****
+1: Run QIC_Integration command in putty in the node
+2: Type option 38 for CV Download from the Menu
+3: Provide the BrmBackup number of the CV that needs to be downloaded
+4: Tool will ask for the confirmation on the CV name that need to be download, Type Y if the CV name is correct
+5: Provide the ENM details and then tool will provide CLI command for execution.
+6: Execute the provide command in the ENM CLI and press Y key in the putty
+7: CV download will show successful, Please login to WINSCP on the respective ENM and download the CV from the path QIC/CVs in the home folder under respective attuid
+
+#################################
+Save the downloaded Post CV's in the folder with below naming 
+
+xxSource_SiteIdxx_Post_Backup_xxDatexx_CVs
+
+** Downloaded CV of the node needs to be saved in Daily logs folder under CV folder ***
+
+********************************** Area Lite Checks *********************************************
+################################################################################################
+Area Lite Checks once  Integration is completed before releasing FE    #########################
+################################################################################################
+
+1. Run the Area lite for the nodes.
+2. Any GS mismatches needs to be address to scripting team or should be taken care from support end post Integration.
+3. Once GS checks completed please share the screen shoots in RSF and mention the GS audit passed for the node.
+
+############################################################
+##########  Area lite Process for clear GS Mismatch ###############################
+############################################################
+ 
+### Please run the Area lite GS checks once the integration is completed, if there are any discrepancies in the Area lite GS use the below mentioned link inorder to clear the GS mismatch.
+ 
+Please open the Qwest tool "https://opqwest.quadgen.com/dynamic_cmcli_conversion/" hit the conversion tools, select Area Lite conversion.
+ 
+Please add the input files as "Area lite GS log files " and take fresh kget all generate the scripts and follow the below mentioned process.
+ 
+Step 1: Run Area-lite GS checks on the node.
+ 
+Step 2: Use the output(Area-lite discrepancies) to generate the CMCLI commands script that are to be executed on the node.  
+ 
+Step 3: Run the commands on the node.
+ 
+Step 4: Please make sure we post the Area-lite discrepancies as well as the commands/scripts that were run on each node in the RSF.
+
+Step 5: Please perform Soft lock all the sectors on the node.
+ 
+A) Incase if emergency calls are present on the cells please use the QIC_Integration tool to "verify the Emergency calls" and select the option "7" to validate.
+B) If emergency calls are present please wait for a while and rerun the "Verify Emergency calls".
+C) Post validation if there are no emergency calls, please update the emergency softlock as False by using the below mentioned command.
+
+cmedit get xxLTE_SiteIdxx ENodeBFunction.(ENodeBFunctionid==1,checkEmergencySoftLock) -t
+cmedit set xxLTE_SiteIdxx ENodeBFunction.(ENodeBFunctionid==1) checkEmergencySoftLock=FALSE
+cmedit get xxLTE_SiteIdxx ENodeBFunction.(ENodeBFunctionid==1,checkEmergencySoftLock) -t
+
+D) Proceed to soft lock the sectors and once the sectors are Soft locked, Please update the emergency softlock as True by using the below commands.
+cmedit get xxLTE_SiteIdxx ENodeBFunction.(ENodeBFunctionid==1,checkEmergencySoftLock) -t
+cmedit set xxLTE_SiteIdxx ENodeBFunction.(ENodeBFunctionid==1) checkEmergencySoftLock=TRUE
+cmedit get xxLTE_SiteIdxx ENodeBFunction.(ENodeBFunctionid==1,checkEmergencySoftLock) -t
+
+Step 6: Once found that all cells are softlocked,take a CV and restart the node.
+
+Step 7: Once restart is performed and node is up, Proceed to perform unlock on all the cells and ensure there are no alarms on the cells/commercial sectors post implementation of scripts as part of GS mismatch alignment
+
+Step 8: Put the status of the cells as per the final status required on the site (Ex: Pre cell status as per pre and  Non commercials/Newly added in locked state)
+
+###############################################################################################################
+
+##########################
+- Save the Above Area lite executions logs with below naming for Source,target and Macro nodes.
+
+- xxSiteIDxx_Area_lite_Verification_logs_check_xxDatexx_Putty_Logs
+- xxSiteIDxx_Area_lite_Execution_logs_check_xxDatexx_ENM_Logs
+
+** Recorded CLI session and putty logs needs to be saved in Daily logs folder under Execution Logs folder ***
+
+##########################
+#####################
+Prechecks (Putty Commands) -  Please make sure all putty logs are getting saved in putty logs folder in local machine before executing the prechecks commands in putty session
+Prechecks (CLI Commands) -    Please make sure ENM session is recorded before executing the CLI commands as part of prechecks in ENM CLI.
+#####################
+
+################## Proceed with Speedtest and calltesting for rehome carrier's. #################### 
+
+follow 5G calltesting template for calltesting
+
+Once calltesting completed proceed with taking CV on Target,MMBB and LTE nodes.
+
+#### Target node ####
+
+amos xxTarget_SiteIdxx
+lt all
+st cell
+st sector
+st field
+st termpoint
+alt
+
+###########################################################################################################################################
+## Take a BackUp CV and FTP to your folder on OSS                                                                                        ##
+## Make sure to save the CV along with the logs in QWEST                                                                                 ##
+## Ensure Post Backup CV are taken for all Nodes (Co-Located and our node)                                                                ##
+###########################################################################################################################################
+cmedit get xxTarget_SiteIdxx BrmBackup.* -t
+
+cmedit action xxTarget_SiteIdxx  BrmBackupManager=1 createBackup.(name="BackUp_Post_Rehome_CV_xxTarget_SiteIdxx")
+
+cmedit get xxTarget_SiteIdxx BrmBackup.* -t
+
+****  Process to Download Backup CV  ****
+1: Run QIC_Integration command in putty in the node
+2: Type option 38 for CV Download from the Menu
+3: Provide the BrmBackup number of the CV that needs to be downloaded
+4: Tool will ask for the confirmation on the CV name that need to be download, Type Y if the CV name is correct
+5: Provide the ENM details and then tool will provide CLI command for execution.
+6: Execute the provide command in the ENM CLI and press Y key in the putty
+7: CV download will show successful, Please login to WINSCP on the respective ENM and download the CV from the path QIC/CVs in the home folder under respective attuid
+
+#################################
+Save the downloaded Post CV's in the folder with below naming 
+
+xxTarget_SiteIdxx_Post_Backup_xxDatexx_CVs
+
+** Downloaded CV of the node needs to be saved in Daily logs folder under CV folder ***
+
+##########################
+
+################# MMBB node #####################
+
+amos xxMacro_MMBB_SiteIdxx
+lt all
+s+
+alt
+st cell
+hget ^EUtranCell.DD|NbIotCell administrativeState|^state|cellbarred|operationalState|primaryplmnreserved|primaryPlmnReserved|sectorcarrier|additionalPlmnReservedList|cellReservedForOperator
+hget ^NRCell|syncsignal cellBarred|administrativeState|operationalState|^state|cellRange|cellState|nRSectorCarrier|cellReservedForOperator
+
+###########################################################################################################################################
+## Take a BackUp CV and FTP to your folder on OSS                                                                                        ##
+## Make sure to save the CV along with the logs in QWEST                                                                                 ##
+## Ensure Post Backup CV are taken for all Nodes (Co-Located and our node)                                                                ##
+###########################################################################################################################################
+cmedit get xxMacro_MMBB_SiteIdxx BrmBackup.* -t
+
+cmedit action xxMacro_MMBB_SiteIdxx  BrmBackupManager=1 createBackup.(name="BackUp_Post_Rehome_CV_xxMacro_MMBB_SiteIdxx")
+
+cmedit get xxMacro_MMBB_SiteIdxx BrmBackup.* -t
+
+****  Process to Download Backup CV  ****
+1: Run QIC_Integration command in putty in the node
+2: Type option 38 for CV Download from the Menu
+3: Provide the BrmBackup number of the CV that needs to be downloaded
+4: Tool will ask for the confirmation on the CV name that need to be download, Type Y if the CV name is correct
+5: Provide the ENM details and then tool will provide CLI command for execution.
+6: Execute the provide command in the ENM CLI and press Y key in the putty
+7: CV download will show successful, Please login to WINSCP on the respective ENM and download the CV from the path QIC/CVs in the home folder under respective attuid
+
+#################################
+Save the downloaded Post CV's in the folder with below naming 
+
+xxMacro_MMBB_SiteIdxx_Post_Backup_xxDatexx_CVs
+
+** Downloaded CV of the node needs to be saved in Daily logs folder under CV folder ***
+
+##########################
+
+################# LTE  node #####################
+
+amos xxLTE_SiteIdxx
+lt all
+s+
+alt
+st cell
+hget ^EUtranCell.DD|NbIotCell administrativeState|^state|cellbarred|operationalState|primaryplmnreserved|primaryPlmnReserved|sectorcarrier|additionalPlmnReservedList|cellReservedForOperator
+hget ^NRCell|syncsignal cellBarred|administrativeState|operationalState|^state|cellRange|cellState|nRSectorCarrier|cellReservedForOperator
+
+###########################################################################################################################################
+## Take a BackUp CV and FTP to your folder on OSS                                                                                        ##
+## Make sure to save the CV along with the logs in QWEST                                                                                 ##
+## Ensure Post Backup CV are taken for all Nodes (Co-Located and our node)                                                                ##
+###########################################################################################################################################
+cmedit get xxLTE_SiteIdxx BrmBackup.* -t
+
+cmedit action xxLTE_SiteIdxx  BrmBackupManager=1 createBackup.(name="BackUp_Post_Rehome_CV_xxLTE_SiteIdxx")
+
+cmedit get xxLTE_SiteIdxx BrmBackup.* -t
+
+****  Process to Download Backup CV  ****
+1: Run QIC_Integration command in putty in the node
+2: Type option 38 for CV Download from the Menu
+3: Provide the BrmBackup number of the CV that needs to be downloaded
+4: Tool will ask for the confirmation on the CV name that need to be download, Type Y if the CV name is correct
+5: Provide the ENM details and then tool will provide CLI command for execution.
+6: Execute the provide command in the ENM CLI and press Y key in the putty
+7: CV download will show successful, Please login to WINSCP on the respective ENM and download the CV from the path QIC/CVs in the home folder under respective attuid
+
+#################################
+Save the downloaded Post CV's in the folder with below naming 
+
+xxLTE_SiteIdxx_Post_Backup_xxDatexx_CVs
+
+** Downloaded CV of the node needs to be saved in Daily logs folder under CV folder ***
+
+##########################
+
+#####################
+###  Post Checks    ###
+#####################
+
+#####################
+Prechecks (Putty Commands) -  Please make sure all putty logs are getting saved in putty logs folder in local machine before executing the prechecks commands in putty session
+Prechecks (CLI Commands) -    Please make sure ENM session is recorded before executing the CLI commands as part of prechecks in ENM CLI.
+#####################
+
+Login to the Source CRAN, LTE/MMBB nodes  and Target CRAN node and execute the below precheck commands in Putty  and in ENM                     ########
+If any Cells are in disabled state,Any Service affecting alarm please reach out to leads before executing Prechecks and send Ongoing to PM's    ########
+########################################################################################################################################################
+amos xxTarget_SiteIdxx
+lt all
+s+
+
+##############################
+## Software Version check ##
+##############################
+cvcu
+
+##############################
+## Sample SW Verification   ##
+##############################
+
+===========================================================================================
+260505-17:29            BackupName                                      SwVersion
+===========================================================================================
+LastCreatedBackup:      Post_Final_Audit_05052026                       CXP2010174/2_R38D30
+LastRestoredBackup:
+-------------------------------------------------------------------------------------------
+Current SwVersion:      CXP2010174/2_R38D30 (25.Q4)
+BrmHouseKeeping:        ENABLED (max: 20 backups)
+BrmFailSafe:            IDLE
+RestoreEscalationList:  s[1] = Auto integration backup - SITE_CONFIG_COMPLETE
+===========================================================================================
+
+Note: 
+Please make sure Software Version is making on all LTE/MMBB nodes  and Target CRAN node.
+If you observed Software Version mismtach don't proceed please reachout leads.
+
+########################################
+## Putty Prechecks get commands ##
+########################################
+
+alt
+hget ^EUtranCell.DD cellBarred|sectorCarrierRef|primaryPlmnReserved|state|additionalPlmnReservedList
+hget ^EUtranCell.DD availabilityStatus|cellrange|administrativeState|operationalState|primaryPlmnReserved|^tac|^CellId|earfcndl|earfcnul|dlChannelBandwidth|physicalLayerCellId|physicalLayerCellIdGroup|physicalLayerSubCellId|rachRootSequence|transmissionmode$|freqband$|Cellrange
+hget ^NRCellDU nRCellDUId|administrativeState|^state|cellBarred|cellRange|cellReservedForOperator|nRSectorCarrierRef|operationalState|serviceState
+hget ^NRCellDU sectorCarrierRef|primaryPlmnReserved|nCGI|nCI|nRPCI|nRSectorCarrier|nRTAC|arfcn$|cellLocalId|pointAArfcnUlFdd|ssbDuration|ssbDurationAutoSelected|ssbFrequency|ssbOffset|ssbOffsetAutoSelected
+hget ^NRCellCU cellLocalId|nCI|nRTAC
+hget ^NRCellCU ueMCCellProfileRef|pmUeIntraFreqCellProfileRef|nrdcMnCellProfileRef|mcpcPSCellProfileRef|mcpcPCellProfileRef
+####### Ensure that all Profiles are Created #######
+hget ^NRCellCU smtcOffset|smtcDuration|serviceState|sNSSAIList|reservedBy|primaryPLMNId|pLMNIdList|nRTAC|nRFrequencyRef|nRCellCUId|nCI|cellState
+hget ^Sector state|configuredMaxTxPower|availableHwOutputPower|noof[rt]x|sectorFunctionRef|bSChannelBw.L|arfcn|txDirection
+hget NbIotCell cellid|freqBand|tac|NbIotCellType
+hget TermPointToENB administrativeState|Operationalstate
+hget TermPointToGNB administrativeState|Operationalstate
+hget TermPointToGnodeb administrativeState|Operationalstate
+hget ^FieldReplaceableUnit administrativeState|operationalState|productData
+hget ^NRSectorCarrier administrativeState|arfcnDL|arfcnUL|bSChannelBwDL|bSChannelBwUL|configuredMaxTxPower|noOfRxAntennas|noOfTxAntennas|operationalState|txDirection|txPowerState
+hget SectorEquipmentFunction administrativeState|availableHwOutputPower|operationalState
+hget SectorCarrier configuredMaxTxPower|noOfRxAntenna|noOfTxAntennas|operationalState|sectorFunctionRef
+hget riport administrativeState|operationalState
+hget RfBranch rfPortRef
+hget AntennaNearUnit rfPortRef
+hget RfPort rfPortId
+hget RiLink riPortRef1|riPortRef2|operationalState|transportType|fronthaulDeviceLineRate|availabilityStatusRiLinkId
+hget RfBranch dlAttenuation|ulAttenuation|ulTrafficDelay|dlTrafficDelay
+sdir
+
+###############
+##RET Checks##
+###############
+lst near
+hget AntennaNearUnit UniqueId|rfPortRef|State|iuantDeviceType|productNumber
+hget RetSubUnit State|userLabel|reservedby
+hget RetSubUnit iuantBaseStationId|iuantSectorId|electricalAntennaTilt|maxTilt|minTilt|iuantAntennaBearing
+hget TmaSubUnit tmaType|ulTrafficDelay|dlTrafficDelay|dlAttenuation|state|ulGain|reservedBy
+
+##############################
+## Termpoint checks##
+##############################
+
+st TermPointToENB
+st TermPointToGNB
+st TermPointToGNodeB
+st TermPointToMme
+st termpoint
+st TermPointToGNBCUCP
+st TermPointToAmf
+
+##############################
+## System Constants check ##
+##############################
+
+scg
+
+##############################
+## GPS Checks ##
+##############################
+
+gpsstatus | grep Product
+hget GnssInfo ReceiverStatus|noOf|tude
+st TimeSyncIO
+st RadioEquipmentClockReference
+
+################################################################
+## Sctp Profile checks ON MMBB/SOURCE CRAN AND TARGET CRAN NODE##
+#################################################################
+
+lpr Transport=1,Router=
+lpr Transport=1,SctpEndpoint=
+st sctp
+hget Transport=1,SctpEndpoint= localIpAddress|operationalState|reservedBy|sctpProfile
+get EndpointResource=1,LocalSctpEndpoint=
+get LocalIpEndpoint=1
+get EndpointResource=1,LocalSctpEndpoint=
+get . sctpEndpointRef
+hget SctpEndpoint localIpAddress|portNumber|sctpprofile
+hget addressipv6 address
+hget NextHop address
+get . upIpAddressRef
+get . encapsulation
+get . vlanId
+
+######################################################
+## 5G Check ON MMBB/SOURCE CRAN AND TARGET CRAN NODE##
+######################################################
+
+hget ^NRCell|syncsignal cellBarred|^state|cellRange|cellState|nRSectorCarrier|cellReservedForOperator
+hget ^NRCell|syncsignal sectorCarrierRef|primaryPlmnReserved|nCGI|nCI|nRPCI|nRSectorCarrier|nRTAC|arfcn$|cellLocalId
+
+##############################
+## Traffic check ##
+pget . pmendcsetupue|pmmacvoldldrb$
+##############################
+
+###############################################################
+## IDLe/IDLy checks ON MMBB/SOURCE CRAN AND TARGET CRAN NODE ##
+###############################################################
+
+st EthernetPort
+get . ^VlanPort
+get . caVlanPortRef
+get . eranVlanPortRef
+get . ExtGNBDUPartnerFunction
+
+####### Additional Check Commands #######
+cvls
+hget ExternalGUtranCell cellState
+hget GUtranFreqRelation gUtranSyncSignalFrequencyRef
+hget ExternalGUtranCell physicalLayerCellIdGroup|physicalLayerSubCellId
+
+##############################
+## PTP  Checks              ##
+##############################
+
+st ptp
+hget InterfaceIPv4 encapsulation                                                           
+hget Transport=1,Router=ptp,InterfaceIPv4=1,AddressIPv4=1 address                          
+hget Router=ptp,RouteTableIPv4Static=1,Dst=1,NextHop=1 address                             
+hget Transport=1,Ptp=1,BoundaryOrdinaryClock=1,PtpBcOcPort=1 associatedGrandmaster         
+ 
+lpr Router=ptp
+lpr Ptp=1
+lpr RadioEquipmentClockReference=ptp
+
+########################################################################
+check for recurring alarms (please make a note to run in a separate tab)
+########################################################################
+
+lgaesvmr
+lga
+lgo
+
+########################################
+## llog -1 Description ##
+########################################
+
+Check for any BB Crash by below command
+
+llog -l
+
+*********************************************************
+From the output, pls check for any instance of BBU restart or program crash and inform the leads immediately if we observe any restarts. 
+*********************************************************
+
+******************************************************************************************
+******************************************************************************************
+In the output generated, please check the following - 
+Under Program/Extra section : If you see any BB Restart with any Crash signature, Please inform the lead immediately. 
+
+For example,
+
+Extra:    BB Restart: Emca 1:DSP 10: "LPP_send to invalid virtual pidnpid: 0xf1" OR "BB Restart: Data Plane Processing Fault"
+Extra:    "BB Restart: Data Plane Processing Fault"
+Extra:    Recovery action initiated by BB via BCI, faultId: 0x301 (SwError), faultDescription: Emca 1:DSP 26: "LPP_send to invalid virtual pidnpid 
+          /local/lmr-lm-builds_gmake_small_fem111/workspace/LM_BUILD_lratBbomAasArmLm/bbmc/bbOmMeBl/bbOmMeRcsSwU/src/bbomme_svc_basic_handling_eh_rcs.cc:169
+******************************************************************************************
+
+###################################### Saving Postchecks logs ####################################################
+
+Putty session in which putty prechecks commands are executed needs to be saved with below standard naming convention
+
+xxSource_SiteIdxx_Postchecks_xxDatexx_Putty_Logs
+xxTarget_SiteIdxx_Postchecks_xxDatexx_Putty_Logs
+xxMacro_MMBB_SiteIdxx_Postchecks_xxDatexx_Putty_Logs
+xxLTE_SiteIDxx_Postchecks_xxDatexx_Putty_Logs
+
+
+CLI session in which CLI prechecks commands are executed needs to be saved with below standard naming convention
+
+xxSource_SiteIdxx_Postchecks_xxDatexx_ENM_Logs
+xxTarget_SiteIdxx_Postchecks_xxDatexx_ENM_Logs
+xxMacro_MMBB_SiteIdxx_Postchecks_xxDatexx_ENM_Logs
+xxLTE_SiteIDxx_Postchecks_xxDatexx_ENM_Logs
+
+** Recorded and Saved session of Postchecks logs from ENM and putty needs to be saved in Daily logs folder under Postchecks folder ***
+
+#################################################################################################################
+
+########################################
+##         KPI's  Description         ##
+########################################
+ 
+/////////////////////////////////////////////////////////////
+KPIs- Please copy the KPI output and save as Post_Integration_KPI_MMDDYYYY.txt file and send it in RSF email chain as part of Postchecks
+/////////////////////////////////////////////////////////////
+ 
+###########################
+##  LTE & 5G KPI Checks  ##
+###########################
+ 
+ue print -admitted
+pmr -m .5 -r 403
+pmr -c /home/shared/common/att_cust_kpi/ATT_VOLTE_CONFIG.txt  -f /home/shared/common/att_cust_kpi/ATT_VOLTE_FORMULA_ERBS.txt -m .5 -r 1-3
+pmxh -m 3 cell pmRrcConnEstabSucc$|pmRrcConnEstabAtt$
+pmx . pmendcsetupue|pmmacvoldldrb$ -m 1
+lgg 3d | grep -v BXP
+pget . pmendcsetupue|pmmacvoldldrb$
+ 
+###################################################################################################################################################
+## After implementing the below KPI Checks. Make sure to share the logs in RSF and save in NAS                                                   ##
+## If KPI checks is not configured run the below command in putty once ENM ID is entered                                                         ##
+##  bash /home/shared/rp7608/myscript/RUN_FIRST_KPI_TOOL.sh                                                                                      ##
+## [Attention: Make sure this command is executed once ENM ID is entered in putty and Do not run this command after logging in to the node]      ##
+###################################################################################################################################################
+
+run /home/shared/common/bk199e/QIC/BBU_scripts/qic_bbu_script.mos
+
+Login to the node and type the keyword 'kpi' once the KPI tool menu appears then check for the below mentioned counters.
+ 
+10, 11 and 13 for LTE KPI,  38 is 5G ENDC and 39 is 5G KPI checks
+ 
+kpi
+10
+11
+13
+38
+39
+q
+  
+############
+ROP KPIs
+############
+ 
+pmr -m 3 -r 203,204 | egrep 'Acc_InitialERabEstabSuccRate|Acc_InitialErabSetupSuccRate|Acc_InitialUEContextEstabSuccRate|Acc_RrcConnSetupSuccRate|Acc_S1SigEstabSuccRate|Av_CellAvail|Int_DlThroughput_kbps|Int_UlThroughput_kbps|Mob_HoExecSuccRate|Mob_HoPrepSuccRate'
+ 
+**********************************************************************************************************************************************
+**	Acc_InitialERabEstabSuccRate 		>99%																								**
+**	Acc_InitialErabSetupSuccRate		>99%																								**
+**	Acc_InitialUEContextEstabSuccRate	>99%																								**
+**	Acc_RrcConnSetupSuccRate			>99%																								**
+**	Acc_S1SigEstabSuccRate				>99%																								**
+**	Av_CellAvail						100		- Should not be Negative if the Cell is Unlocked/Enabled									**
+**	Int_DlThroughput_kbps				>10000 (however depends on carrier)																	**
+**	Int_UlThroughput_kbps				~3000																								**
+**	Mob_HoExecSuccRate					>98																									**
+**	Mob_HoPrepSuccRate					>98																									**
+**********************************************************************************************************************************************
+ 
+VoLTE
+########
+voltepmr -m 3.00 -r 1,2,3
+########
+ 
+**************************************************************
+**	VAcc_ErabAttAdded				# of VoLTE Attempts		**
+**	VAcc_ErabAttInit				# of VoLTE Attempts		**
+**	VAcc_ErabSuccRate				>97-98%					**
+**	VRet_AbnormalEnodebRelAct		(as low as possible)	**
+**	VRet_AbnormalMmeRelAct			(as low as possible)	**
+**	VRet_ErabRetainability_ATT		>97-98%					**
+**	VRet_ErabRetainability_Eric		>97-98%					**
+**************************************************************
+ 
+############
+RRC Attempts
+############
+ 
+pmxh EutranCellfdd pmRrcConnEstabAtt$|pmRrcConnEstabSucc$|pmErabRelAbnormalMme$ -m 3.00
+ 
+**************************************************************************************************************************************************************
+**pmRrcConnEstabAtt		To check if Sectors taking traffic	- Should be the same as pre or not decreasing with time											**														
+**pmRrcConnEstabSucc	To check if Sectors taking traffic	- Should be the same as pre or not decreasing with time	and comparable with pmRrcConnEstabAtt 	**															
+**pmErabRelAbnormalMme  To check if there are no MME drops	- Should be the same as pre or not increasing with time											**
+**************************************************************************************************************************************************************
+
+********************************************************************************************************************************************************
+
+###################################### Saving Post KPI logs ####################################################
+
+Putty session in which KPI prechecks commands are executed needs to be saved with below standard naming convention
+
+xxSource_SiteIdxx_Post_KPI_xxDatexx_Putty_Logs
+xxTarget_SiteIdxx_Post_KPI_xxDatexx_Putty_Logs
+xxMacro_MMBB_SiteIdxx_Post_KPI_xxDatexx_Putty_Logs
+xxLTE_SiteIDxx_Post_KPI_xxDatexx_Putty_Logs
+
+** Recorded and Saved session of KPI Postchecks logs from putty needs to be saved in Daily logs folder under KPI folder ***
+
+#################################################################################################################
+
+########################################################################################################################
+
+#############################################*** QWEST 360 Post checks *** #############################################
+####################### Complete the Postchecks for Co-located nodes if any and also for Our Node  #####################
+######### Post HC,Post Kgetalls,Post-MOM,SCG Files needs to be taken for Co-located nodes and also for Our Node ########
+QWEST 360 complete pre-post checks link                                                                         ########
+https://opqwest.quadgen.com:8012/qwest360                                                                       ########                                                                 
+												                                                                ########
+Azure Pre-post HC link                                                                                          ########
+https://qwestprod.quadgen.com/att-qwest-projects                                                                ########
+########################################################################################################################
+
+#################################
+Save the QWEST Prechecks logs in below format
+
+xxTarget_SiteIdxx_QWEST_postchecks_xxDatexx_Logs
+
+** Downloaded Postchecks QWEST logs needs to be saved in Daily logs folder under Postchecks folder ***
+
+#####################################################
+##########  QA report geneartion and  verification ##
+#####################################################
+
+If QA report generated along with post checks use the report and clear the discrepancies are verified proceed for complete Post checks.
+
+If not use below method to generate QA report.
+
+#####################################################
+########## Sample QA generation Process #############
+#####################################################
+
+Please open a New Tab and login to target, MMBB and LTE nodes 
+
+amosbatch xxTarget_SiteIdxx 'lt all;s+;kget all;q'
+
+cd xxxspecified pathxxxxxx
+ls
+zip ###kgetallname###.zip xxTarget_SiteIdxx.log xxMacro_MMBB_SiteIdxx.log xxLTE_SiteIdxx.log
+
+Using kget all generate the QA report
+
+#######   Use QWEST module to generate QA report provide the pre and postkgetall as input    #######
+
+Once QA discrepancies are verified proceed for complete Post checks
+
+############################################################
+Save the Generated QA template in the QA folder
+
+QA_Automation_Summary_xxTarget_SiteIdxx.xlsx
+ 
+############################################################
+
+###############################################################
+#####  Audit report generation and verify the input files #####
+###############################################################
+
+Audit report generated along with post checks,check if inputs are all good share in Qwest and mention same in RSF.
+
+################ Important step ##############
+
+Run CSI tool SCC checks with USID and compare cell's status as per pre on LTE and MMBB node.
+Cross check Target node moved cells are made commercials as per pre.
+Share cells status in RSF.
+
+Note: 
+Ask tech to logout from NFSD with Both Macro and HUB FA codes.
+
