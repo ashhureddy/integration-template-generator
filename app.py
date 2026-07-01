@@ -316,10 +316,17 @@ def extract_precheck_sectors(text):
 
 def classify_carriers(ciq_wb, mm_objs, precheck_text):
     """Returns a dict: added (per node), moved, deleted_sectors, deleted_nodes, retuned."""
-    result = {"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": [], "retuned": []}
+    result = {"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": [], "retuned": [], "node_band_sectors": {}}
 
     pre_pairs, pre_nodes = extract_precheck_sectors(precheck_text)
     pre_cells = {cell for (_, cell) in pre_pairs}
+
+    # per (node, band label) sector inventory — used to tell "whole band moved" from "partial move"
+    node_band_sectors = {}
+    for (node, cell) in pre_pairs:
+        label, sector = band_label(cell)
+        if label and sector:
+            node_band_sectors.setdefault((node, label), set()).add(sector)
 
     ciq_nodes = {str(r.get("Node to be built as", "")).strip() for r in mm_objs if r.get("Node to be built as")}
     if pre_nodes:
@@ -371,6 +378,7 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
         if added_here:
             result["added"][node] = added_here
 
+    result["node_band_sectors"] = node_band_sectors
     return result
 
 
@@ -394,11 +402,20 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
     for m in classification["moved"]:
         key = (m["from_node"], m["to_node"])
         moved_by_pair.setdefault(key, []).append(m["cell"])
+    node_band_sectors = classification.get("node_band_sectors", {})
     for (from_node, to_node), cells in moved_by_pair.items():
         labels = dedupe_labels(cells)
         label_str = labels[0] if len(labels) == 1 else f"[{'/'.join(labels)}]"
-        sector_names = sorted({band_label(c)[1] for c in cells if band_label(c)[1]}, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
-        sectors_str = f" {', '.join(sector_names)}" if sector_names else ""
+        per_label_moved = {}
+        for c in cells:
+            label, sector = band_label(c)
+            if label and sector:
+                per_label_moved.setdefault(label, set()).add(sector)
+        is_whole = bool(per_label_moved) and all(
+            per_label_moved[l] == node_band_sectors.get((from_node, l), set()) for l in per_label_moved
+        )
+        sector_names = sorted({s for sset in per_label_moved.values() for s in sset}, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
+        sectors_str = "" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
         lines.append(f"Moved Sectors:\t{label_str}{sectors_str}\tFrom:\t{from_node}\tTo:\t{to_node}")
 
     for node in classification["deleted_nodes"]:
@@ -415,6 +432,27 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
         lines.append(f"DSS Activation:\t{' & '.join(dss_outputs_meta)}")
 
     return lines
+
+
+def scope_lines_to_table(scope_lines):
+    """Parse the tab-separated Scope of Work lines into a clean table: Category | Details | From | To.
+    Plain monospace text can't align cleanly since 'Integration:' and '6610 Controller Integration:'
+    are very different lengths — a real table sidesteps that entirely."""
+    rows = []
+    for line in scope_lines:
+        parts = line.split("\t")
+        category = parts[0].rstrip(":")
+        if "From:" in parts:
+            fi = parts.index("From:")
+            details = " ".join(p for p in parts[1:fi] if p)
+            from_val = parts[fi + 1] if fi + 1 < len(parts) else ""
+            ti = parts.index("To:") if "To:" in parts else None
+            to_val = parts[ti + 1] if ti is not None and ti + 1 < len(parts) else ""
+            rows.append({"Category": category, "Details": details, "From": from_val, "To": to_val})
+        else:
+            details = " — ".join(p for p in parts[1:] if p)
+            rows.append({"Category": category, "Details": details, "From": "", "To": ""})
+    return rows
 
 
 # ============================================================
@@ -1256,8 +1294,7 @@ if run:
 
     if scope_lines:
         st.subheader("📋 Scope of work summary")
-        readable_lines = [line.replace("\t", "    ") for line in scope_lines]
-        st.code("\n".join(readable_lines), language=None)
+        st.dataframe(pd.DataFrame(scope_lines_to_table(scope_lines)), use_container_width=True, hide_index=True)
         with st.expander("📋 Copy tab-separated version for Excel/Notepad"):
             st.text_area("Tab-separated (select all, copy, paste into Excel — lands in columns)",
                           "\n".join(scope_lines), height=150, key="sow_raw")
