@@ -1,0 +1,432 @@
+The following conditions need to be satisfied to consider a carrier as a DSS candidate
+1. If LTE Freq(Fdownlink & Fuplink) and NR Frequency(NR Fdownlink & NR Fuplink) are same.
+2. If LTE configuredOutputPower/BW(>=10MHz) and NR configuredOutputPower/BW(>=10MHz) is the same.
+3. LTE & NR cells need to be on the same radio/Sectorequipmentfunction.
+4. LTE carrier should not be dlonly.
+5. Should not have NbIotCell tied to the LTE Cells identified for DSS.(DSS can’t be activated unless the references to the LTE cells are removed from the NbIotcell)
+
+
+
+xxMMBB_Primary_Node_Namexx         ---->  Replace with the Mixed Mode Primary Node Name (Node name which we used to Login)
+xxLTE_Site_IDxx                    ---->  Replace with the LTE Node Site ID
+xx5G_NR_Node_Namexx                ---->  Replace with the 5G NR Node Site ID/5G NR Cell Name 
+xxLTE_eNBIDxx                      ---->  Replace with the LTE Node eNBID 
+xx5G_NR_gNBIDxx                    ---->  Replace with the 5G NR Node gNBID 
+xxDatexx                           ---->  Replace the date with the MMDDYYYY format
+
+
+
+LTE_cellidA                      ---->  Replace with LTE Alpha sector CellID value
+LTE_cellidB                      ---->  Replace with LTE Beta sector CellID value
+LTE_cellidC                      ---->  Replace with LTE Gamma sector CellID value
+
+xx5G_celllocalidAxx	               ---->  Replace with 5G NR Alpha sector CellID value
+xx5G_celllocalidBxx	               ---->  Replace with 5G NR Beta sector CellID value
+xx5G_celllocalidCxx	               ---->  Replace with 5G NR Gamma sector CellID value
+
+xx5G_ssbfrequencyAxx	           ---->  Replace with 5G  ssbfrequency value
+
+
+xx5G_NRSectorCarrier_Alphaxx  ---->   Replace with the 5G Alpha NRSectorCarrier Name
+xx5G_NRSectorCarrier_Betaxx   ---->   Replace with the 5G Beta NRSectorCarrier Name
+xx5G_NRSectorCarrier_Gammaxx  ---->   Replace with the 5G Gamma NRSectorCarrier Name
+
+
+xxnoOfRxAntennas_Valuexx          ---->  Replace with noOfRxAntennas values for the cells that are on DSS
+xxnoOfTxAntennas_Valuexx          ---->  Replace with noOfTxAntennas values for the cells that are on DSS
+
+xxLTE_SectorCarrier_No_Alphaxx    --->   Replace with the Alpha SectorCarrier Number/SectorCarrier Name
+xxLTE_SectorCarrier_No_Betaxx     --->   Replace with the Beta SectorCarrier Number/SectorCarrier Name
+xxLTE_SectorCarrier_No_Gammaxx    --->   Replace with the Gamma SectorCarrier Number/SectorCarrier Name
+
+xxLTE_Site_IDxx_XA_1    --> Replace with LTE Alpha sector name, [AWS/PCS/850]
+xxLTE_Site_IDxx_XB_1    --> Replace with LTE Beta sector name, [AWS/PCS/850]
+xxLTE_Site_IDxx_XC_1    --> Replace with LTE Gamma sector name, [AWS/PCS/850]
+
+xx5G_NR_Node_Namexx_N00XA_1   -->  Replace with 5G Alpha sector name, [AWS/PCS/850]
+xx5G_NR_Node_Namexx_N00XB_1   -->  Replace with 5G Beta sector name, [AWS/PCS/850]
+xx5G_NR_Node_Namexx_N00XC_1   -->  Replace with 5G Gamma sector name, [AWS/PCS/850]
+
+N00X  -->  Replace with 5G  band name. 
+
+essScPairId_A -->  Autofilled by tool.
+essScPairId_B -->  Autofilled by tool.
+essScPairId_C -->  Autofilled by tool.
+
+essScLocalId_A -->  Autofilled by tool.
+essScLocalId_B -->  Autofilled by tool.
+essScLocalId_C -->  Autofilled by tool.
+
+
+
+#####################################
+## Start of DSS Activation Process ##
+#####################################
+
+cmedit action xxMMBB_Primary_Node_Namexx BrmBackupManager=1 createBackup.(name="Pre_DSS_ACTIVATION_xxDatexx")
+cmedit get xxMMBB_Primary_Node_Namexx BrmBackup.* -t
+
+
+Check which sectors are DSS pairs according to the frequency by running the following script
+The script will give the DSS pairs to cross verify it with the CIQ
+DSS PAIRS WILL BE HIGHLIGHTED IN YELLOW ONCE THE SCRIPT IS RUN	
+
+
+
+run /home/shared/ss0030/DSS_CHECK.mos
+
+#### VERIFY IF THE RADIOS AND SECTOREQUIPMENTFUNCTION ARE THE SAME ####
+#### MOPDIFY THE BELOW COMMAND AS PER THE DSS PAIRS TO CHECK IF THEY ARE ON THE SAME RADIOS/SEFs ####
+lk ^EutrancellFdd=.*_9A_1
+lk ^NRCellDU=.*_N00XA_1
+
+lk ^EutrancellFdd=.*_9B_1
+lk ^NRCellDU=.*_N00XB_1
+
+lk ^EutrancellFdd=.*_9C_1
+lk ^NRCellDU=.*_N00XC_1
+
+
+
+#### VERIFY IF THE DSS CELLS ARE NOT DL ONLY AND CHECK BANDWIDTH ####
+#### CHECK IF THE configuredMaxTxPower FOR THE DSS PAIRS(SHARING SAME SECTOREQUIPMENTFUNCTION) IS THE SAME ####
+
+cmedit get xxMMBB_Primary_Node_Namexx EutrancellFdd.(EutrancellFddId,dlChannelBandwidth,isDlOnly) -t
+cmedit get xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId,bSChannelBwDL) -t
+cmedit get xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId,configuredMaxTxPower,sectorFunctionRef) -t
+cmedit get xxMMBB_Primary_Node_Namexx NRSectorCarrier.configuredMaxTxPower -t
+
+
+#### CHECK IF THERE ARE IOT CELLS USING ANY OF THE DSS PAIRS AS REFERENCE ####
+#### ESCALATE TO THE TEAM LEAD TO CHECK IF THE REFs CAN BE REMOVED UPON CONFIRMATION FROM THE MARKET ####
+
+cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.(NbIotCellId,eutranCellRef) -t
+
+    ### CONTINUE ONLY AFTER CONFIRMATION FROM MARKET IS RECEIVED TO REMOVE THE REFERENCES FROM NBIOT CELLS ####
+    ### LOCK IoT CELLS
+	### cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.(NbIotCellId,administrativestate,operationalstate) -t
+	### cmedit set xxMMBB_Primary_Node_Namexx NbIotCell.NbIotCellId==* administrativestate:LOCKED
+	### cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.(NbIotCellId,administrativestate,operationalstate) -t
+	
+    ### SET CELLS TO BARRED/RESERVED STATE
+	### cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.(NbIotCellId,cellBarred,plmnReservedList) -t
+	### cmedit set xxMMBB_Primary_Node_Namexx NbIotCell.NbIotCellId==* cellBarred:BARRED
+	### cmedit set xxMMBB_Primary_Node_Namexx NbIotCell.NbIotCellId==* plmnReservedList:true
+	### cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.(NbIotCellId,cellBarred,plmnReservedList) -t
+	
+    ### REMOVE REFERENCE FOR LTE CELLS
+	### cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.(NbIotCellId,eutranCellRef) -t
+	### cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.NbIotCellId==* eutranCellRef:<empty>
+	### cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.(NbIotCellId,eutranCellRef) -t
+	
+	### cmedit action xxMMBB_Primary_Node_Namexx BrmBackupManager=1 createBackup.(name="Pre_ENM_Migration_xxDatexx")
+	### cmedit get xxMMBB_Primary_Node_Namexx BrmBackup.* -t
+	
+#### Check if the 5G Cells are enabled after soft locking the LTE cells
+#### The Sample commands are added for the PCS Carrier. If the DSS activation sectors are AWS or  850 then change the commands accordingly before start with the DSS activation.
+#### If DSS cell is AWS then replace *N002* and *_9* with *N066* and *_2*
+#### If DSS cell is 850 then replace *N002* and *_9* with *N005* and *_8*
+
+cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId,administrativestate,operationalstate) -t
+cmedit set xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId==*N002*) administrativestate:UNLOCKED
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrier==*N002*) administrativestate:UNLOCKED
+cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId,administrativestate,operationalstate) -t
+
+
+#### Check termpointtognb towards the 5G node is enabled
+#### If the ExternalGNodeBFunction & TermPointToGNB is not built with the 5G Nodename, please delete and recreate the MO using 5G Nodename
+#### Example - ENodeBFunction=1,GUtraNetwork=1,ExternalGNodeBFunction=DXFN015563,TermPointToGNB=DXFN015563
+																	  ^^^^^^^^^^				^^^^^^^^^^
+
+
+cmedit get xxMMBB_Primary_Node_Namexx termpointtognb.(termpointtognbId==xx5G_NR_Node_Namexx,administrativestate,operationalState) -t
+cmedit set xxMMBB_Primary_Node_Namexx termpointtognb.termpointtognbId==xx5G_NR_Node_Namexx administrativestate:UNLOCKED -t
+cmedit get xxMMBB_Primary_Node_Namexx termpointtognb.(termpointtognbId==xx5G_NR_Node_Namexx,administrativestate,operationalState) -t
+
+#### LOCK DOWN THE 5G NRCELLS and NRSectorCarrier ONCE THEY ARE VERIFIED TO BE ENABLED ####
+cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId==*N002*, administrativestate,operationalState) -t
+cmedit set xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId==*N002*) administrativestate:LOCKED
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(nRSectorCarrierId==*N002*) administrativestate:LOCKED
+cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId==*N002*, administrativestate,operationalState) -t
+cmedit get xxMMBB_Primary_Node_Namexx NRSectorCarrier.(nRSectorCarrierId==*N002*, administrativestate,operationalState) -t
+
+
+#### SOFTLOCK THE EUtranCellFDDs
+cmedit get xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDDId==*_9*,administrativeState , operationalState) -t
+cmedit set xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDD==*_9*) administrativestate:SHUTTINGDOWN
+cmedit get xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDDId==*_9*,administrativeState , operationalState) -t
+
+#######################################################################################
+###########							ACTIVATE DSS FEATURES					###########
+#######################################################################################
+
+cmedit get xxMMBB_Primary_Node_Namexx CapacityState.CapacityStateId==CXC4012411;FeatureState.FeatureStateId==CXC4012543;FeatureState.FeatureStateId==CXC4012537;FeatureState.FeatureStateId==CXC4012507;FeatureState.FeatureStateId==CXC4012015;FeatureState.FeatureStateId==CXC4011018;FeatureState.FeatureStateId==CXC4011823 --output priColl collName2
+cmedit get collName2 CapacityState.(capacityStateId,description,featureState,licenseState,serviceState);FeatureState.(description,featureState,featureStateId,licenseState,serviceState) -t
+
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4012537) featureState:ACTIVATED      --force
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4011823) featureState:ACTIVATED      --force
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4011018) featureState:ACTIVATED      --force
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4012015) featureState:ACTIVATED      --force
+cmedit set xxMMBB_Primary_Node_Namexx capacityState.(FeatureStateId==CXC4012411) featureState:ACTIVATED    --force
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4011802) featureState:ACTIVATED      --force
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4012543) featureState:ACTIVATED      --force
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4012507) featureState:ACTIVATED      --force
+
+
+cmedit get xxMMBB_Primary_Node_Namexx CapacityState.CapacityStateId==CXC4012411;FeatureState.FeatureStateId==CXC4012543;FeatureState.FeatureStateId==CXC4012537;FeatureState.FeatureStateId==CXC4012507;FeatureState.FeatureStateId==CXC4012015;FeatureState.FeatureStateId==CXC4011018;FeatureState.FeatureStateId==CXC4011823 --output priColl collName2
+cmedit get collName2 CapacityState.(capacityStateId,description,featureState,licenseState,serviceState);FeatureState.(description,featureState,featureStateId,licenseState,serviceState) -t
+collection delete collName2
+
+
+
+#######################################################################################
+#######################################################################################
+IMPLEMENT THE DSS BASELINE SCRIPT MANUALLY
+
+ATT_DSS_21Q4_REV21.35.mos
+
+BASELINE SCRIPT IS BELOW. If you are activating the DSS on two carriers then create the copy of the same baslines for the 2nd carrier as well accordingly.
+
+
+cmedit set xxMMBB_Primary_Node_Namexx EUtranCellFDD=xxLTE_Site_IDxx_X* crsGain:0,dlInterferenceManagementActive:false,prescheduling:false,prsConfigIndex:11,prsMutingPatternLen:4
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XA_1,CellSleepFunction=1 -t
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XB_1,CellSleepFunction=1 -t
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XC_1,CellSleepFunction=1 -t
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XA_1,CellSleepFunction=1 capCellDlPrbSleepThreshold:10,capCellRrcConnSleepThreshold:5,capCellSleepMonitorDurTimer:15,covCellDlPrbWakeUpThreshold:25,covCellRrcConnWakeUpThreshold:30,covCellWakeUpMonitorDurTimer:15,sleepEndTime:"05:00",sleepMode:DEACTIVATED,sleepStartTime:"02:00" --force
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XB_1,CellSleepFunction=1 capCellDlPrbSleepThreshold:10,capCellRrcConnSleepThreshold:5,capCellSleepMonitorDurTimer:15,covCellDlPrbWakeUpThreshold:25,covCellRrcConnWakeUpThreshold:30,covCellWakeUpMonitorDurTimer:15,sleepEndTime:"05:00",sleepMode:DEACTIVATED,sleepStartTime:"02:00" --force
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XC_1,CellSleepFunction=1 capCellDlPrbSleepThreshold:10,capCellRrcConnSleepThreshold:5,capCellSleepMonitorDurTimer:15,covCellDlPrbWakeUpThreshold:25,covCellRrcConnWakeUpThreshold:30,covCellWakeUpMonitorDurTimer:15,sleepEndTime:"05:00",sleepMode:DEACTIVATED,sleepStartTime:"02:00" --force
+ 
+ 
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XA_1,MimoSleepFunction=1 -t
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XB_1,MimoSleepFunction=1 -t
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XC_1,MimoSleepFunction=1 -t
+
+ 
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XA_1,MimoSleepFunction=1 sleepEndTime:"05:00",sleepMode:OFF,sleepStartTime:"02:00",switchDownMonitorDurTimer:30,switchDownPrbThreshold:10,switchDownRrcConnThreshold:5,switchUpMonitorDurTimer:5,switchUpPrbThreshold:30,switchUpRrcConnThreshold:50
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XB_1,MimoSleepFunction=1 sleepEndTime:"05:00",sleepMode:OFF,sleepStartTime:"02:00",switchDownMonitorDurTimer:30,switchDownPrbThreshold:10,switchDownRrcConnThreshold:5,switchUpMonitorDurTimer:5,switchUpPrbThreshold:30,switchUpRrcConnThreshold:50
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XC_1,MimoSleepFunction=1 sleepEndTime:"05:00",sleepMode:OFF,sleepStartTime:"02:00",switchDownMonitorDurTimer:30,switchDownPrbThreshold:10,switchDownRrcConnThreshold:5,switchUpMonitorDurTimer:5,switchUpPrbThreshold:30,switchUpRrcConnThreshold:50
+
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4011808 featureState:DEACTIVATED      --force
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4012507 featureState:ACTIVATED        --force
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4012543 featureState:ACTIVATED        --force
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4012581 featureState:ACTIVATED        --force
+cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4012583 featureState:ACTIVATED        --force
+
+
+////cmedit set xxMMBB_Primary_Node_Namexx ENodeBFunction=1,NbIotCell=xxNBIOTCellxx raiEnabled true
+
+////####################
+////# ESS     : FALSE  #
+////# non_ESS : TRUE   #
+////####################
+
+
+*****************5G*****************************************************
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XA_1 siWindowLength:20,csiRsPeriodicity:20,pdschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER",puschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XB_1 siWindowLength:20,csiRsPeriodicity:20,pdschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER",puschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XC_1 siWindowLength:20,csiRsPeriodicity:20,pdschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER",puschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER"
+
+//////////////////////////////////////////
+/// This needs to be cmedit set xxMMBB_Primary_Node_Namexx for 2X2 config///
+//////////////////////////////////////////
+cmedit set xxMMBB_Primary_Node_Namexx NRCellDU=xx5G_NR_Node_Namexx_N00XA_1 csiRsConfig2P:{aRestriction=<empty>,csiRsControl2Ports=0},csiRsConfig8P={csiRsControl8Ports=0}
+cmedit set xxMMBB_Primary_Node_Namexx NRCellDU=xx5G_NR_Node_Namexx_N00XB_1 csiRsConfig2P:{aRestriction=<empty>,csiRsControl2Ports=0},csiRsConfig8P={csiRsControl8Ports=0}
+cmedit set xxMMBB_Primary_Node_Namexx NRCellDU=xx5G_NR_Node_Namexx_N00XC_1 csiRsConfig2P:{aRestriction=<empty>,csiRsControl2Ports=0},csiRsConfig8P={csiRsControl8Ports=0}
+
+
+#################################
+##       End of Baselines      ##
+#################################
+
+#######################################################################################
+#######################################################################################
+
+#############################################################################################################
+###########	SET essScPairId|essScLocalId ON SectorCarrier & NRSectorCarrier MOs	FOR THE DSS PAIRS ###########
+#############################################################################################################
+
+cmedit get xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId,essScLocalId,essScPairId) -t
+cmedit get xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId,essScLocalId,essScPairId) -t
+cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId,nRSectorCarrierRef) -t
+cmedit get xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDDId,sectorCarrierRef) -t
+cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId,ssboffset,ssbduration,) -t
+
+
+#### Update essScPairId & essScLocalId
+
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==*N00XA_1) essScPairId:essScPairId_A,essScLocalId:essScLocalId_A
+cmedit set xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId==xxLTE_SectorCarrier_No_Alphaxx) essScPairId:essScPairId_A,essScLocalId:essScLocalId_A
+
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==*N00XB_1) essScPairId:essScPairId_B,essScLocalId:essScLocalId_B
+cmedit set xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId==xxLTE_SectorCarrier_No_Betaxx) essScPairId:essScPairId_B,essScLocalId:essScLocalId_B
+
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==*N00XC_1) essScPairId:essScPairId_C,essScLocalId:essScLocalId_C
+cmedit set xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId==xxLTE_SectorCarrier_No_Gammaxx) essScPairId:essScPairId_C,essScLocalId:essScLocalId_C
+
+
+
+#### Verify if all the essScLocalId/essScPairId are set as per the values shown above
+
+cmedit get xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId,essScLocalId,essScPairId) -t
+cmedit get xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId,essScLocalId,essScPairId) -t
+cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId,nRSectorCarrierRef) -t
+cmedit get xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDDId,sectorCarrierRef) -t
+cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId,ssboffset,ssbduration,) -t
+
+
+cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.NRCellDUId==xxMMBB_Primary_Node_Namexx_N00X*,DlOuterLoop.DlOuterLoopId==1
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XA_1,DlOuterLoop=1
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XB_1,DlOuterLoop=1
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XC_1,DlOuterLoop=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XA_1,DlOuterLoop=1 dualOuterLoopEnabled : true
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XB_1,DlOuterLoop=1 dualOuterLoopEnabled : true
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XC_1,DlOuterLoop=1 dualOuterLoopEnabled : true
+
+
+##################################### IMPORTANT ###############################################################################################
+#### Adding rfBranchRxRef and rfBranchTxRef for NRSectorCarrier that are in DSS ####
+#### Note: Do not Remove rfBranchRxRef and rfBranchTxRef for LTE SectorCarrier ####
+
+Note: Please add the respective RfBranch ID in the below commands before execution
+##################################### ###########################################################################################################
+
+hget SectorCarrier=|SectorEquipmentFunction branch
+
+cmedit get xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId,rfBranchRxRef,rfBranchTxRef) -t
+cmedit get xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId,rfBranchRxRef,rfBranchTxRef) -t
+
+# Execute if AWS sectors are a part of the DSS pairs
+
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier=xx5G_NRSectorCarrier_Alphaxx rfBranchRxRef:["SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=1,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=1,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=1,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=1,RfBranch=xx"],rfBranchTxRef:["SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=1,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=1,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=1,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=1,RfBranch=xx"],noOfRxAntennas:xxnoOfRxAntennas_Valuexx,noOfTxAntennas:xxnoOfTxAntennas_Valuexx  --force 
+
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier=xx5G_NRSectorCarrier_Betaxx  rfBranchRxRef:["SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=2,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=2,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=2,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=2,RfBranch=xx"],rfBranchTxRef:["SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=2,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=2,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=2,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=2,RfBranch=xx"],noOfRxAntennas:xxnoOfRxAntennas_Valuexx,noOfTxAntennas:xxnoOfTxAntennas_Valuexx  --force
+
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier=xx5G_NRSectorCarrier_Gammaxx rfBranchRxRef:["SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=3,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=3,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=3,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=3,RfBranch=xx"],rfBranchTxRef:["SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=3,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=3,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=3,RfBranch=xx","SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,Equipment=1,AntennaUnitGroup=3,RfBranch=xx"],noOfRxAntennas:xxnoOfRxAntennas_Valuexx,noOfTxAntennas:xxnoOfTxAntennas_Valuexx  --force
+
+
+cmedit get xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId,rfBranchRxRef,rfBranchTxRef) -t
+cmedit get xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId,rfBranchRxRef,rfBranchTxRef) -t
+
+#### ENSURE ExternalGutrancells are created with the following format 310410-000000gNbID-CellID
+#### If not delete and recreate it with the correct format using LTE-NR cellrelation script
+
+cmedit action xxMMBB_Primary_Node_Namexx BrmBackupManager=1 createBackup.(name="Post_DSS_essSc_xxDatexx")
+cmedit get xxMMBB_Primary_Node_Namexx BrmBackup.* -t
+
+
+cmedit action xxMMBB_Primary_Node_Namexx FieldReplaceableUnit=1 restartUnit.(restartrank=RESTART_COLD,restartreason=PLANNED_RECONFIGURATION) --force
+
+cmedit get xxMMBB_Primary_Node_Namexx BrmBackup.* -t
+
+### Run the below two commands in the Putty CLI for checking the ExternalENodeBFunction MO format. Once the MO format is identified change the ExternalENodeBFunction=auto310_410_3_xxLTE_eNBIDxx MO accordingly.
+
+get ^enodebfunction enbid > $LTE_enodebID
+get ExternalENodeBFunction=.*$LTE_enodebID externalENodeBFunctionId > $get_ExternalENodeBFunction
+
+###############################################################################################################################################################################################################################################################################################################
+Scenario: when DSS activation is carried for the cells that are in disabled state and also if termpointtognb is disabled,auto created GNBCUCPFunction=1,EUtraNetwork=1,ExternalENodeBFunction=auto310_410_3_xxLTE_eNBIDxx MO will not be created onsite,which will cause error while creating ExternalEUtranCell MO
+
+Execute the below command on the respective node by changing the enbID and also the MMBB_Primary_Node_Name to create GNBCUCPFunction=1,EUtraNetwork=1,ExternalENodeBFunction=auto310_410_3_xxLTE_eNBIDxx function
+
+Note: If the termpointtognb is enabled and  MO is already present ignore the below command and proceed as normally
+
+Command:
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,EUtraNetwork=1,ExternalENodeBFunction=auto310_410_3_xxLTE_eNBIDxx externalENodeBFunctionId=auto310_410_3_xxLTE_eNBIDxx,eNodeBId=xxLTE_eNBIDxx,pLMNId={mcc=310,mnc=410}
+
+###############################################################################################################################################################################################################################################################################################################
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,EUtraNetwork=1,ExternalENodeBFunction=auto310_410_3_xxLTE_eNBIDxx,ExternalEUtranCell=xxLTE_Site_IDxx_XA_1 ExternalEUtranCellId=xxLTE_Site_IDxx_XA_1,cellLocalId=LTE_cellidA
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,EUtraNetwork=1,ExternalENodeBFunction=auto310_410_3_xxLTE_eNBIDxx,ExternalEUtranCell=xxLTE_Site_IDxx_XB_1 ExternalEUtranCellId=xxLTE_Site_IDxx_XB_1,cellLocalId=LTE_cellidB
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,EUtraNetwork=1,ExternalENodeBFunction=auto310_410_3_xxLTE_eNBIDxx,ExternalEUtranCell=xxLTE_Site_IDxx_XC_1 ExternalEUtranCellId=xxLTE_Site_IDxx_XC_1,cellLocalId=LTE_cellidC
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,NRCellCU=xx5G_NR_Node_Namexx_N00XA_1,EUtranCellRelation=xxLTE_Site_IDxx_XA_1 EUtranCellRelationId=xxLTE_Site_IDxx_XA_1,neighborCellRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,EUtraNetwork=1,ExternalENodeBFunction=auto310_410_3_xxLTE_eNBIDxx,ExternalEUtranCell=xxLTE_Site_IDxx_XA_1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,NRCellCU=xx5G_NR_Node_Namexx_N00XA_1,EUtranCellRelation=xxLTE_Site_IDxx_XA_1 essEnabled:true,isRemoveAllowed:false
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,NRCellCU=xx5G_NR_Node_Namexx_N00XB_1,EUtranCellRelation=xxLTE_Site_IDxx_XB_1 EUtranCellRelationId=xxLTE_Site_IDxx_XB_1,neighborCellRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,EUtraNetwork=1,ExternalENodeBFunction=auto310_410_3_xxLTE_eNBIDxx,ExternalEUtranCell=xxLTE_Site_IDxx_XB_1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,NRCellCU=xx5G_NR_Node_Namexx_N00XB_1,EUtranCellRelation=xxLTE_Site_IDxx_XB_1 essEnabled:true,isRemoveAllowed:false
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,NRCellCU=xx5G_NR_Node_Namexx_N00XC_1,EUtranCellRelation=xxLTE_Site_IDxx_XC_1 EUtranCellRelationId=xxLTE_Site_IDxx_XC_1,neighborCellRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,EUtraNetwork=1,ExternalENodeBFunction=auto310_410_3_xxLTE_eNBIDxx,ExternalEUtranCell=xxLTE_Site_IDxx_XC_1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBCUCPFunction=1,NRCellCU=xx5G_NR_Node_Namexx_N00XC_1,EUtranCellRelation=xxLTE_Site_IDxx_XC_1 essEnabled:true,isRemoveAllowed:false
+
+
+/// SpectrumSharingFunction
+
+cmedit create  SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,SpectrumSharingFunction=1 SpectrumSharingFunctionId=1 
+
+
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XA_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=310410-000000xx5G_NR_gNBIDxx-xx5G_celllocalidAxx
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XB_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=310410-000000xx5G_NR_gNBIDxx-xx5G_celllocalidBxx
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XC_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=310410-000000xx5G_NR_gNBIDxx-xx5G_celllocalidCxx
+
+
+cmedit delete SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XA_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=310410-000000xx5G_NR_gNBIDxx-xx5G_celllocalidAxx
+cmedit delete SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XB_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=310410-000000xx5G_NR_gNBIDxx-xx5G_celllocalidBxx
+cmedit delete SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XC_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=310410-000000xx5G_NR_gNBIDxx-xx5G_celllocalidCxx
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XA_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=xx5G_NR_Node_Namexx_N00XA_1 gUtranCellRelationId : xx5G_NR_Node_Namexx_N00XA_1, neighborCellRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,GUtraNetwork=1,ExternalGNodeBFunction=xx5G_NR_Node_Namexx,ExternalGUtranCell=310410-000000xx5G_NR_gNBIDxx-xx5G_celllocalidAxx",isRemoveAllowed:false,essEnabled:true
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XB_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=xx5G_NR_Node_Namexx_N00XB_1 gUtranCellRelationId : xx5G_NR_Node_Namexx_N00XB_1, neighborCellRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,GUtraNetwork=1,ExternalGNodeBFunction=xx5G_NR_Node_Namexx,ExternalGUtranCell=310410-000000xx5G_NR_gNBIDxx-xx5G_celllocalidBxx",isRemoveAllowed:false,essEnabled:true
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XC_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=xx5G_NR_Node_Namexx_N00XC_1 gUtranCellRelationId : xx5G_NR_Node_Namexx_N00XC_1, neighborCellRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,GUtraNetwork=1,ExternalGNodeBFunction=xx5G_NR_Node_Namexx,ExternalGUtranCell=310410-000000xx5G_NR_gNBIDxx-xx5G_celllocalidCxx",isRemoveAllowed:false,essEnabled:true
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,SpectrumSharingFunction=1,SharingGroup='xxLTE_Site_IDxx_XA_1:xx5G_NR_Node_Namexx_N00XA_1' sharingGroupId:"xxLTE_Site_IDxx_XA_1:xx5G_NR_Node_Namexx_N00XA_1",eUtranCellRef:"SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XA_1",gUtranCellRelationRef:"SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XA_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=xx5G_NR_Node_Namexx_N00XA_1"
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,SpectrumSharingFunction=1,SharingGroup='xxLTE_Site_IDxx_XB_1:xx5G_NR_Node_Namexx_N00XB_1' sharingGroupId:"xxLTE_Site_IDxx_XB_1:xx5G_NR_Node_NamexxN00XB_1",eUtranCellRef:"SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XB_1",gUtranCellRelationRef:"SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XB_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=xx5G_NR_Node_Namexx_N00XB_1"
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,SpectrumSharingFunction=1,SharingGroup='xxLTE_Site_IDxx_XC_1:xx5G_NR_Node_Namexx_N00XC_1' sharingGroupId:"xxLTE_Site_IDxx_XC_1:xx5G_NR_Node_Namexx_N00XC_1",eUtranCellRef:"SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XC_1",gUtranCellRelationRef:"SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XC_1,GUtranFreqRelation=xx5G_ssbfrequencyAxx-15-20-0-2,GUtranCellRelation=xx5G_NR_Node_Namexx_N00XC_1"
+
+
+#cmedit get xxMMBB_Primary_Node_Namexx GUtranCellRelation.GUtranCellRelationId==* -t -count
+#cmedit get xxMMBB_Primary_Node_Namexx GUtranCellRelation.GUtranCellRelationId==* -count
+
+
+#cmedit action xxMMBB_Primary_Node_Namexx BrmBackupManager=1 createBackup.(name="Post_DSS_ACTIVATION_xxDatexx")
+#cmedit get xxMMBB_Primary_Node_Namexx BrmBackup.* -t
+
+Note: Podt DSS Activation while Unlocking the DSS Cells, First the DSS NR Cells has to be Unlocked once it is enabled then proceed with Unlocking the DSS LTE Cells.
+
+#######UNLOCK NRSectorCarrier
+#cmedit get xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==*N00X*,administrativeState,operationalState) -t
+#cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==*N00X*) administrativeState:UNLOCKED
+#cmedit get xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==*N00X*,administrativeState,operationalState) -t
+
+#######UNLOCK NRCellDU
+#cmedit get xxMMBB_Primary_Node_Namexx NRCELLDU.(NRCELLDUId==*N00X*,administrativeState,operationalState) -t
+#cmedit set xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId==*N00X*) administrativeState:UNLOCKED
+#cmedit get xxMMBB_Primary_Node_Namexx NRCELLDU.(NRCELLDUId==*N00X*,administrativeState,operationalState) -t
+
+#######UNLOCK EUtranCellFDD
+
+#cmedit get xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDDId==*_X*,administrativeState,operationalState) -t
+#cmedit set xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDDId==*_X*) administrativeState:UNLOCKED
+#cmedit get xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDDId==*_X*,administrativeState,operationalState) -t
+
+#######UNLOCK IoT CELLS IF NEEDED
+#cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.(NbIotCellId==*,administrativeState,operationalState) -t
+#cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.(NbIotCell==*) administrativeState:UNLOCKED
+#cmedit get xxMMBB_Primary_Node_Namexx NbIotCell.(NbIotCellId==*,administrativeState,operationalState) -t
+
+###################################
+## End of DSS Activation Process ##
+###################################
+
