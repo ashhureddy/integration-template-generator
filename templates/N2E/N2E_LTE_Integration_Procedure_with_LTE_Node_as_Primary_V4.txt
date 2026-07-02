@@ -1,0 +1,1225 @@
+#####################################################################################################################
+###                                       NOKIA Prechecks                                                    ########
+#####################################################################################################################
+#####################################################################################################################
+
+QIC must run and capture logs of AL output & DR1 logs from Nokia Hotkey tool.
+QIC must verify there are no DC power or swap stopper alarms.
+*** Refer to N2E Integration Checks_V2 document for Nokia process/steps***
+
+###################################################################################################################################################################
+#################### Check the SIAD Provisioning Status for all the markets. For all the new additional nodes                       ###############################
+##                ####################################################################################################################                           ##
+##                                                                                                                                                               ##
+## Checks under Canopi Worklist                                                                                                                                  ##
+## 1. Check the USID, Site Name, SIAD CLLI, SIAD Port to Cabinet, SIAD OAM IPv6 IP, SIAD Bearer IPv6 IP, OAM Vlan ID, Bearer Vlan ID in the System Info tab.     ##
+## 2. Check the PTU Automation Status & Progress [Automation Status should be Complete and Progress should be 100%]                                 ##
+## Checks under PTU Troubleshooter Search                                                                                                                        ##
+## 3. Ensure all the task under the Canopi Task List should be in Completed state. In case if any task is shouwing as "Complete Task" Get the task completed.    ##
+## 4. Specifically for the "RWK-ETTCS C&E" task Status should be in “COMPLETED" state.                                                                           ##
+## 5. Any further issues run the PTU Troubleshooter and check with leads accordingly.                                                                            ##
+## Check the PTU SIAD Provisioning and Send out and Ongoing to the PM and then include the issue in the Report and report to market if not provisioned          ##                                                                           ##
+###################################################################################################################################################################
+
+############ N2E LTE Integration Procedure [LTE as Primary] - for NSB Sites Final_v1.0 ###########
+###########################################################################################################################
+############                                        Updated with LPA Process                                    ###########
+###########################################################################################################################
+xSITE_IDx 			-- SiteName
+xxUserIDxx 			-- Rename with the UserID				****** Eg: au651d
+xxOAMIPAddressxx    -- Replace this with IP Address of the node ****** IP address shown after running the commands in AMOS
+xDatex				-- mmddyyyy format ## Eg: 03312020
+
+
+###### Inputs from EDP #####
+xsecondary_IPV6_ENODEB_BEARER_IPx			## IP from EDP Column DY - IPV6_ENODEB_BEARER_IP from LTE EDP. Download the EDP with USEID)
+xLTE_IPV6_SIAD_BEARER_IPx			## IP from EDP Column DX - IPV6_SIAD_BEARER_IP_DEF_ROUTER from LTE EDP. Download the EDP with USEID)
+xLTE_Vlan_IDx						## Vlan ID from EDP Column DR - bearer_enodeb_sb_vlan_id
+############################
+
+############################################################################################################
+## Warning : All the Scripts generated as part of Integration should be shared in the RSF at this point   ##
+############################################################################################################
+##########################
+## Start of the Process ##
+##########################
+cmedit get xSITE_IDx ComConnectivityInformation.* 
+cmedit get NetworkElement=xSITE_IDx,CmFunction=1
+cmedit get xSITE_IDx networkelement.*
+
+####### Ideally, the command would return "0 instance(s)" response.
+If any exception output "1 instance(s)" is received, verify that parameters are set as per required values. Also, the NE would be in UNSYNCHRONIZED state at this stage.#######
+
+#### LKF Import: ####
+Download LKF and Import it in ENM(SHM/ LICENSE ADMINISTRATION/IMPORT KEY FILES) before proceeding)
+
+##############################################################################################################################################################
+## Creating Node in ENM and Site Integration scripts(Download LKF and Import it in ENM(SHM/ LICENSE ADMINISTRATION/IMPORT KEY FILES) before proceeding)  ##
+## Drag and Drop the APfile shared in RSF/QWEST in the ENM and follow below steps to generate Site install script                                              ##
+##############################################################################################################################################################
+ap order file:xSITE_IDx_Radionode_Project.zip
+
+ap status -p xSITE_IDx
+ap view -n xSITE_IDx
+ap status -n xSITE_IDx
+ap download -o -n xSITE_IDx
+
+##################################################################################################
+##Share the downloaded Site install file to FE and ask him to load to the BBU               ##
+## Status should be : Integration Completed at this point, Once FE loaded Site install file ##
+##################################################################################################
+
+ap status -n xSITE_IDx
+
+### AT this Point connectivity will be established ###
+
+###############################################################################################################################
+Check enrollment Status post loading Site install File , If Found Discrepancies please stop there and reach out to the leads  
+###############################################################################################################################
+
+amos xSITE_IDx
+lt all
+
+get SecM=1,CertM=1,NodeCredential=oamNodeCredential subjectName
+[oamNodeCredential should be loaded with the respective ENM]
+
+####### If No output is received, check from ENM CLI #######
+
+## Make sure enrollmentProgress for the below mentioned menus are verified as per the below standard ## 
+ >>> 5.progressPercentage = 100
+ >>> 6.result = 1 (SUCCESS)
+ >>> 7.resultInfo = SystemFunctions=1,SecM=1,CertM=1,NodeCredential=oamNodeCredential
+ >>> 8.state = 3 (FINISHED)
+ >>> Make sure the Certificate files are loaded with the right ENM where the site is built.
+ 
+ENM CLI Command
+---------------  
+cmedit get xSITE_IDx NodeCredential.(subjectName) -t
+
+#######################################################################################################
+Setting supervision to true once Connectivity to the node is established post loading Site install File
+#######################################################################################################
+
+## Setting supervision to true ##
+
+cmedit get NetworkElement=xSITE_IDx,CmNodeHeartbeatSupervision=1 
+cmedit set NetworkElement=xSITE_IDx,CmNodeHeartbeatSupervision=1 active=true 
+
+cmedit get NetworkElement=xSITE_IDx, FmAlarmSupervision=1 
+cmedit set NetworkElement=xSITE_IDx,FmAlarmSupervision=1 active=true
+
+cmedit get NetworkElement=xSITE_IDx, InventorySupervision=1 
+cmedit set NetworkElement=xSITE_IDx,InventorySupervision=1 active=true 
+
+cmedit get NetworkElement=xSITE_IDx,PmFunction=1 
+cmedit set NetworkElement=xSITE_IDx,PmFunction=1 pmEnabled=true 
+
+cmedit get NetworkElement=xSITE_IDx,CmFunction=1
+cmedit action NetworkElement=xSITE_IDx,CmFunction=1 sync 
+cmedit get NetworkElement=xSITE_IDx,CmFunction=1
+
+## Status should be : SYNCHRONIZED at this point ##
+
+####### If the node is Not Synchronized at this phase, stop execution & reach out to Leads #######
+
+cmedit get xSITE_IDx networkelement.* -t
+
+####### Verify the FDN parameters are as per required managementState=Normal, nodeModelIdentity==ossModelIdentity #######
+
+#######################################
+To update node login credentials in ENM
+#######################################
+
+secadm credentials update --secureusername rbs --secureuserpassword StArW@r$1977# -n xSITE_IDx
+
+#################################################################################
+#####			CHECK IF THE USERLABEL IS UPDATED							#####
+#################################################################################
+
+## Set the Userlabel as per the site configuration##
+
+cmedit get xSITE_IDx networkelement.userlabel
+
+cmedit set NetworkElement=xSITE_IDx  userLabel=4GRadioNode
+<For LTE nodes>
+
+cmedit get xSITE_IDx networkelement.userlabel
+
+############################################################
+***** Setting the TimeZone and Dateandtime offset     *****
+###########################################################
+Based on the location of the site, set the time zone. ##### Refer to Column N "Timezone" under Mixed Mode Info tab in CIQ #####
+
+********************************************************************************
+***** Setting the TimeZone and Dateandtime offset if not set initially      *****
+*********************************************************************************
+
+Based on the location of the site, set the time zone.
+
+cmedit get xSite_IDx DateAndTime.TimeZone -t
+ 
+Eastern Sites 
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Eastern"
+ 
+Central Sites 
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Central"
+ 
+Mountain Sites 
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Mountain"
+ 
+Arizona Sites 
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Arizona"
+ 
+Pacific Sites
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Pacific"
+
+cmedit get xSite_IDx DateAndTime.TimeZone -t
+
+get DateandTime
+ 
+********************************************************
+
+cmedit get xSite_IDx TimeSettings.*
+
+Eastern Sites 
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-05:00"
+ 
+Central Sites 
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-06:00"
+ 
+Mountain Sites 
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-07:00"
+ 
+Arizona Sites 
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-07:00"
+ 
+Pacific Sites
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-08:00"
+ 
+cmedit get xSite_IDx TimeSettings.*
+
+get TimeSettings=1
+ 
+
+#################################################### IMPORTANT ############################################################################################
+ 
+Commands to update networkelement timeZone to same as Node timezone in the ENM
+ 
+********** Please ensure to set the networkelement timeZone to same as Node timezone in the ENM with out fail  **********
+********** Use this below commands to set networkelement timeZone                                              **********
+ 
+###########################################################################################################################################################
+
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
+
+Eastern Sites 
+cmedit set xSite_IDx networkelement timeZone:"US/Eastern"
+
+Central Sites 
+cmedit set xSite_IDx networkelement timeZone:"US/Central"
+
+Mountain Sites 
+cmedit set xSite_IDx networkelement timeZone:"US/Mountain"
+ 
+Arizona Sites 
+cmedit set xSite_IDx networkelement timeZone:"US/Arizona"
+
+Pacific Sites
+cmedit set xSite_IDx networkelement timeZone:"US/Pacific"
+ 
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
+
+##########################################################################################################
+Both ENM and Node end to have same timeZone when checked with below get commands upon setting the timezone
+##########################################################################################################
+
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
+
+cmedit get *xSite_IDx* DateAndTime.TimeZone -t
+
+##############################################################################################################################################################
+ 
+*********  Step 11: daylightSavingTimeStartDate & daylightSavingTimeEndDate check ***********************
+
+########  daylightSavingTimeStartDate and daylightSavingTimeEndDate set commands ########
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSite_IDx,ManagedElement=xSite_IDx,NodeSupport=1,TimeSettings=1 daylightSavingTimeStartDate:{dayRule="Sun>=8",month=MARCH,time="02:00"} --force
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSite_IDx,ManagedElement=xSite_IDx,NodeSupport=1,TimeSettings=1 daylightSavingTimeEndDate:{dayRule="Sun>=1",month=NOVEMBER,time="02:00"} --force
+
+Note: For Arizona/Hawaii sites,  daylightSavingTimeOffset should be 0 since there is no daylightsaving observed.Please verify on site
+
+###########################################################
+***** LKF Check point After LKF Installation          *****
+###########################################################
+
+################################################################################################################################################################################################################
+## Once node gets synchronized in ENM please check if LKF is installed correctly with proper sequence number as received and also there are no LKF related alarms on site ,Post the o/p of below commands in RSF  ##
+
+lget KeyFileManagement
+(Check if installed LKF sequence number is matching on site &  State should be finished and installation time should be present) )
+
+################################################################################################################################################################################################################
+
+########################################################################################################################
+#### Check if the GPS connected is GRU 04 or GPS 05 01                           	    		        ####
+#### Ensure all N2E sites are with GRU 04 or GPS 05 01 version for GPS      	 			    ####
+#### Make sure the FE installs GRU04 delivered with the equipment on site and preferably connect it to all N2E Node    ####
+#### Please ensure FE install the GPS OVP,6610 controller and SAU as per the Guidelines and share the template to FEs	####
+########################################################################################################################
+
+####### In Pre-IX phase, sometimes GPS are Not installed, in that condition, the GPS state will show DISABLED & GPS details will not reflect. Inform the same to PM to confirm that GPS will
+be installed during Cutover phase. Mention the same as Pending in Report #######
+
+gpsstatus | grep Product
+st TimeSyncIO
+### Should be Enabled ###
+lpr TimeSyncIO
+st RadioEquipmentClockReference
+### Should be Unlocked/Enabled ###
+sts
+### GPS should be NO_FAULT ###
+
+###################################################################
+### Integration PROCESS ####
+###################################################################
+
+###################################################################
+################## Please check the Alarms #########
+###################################################################
+
+alt
+####### If any HW Fault alarm in FieldReplaceableUnit/SW related alarm is there on your site, please escalated to Leads/RSF #######
+
+Sample SW Error Alarm
+---------------------
+2026-02-10 07:38:33 m SW Error            FieldReplaceableUnit=1 (Contact next level of support and provide log files required by Data Collection Guideline. AI: UI: [{"PN":
+"RAN Processor 6672","SN":"EA2B336444","PNR":"KDU1370114/11","PR":"R3B"}])
+
+################## Check FRU Status  #########
+(Adm. state should be UNLOCKED and ENABLED)
+
+lt all
+st field
+
+####### If FRU shows Disabled, Check if TN & RN are already run in AP file execution, if not found reach out to Leads & only upon confirmation, run TN & RN separately #######
+
+RN : Check for successful execution
+######## To check enbid and Userlabel(Site id) ########
+hget enodebfunction userlabel|enbid
+
+TN : Check for successful execution
+######## To check SctpProfile created ########
+lpr SctpProfile
+
+
+################## Check Created SctpProfiles & AddressIPv6  #########
+
+lpr Router
+####### Check that all Router profile MOs are created #######
+lpr SctpProfile
+####### Check that all Router profile MOs are created #######
+get 0
+####### Check managedElementId, dnPrefix, swVersion, userLabel)
+
+#########################################################################################################################################################################################
+# Make Sure the node is SYNCHRONIZED at this point. Please reach out to Leads or Ask for advise before proceeding with Sectorization Script in case the node is in UNSYNCHRONIZED State #
+#########################################################################################################################################################################################
+
+##########################################################################
+####  PROCEED WITH RUNNING THE SCRIPTS							      ####
+##########################################################################
+
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Pre_Transport")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+Execute the transport script in CLI in ENM
+Drag and Drop the script in CLI and execute the script with command ** Batch execute file:xSITE_IDx_RADIO_LTE_Primary_cmcli_Transport_Script_xxDatexx
+
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Post_Transport")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+#### Check if InterfaceIPv6 MO has been created on Router=LTE Parent MO.####
+
+lt all
+lpr transport
+lpr Router
+
+###################################################################################################################
+## if InterfaceIPv6 MO is missing on site at this point, please escalate it in the RSF and reach out to Leads ##
+###################################################################################################################
+
+get Router=S1
+
+## Restart the LTE node in order to get the sctp Endpoints in Enabled state ##
+
+cmedit action xSITE_IDx FieldReplaceableUnit=1 restartUnit.(restartrank=RESTART_WARM,restartreason=PLANNED_RECONFIGURATION) --force
+
+########################################
+Once Node is reachable, Check Sync State
+########################################
+
+cmedit get NetworkElement=xSite_IDx,CmFunction=1
+
+######################################################
+If Node found Unsync'd, initiate CM sync & check again
+######################################################
+
+cmedit action NetworkElement=xSite_IDx,CmFunction=1 sync 
+cmedit get NetworkElement=xSite_IDx,CmFunction=1
+
+#######################################################################
+##  sctp check commands for LTE nodes with LTE as primary  ## 
+#######################################################################
+
+lt all
+st sctp
+
+##############################################################################################################
+##  All the SctpEndpoints should be in Enabled state. If it is in disabled state escalate to the Leads/RSF  ##
+##############################################################################################################
+
+lt all
+hget Transport=1,SctpEndpoint= localIpAddress|operationalState|reservedBy|sctpProfile
+get EndpointResource=1,LocalSctpEndpoint
+get LocalIpEndpoint=1
+
+get . endpointResourceRef
+
+####### For LTE enbid check #######
+
+#######For LTE enbID check #######
+hget ^enodebfunction enbid
+
+get . dst
+get . vlanId
+get . ^vlanport
+get ^address address
+get nexthop address
+get . encapsulation
+####### Ensure that encapsulation values are created #######
+
+## Ensure that the VLANs for the NR Config has been set as per the EDP. If any changes observed on site. Please reach out to the Leads ##
+################################################################################################################################ 
+## 1. IP Address/vlanId for the NR should be as per the EDP. If you find mismatch in the IPs escalate to the Leads/RSF  ##
+## 2. Router=OAM/Router=vr_OAM IPs should be set according to the 5G EDPs                                                ##
+################################################################################################################################
+
+mcc Transport=1,Router=.*OAM ping6 --count 3 xSecondary_IPV6_enb_BEARER_IPx
+
+Note: If the IPV6_ENODEB_BEARER_IP for the 5G primary node is not ping-able and the result says 100% packet loss, then check the PTU SIAD Provisioning and also if VLAN ID is present in PTU troubleshooter logs or MTRC logs,Check with the leads and report accordingly. 
+
+##################################################################################################################################################################################
+##  In case of the 5G nodes after the implementation of 5G transport script and upon restarting the node make sure the node config has been changed based on our requirement.   ##
+##  Check the status using the "pv $rats" command.                                                                                                                              ##
+##  If the node is 5G then the output of the "pv $rats" command should be "$rats = N"                                                                                           ##
+##  If you are not seeing the output as per the requirement please reach out to the Leads immediately. Do not proceed further!!                                                 ##
+##################################################################################################################################################################################
+
+pv $rats 
+
+##############################################
+##   HXIN083802> pv $rats                   ##
+##                                          ##
+##   $rats = N                             ##
+##############################################
+
+#####################################################################################################################################################################
+#####################################################################################################################################################################
+
+>>> Note that while Creating Import Job in Bulk Configuration, Name the Job Name as same as the Script file (To identify the Script execution status in future)
+>>> Copy the Script File Name to be executed, Paste it on the Job Name Section.
+>>> Select the Script File to be executed in the File Selection Section.
+>>> In Validation Options, Select Skip Node Based Validation
+>>> In Execution Error Handling, Select Stop
+>>> Select Sequential in Execution Order
+>>> Create & Validate the Job
+>>> Validate the Job & wait for the status to change to VALIDATED. Check for any Error.
+>>> If any Error is received check with Lead & accordingly escalate to Scripting Team if required.
+>>> Once the Job is Successfully Validated, Execute the Job till Status comes as EXECUTED.
+>>> If any Error is received check with Lead & accordingly escalate to Scripting Team if required.
+
+#####################################################################################################################################################################
+#####################################################################################################################################################################
+
+######################################################
+## 	Proceed with running Network Relation 1 script	##
+######################################################
+
+####### For Any NR Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
+For "Instance Validation Error : MO created earlier by import file", Check the Bulk Import Created Job List & make sure No other Job is Validated/Running for the same Node.
+Thereby, Delete the previously validated file, then Reimport the script file, Re-Validate & Re-Execute.
+For Errors received due to Nodes being "Unsynchronized" during Job execution, Resync the Node & ensure that the Node is Sync'd in ENM. Then Re-Validate & Re-Execute the Job. #######
+
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Pre_Network_relations_1")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+xSITE_IDx_01_network_relations_xDatex_dynamic_script
+
+####### NR1 if fails, Cant move forward as NR2/3 and Radio scripts cant be executed. Without Radio scripts No Sectors will be created and no furthers scripts can be executed. Needs to be fixed to proceed further. #######
+
+##################################################################################################
+Any Errors in the scripts please mention in RSF and reach out to the Leads immediately ##
+##################################################################################################
+
+##################################################
+## 	Proceed with running Sectorization script	##
+##################################################
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Pre_sectorization_xDatex")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+##Radio Combine-Script ##
+
+##                  Bulk Configuration script execution method             ##       
+
+
+xSite_IDx_Radio_Tool_Combined_Script_xDatex
+
+############################# Individual Script (Alternative) #############################
+####### For exception case, where combined script fails or any direction received that any individual script has ay manual updates, that particular individual script; if need to run all
+individual scripts, follow below sequence #######
+####### Note that the individual script is to be considered only if directed or combined script has any issue #######
+
+xSite_IDx_Antenna_Info_dynamic_scriptxx
+xSite_IDx_Sectorization_Dynamic_RRU-xx_dynamic_scriptxx
+xSite_IDx_Sectorization_Dynamic_RRU-xx_dynamic_scriptxx
+xSite_IDx_Sectorization_Dynamic_RRU-xx_dynamic_scriptxx
+xSite_IDx_RADIO_TermpointCreation_1_dynamic_scriptxx
+xSite_IDx_Rilink_dynamic_scriptxx
+xSite_IDx_Cpri_Link_Iq_Data_dynamic_scriptxx
+
+
+##################################################################################################
+Any Errors in the scripts please mention in RSF and reach out to the Leads immediately ##
+##################################################################################################
+lt all
+s+
+alt 
+st field
+
+#####################################################################################################################################################################
+## 	Make sure MME is enable at this stage and  Proceed                                                                                                             ##
+#####################################################################################################################################################################
+st MME
+
+###########################################################################
+## If XMU is present on site,use the below command to unlock XMU on site ##
+###########################################################################
+
+cmedit set xSITE_IDx FieldReplaceableUnit=XMU03-1-1 administrativeState=UNLOCKED
+
+##################################################################################################################################################################################################
+## Run the below commands and check the values in the output                                                                                                                                    ##
+## Cellid, Cellrange ,crsgain,BandWidth,Power,PCIs,earfcn, bandwidth and Rilinks should be verified with either pre or CIQ depending on the market  ##
+## If they match, proceed with next steps                                                                                                                                                       ##
+## If they do not match, escalate immediately to the shift lead                                                                                                                                 ##
+## All Values should be matching as per CIQ.                                                                                                                                                    ##
+##################################################################################################################################################################################################
+##Putty GET COMMANDS##
+lt all
+alt
+hget ^EUtranCell.DD cellBarred|sectorCarrierRef|primaryPlmnReserved|state|additionalPlmnReservedList
+hget ^EUtranCell.DD availabilityStatus|cellrange|administrativeState|operationalState|primaryPlmnReserved|^tac|^CellId|earfcndl|earfcnul|dlChannelBandwidth|physicalLayerCellId|physicalLayerCellIdGroup|physicalLayerSubCellId|rachRootSequence|transmissionmode$|freqband$|Cellrange
+hget ^Sector state|configuredMaxTxPower|availableHwOutputPower|noof[rt]x|sectorFunctionRef|bSChannelBw.L|arfcn|txDirection
+hget NbIotCell cellid|freqBand|tac|NbIotCellType
+hget TermPointToENB administrativeState}Operationalstate
+hget TermPointToGNB administrativeState}Operationalstate
+hget ^FieldReplaceableUnit administrativeState|operationalState|productData
+hget SectorEquipmentFunction administrativeState|availableHwOutputPower|operationalState
+hget SectorCarrier configuredMaxTxPower|noOfRxAntenna|noOfTxAntennas|operationalState|sectorFunctionRef
+hget riport administrativeState|operationalState
+hget RfBranch rfPortRef
+hget AntennaNearUnit rfPortRef
+hget RfPort rfPortId
+hget RiLink riPortRef1|riPortRef2|operationalState|transportType|fronthaulDeviceLineRate|availabilityStatusRiLinkId
+hget RfBranch dlAttenuation|ulAttenuation|ulTrafficDelay|dlTrafficDelay
+sdir
+
+######################################################################################################
+## Check whether all the RRUS/Rilinks/FDDs/MMEs/sectors are created and MMEs are Unlocked/Enabled   ##
+## If there are MMEs Disabled, reach out to the Leads immediately                                   ## 
+######################################################################################################
+
+## Sample of Cells present on site in LTE node [LTE Cells]            ##
+
+===================================================================================
+Proxy  Adm State     Op. State     MO
+===================================================================================
+   50  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_2A_1
+  246  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_2A_3
+  455  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_2B_1
+  612  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_2B_3
+  771  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_2C_1
+  934  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_2C_3
+ 1116  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_2D_1
+ 1253  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_2D_3
+ 1407  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_9A_1
+ 1638  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_9B_1
+ 1854  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_9C_1
+ 2053  1 (LOCKED)  1 (DISABLED)   ENodeBFunction=1,EUtranCellFDD=DXL03050_9D_1
+===================================================================================
+Total: 28 MOs
+
+DXL03050>
+######################################################################################################
+#####################################################################################################################################################################
+## Proceed with restarting the site post sectorization script and parameters verfication                                                                           ##
+#####################################################################################################################################################################
+
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Pre_Restart")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+cmedit action xSITE_IDx FieldReplaceableUnit=1 restartUnit.(restartrank=RESTART_COLDWTEST,restartreason=PLANNED_RECONFIGURATION) --force
+
+#####################################################################################################################################################################
+## Post node restart once node is up check the status of the cells and site                                                                                        ##
+#####################################################################################################################################################################
+
+lt all
+s+
+alt
+st cell
+st sector
+st field
+hget field product
+st TermPoint
+
+################
+Check Sync State
+################
+
+cmedit get NetworkElement=xSite_IDx,CmFunction=1
+
+######################################################
+If Node found Unsync'd, initiate CM sync & check again
+######################################################
+
+cmedit action NetworkElement=xSite_IDx,CmFunction=1 sync 
+cmedit get NetworkElement=xSite_IDx,CmFunction=1
+
+##########################################################################################
+Block all ulcompgroups which are present post sectorization before executing the Baselines
+##########################################################################################
+
+st UlCompGroup
+
+hget SectorCarrier= reservedBy
+
+cmedit get xSITE_IDx UlCompGroup.(administrativeState) -t
+
+cmedit set xSITE_IDx UlCompGroup administrativeState:LOCKED
+
+cmedit get xSITE_IDx UlCompGroup.(administrativeState) -t
+
+st UlCompGroup
+
+##################################
+Checks for Scanner Profile on node
+###################################
+pst
+(If scanner is missing on site then proceed with toggling the CM & PM functions and set the userlabel in the ENM
+
+##############################################################
+##commands for toggling PM functions if scanner is not added##
+##############################################################
+cmedit set NetworkElement=xSITE_IDx,PmFunction=1
+cmedit set NetworkElement=xSITE_IDx,PmFunction=1 pmEnabled=false
+cmedit set NetworkElement=xSITE_IDx,PmFunction=1 pmEnabled=true
+cmedit set NetworkElement=xSITE_IDx,PmFunction=1
+
+cmedit get NetworkElement=xSITE_IDx ,CmFunction=1
+cmedit action NetworkElement=xSITE_IDx,CmFunction=1 sync
+cmedit get NetworkElement=xSITE_IDx ,CmFunction=1
+
+pst
+(Check for the scanner profile again after toggling if it's added, If still not added escalate to leads)
+
+###########################################################
+***** Scanner Checks                              *****
+###########################################################
+pst PmJob=USERDEF-National
+
+############################################################################################################################################
+####ReqState/CurrState will change back to ACTIVE and nrRdrs/Evts should be greater than 595 after running this command				    ####
+####	                                                                                                                                ####
+#### DXL03050> pst PmJob=USERDEF-National                                                                                             ####
+#### Parsing EVENT cache: /home/shared/au651d/moshell/jarxml/EVENTCACHE_MSRBS_NODE_MODEL_22.Q4_584.28076.108_8081.txt.gz ... Done.      ####
+#### .................................................................................................................................. ####
+#### ====================================================================================================                               ####
+#### Proxy  Job                                                                    ReqState     CurrState     Granul nrRdrs/Evts        ####
+#### ====================================================================================================                               ####
+#### 14140  PmJob=USERDEF-National_PM_Standard_eNodeB_L25Q4_G2G3G4_25.35.Cont.Y.STATS  ACTIVE       ACTIVE           900   2710         ####
+#### ====================================================================================================                               ####
+#### >>> Total: 1 PmJobs, 0 EventJobs                                                                                                   ####
+####                                                                                                                                    ####
+#### DXL03050>                                                                                                                        ####
+############################################################################################################################################
+
+pst PmJob=USERDEF-National
+
+######################################################################################################################################
+##    Mention in the RSF once Sectorization Script is completed and node has been restarted and Proceed with Baseline 1 Baseline 2  ##
+######################################################################################################################################
+ 
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Pre_Baselines_1")
+cmedit get xSITE_IDx BrmBackup.* -t
+ 
+####### For BL Error, if Any BL Script Fails as a whole in Validation state or stuck in Parsed state, Need to Re-Import, Re-Validate & Execute. If Error persists, open a ticket & raise to BL Team.
+For Any BL Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
+Ensure that the BL File SW version is as per latest release. If found to be of Older SW version, reach out to the Leads/escalate to Scripting Team.
+Don't perform any parallel execution on the same Node even from Bulk Configuration or ENM CLI. Wait for the last running Job to complete before proceeding for next file validation.
+For Errors received due to Nodes being "Unsynchronized" during Job execution, Resync the Node & ensure that the Node is Sync'd in ENM. Then Re-Validate & Re-Execute the Job.
+Maintain the Order of Execution for the Scripts #######
+
+Run Baseline 1 and 2 scripts in Bulk Configuration (Do not touch the FGA scripts)
+
+xSITE_IDx_01_1_Baseline_for_Features_EnodeB_CRX_BaseBand_L25Q4_REV25.46_xDatex_dynamic_script
+xSITE_IDx_01_2_Baseline_for_Features_EnodeB_CRX_BaseBand_L25Q4_REV25.46_xDatex_dynamic_script
+xSITE_IDx_02_1_Baseline_for_EnodeB_QCI199_162_150_L25Q4_REV25.46_xDatex_dynamic_script
+xSITE_IDx_02_2_Baseline_for_EnodeB_QCI199_162_150_L25Q4_REV25.46_xDatex_dynamic_script
+
+##################################################################### 
+## Check that the script runs with NO ERRORS                       ##
+## If any Error is received make sure they are taken care here     ##
+##################################################################### 
+
+Post Execution, Export the file and check for Errors, If MOs already exists are only present and can be ignored,PLease proceed further ,IF any other Errors are present please post the exported execution log to scripting team and ask to check on the error
+Save the Exported log Excel file in Execution logs with Script Naming and share in RSF for Baseline Team.
+ 
+################################################################################################################
+##    Once Baseline 1 & Baseline 2 completed Inform Leads to go to Onshore Team for Execution of FGA script. ###
+################################################################################################################
+
+####### xSite_IDx_02_1_Baseline_FGA_300_L25Q4_REV25.46_xDatex_dynamic_script ################
+####### xSite_IDx_02_2_Baseline_FGA_300_L25Q4_REV25.46_xDatex_dynamic_script ################
+
+#####################################################################
+### Once Leads confirms that FGA Execution Proceed for NR scripts ###
+#####################################################################
+
+Post Execution, Export the file and check for Errors, If MOs already exists are only present and can be ignored, Please proceed further; If any other Errors are present please post the exported execution log
+to scripting team and ask to check on the error. Save the Exported log Excel file in Execution logs with Script Naming and share in RSF for Baseline Team.
+
+#####################################################################################################################
+##                       Proceed With Network relation 2 and 3 script in Bulk Configuration                        ##
+#####################################################################################################################
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Pre_Network_relations_2")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+####### For Any NR Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue. #######
+
+xSITE_IDx_02_1_network_relations_xDatex_dynamic_script
+
+####### NR2 if fails, no dependency, NR 3/4/5/6 can be executed while waiting for NR2 issue to be fixed by Scripting Engineer #######
+
+xSITE_IDx_03_1_network_relations_ENDC_xDatex_dynamic_script
+
+####### NR3 if fails, no dependency, NR 4/5/6 can be executed while waiting for NR3 issue to be fixed by Scripting Engineer #######
+ 
+##################################################################### 
+## Check that the script runs with NO ERRORS                       ##
+##################################################################### 
+
+Post Execution, Export the file and check for Errors, If MOs already exists are only present and can be ignored,PLease proceed further ,IF any other Errors are present please post the exported execution log to scripting team and ask to check on the error
+
+Save the Exported log Excel file in Execution logs with Script Naming
+##################################################################### 
+
+#####################################################################################################################
+Once Relation Recreate, Frequency Relations, cell Relation, are executed please verify the below mention Parameter 
+#####################################################################################################################
+ 
+#### To verify if all Pre and New Frequency relations are created on Eutran and Utran Networks please execute below mention command ####
+
+lt all
+lpr EUtranFreqRelation
+lpr GUtranFreqRelation
+lpr GUtranSyncSignalFrequency
+
+#####################################################################################################################
+##                       Proceed With Rest all Baseline scripts                                                    ##
+#####################################################################################################################
+ 
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Pre_Baselines_4")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+####### For BL Error, if Any BL Script Fails as a whole in Validation state or stuck in Parsed state, Need to Re-Import, Re-Validate & Execute. If Error persists, open a ticket & raise to BL Team.
+For Any BL Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
+Ensure that the BL File SW version is as per latest release. If found to be of Older SW version, reach out to the Leads/escalate to Scripting Team.
+Don't perform any parallel execution on the same Node even from Bulk Configuration or ENM CLI. Wait for the last running Job to complete before proceeding for next file validation.
+For Errors received due to Nodes being "Unsynchronized" during Job execution, Resync the Node & ensure that the Node is Sync'd in ENM. Then Re-Validate & Re-Execute the Job.
+Maintain the Order of Execution for the Scripts #######
+
+Run Baseline 4 scripts in Bulk Configuration
+
+xSITE_IDx_04_Baseline_for_CRX_SyCon_and_TM_DU5216_L25Q2_REV25.26_xDatex_dynamic_script
+
+Baseline 5 we will run in putty 
+
+run /home/shared/xxUserIDxx/QIC/scripts/xSITE_IDx_05_Baseline_for_Internal_Parameters_Write_Script_DU5216_L25Q2_REV25.26_xDatex.txt
+ 
+Run Baseline 8,9 and 15 script in Bulk Configuration
+
+xSITE_IDx_08_1_Baseline_for_CRX_SectorcarrierparametersL25Q4_REV25.46_xDatex_dynamic_script
+xSITE_IDx_08_2_Baseline_for_CRX_SectorcarrierparametersL25Q4_REV25.46_xDatex_dynamic_script
+xSITE_IDx_09_2_Baseline_PtmCellProfile_set_commands_L25Q4_REV25.46_xDatex_dynamic_script
+xSITE_IDx_15_2_ENDC_Baselines_L25Q4_REV25.46_xDatex
+
+##################################################################### 
+## Check that the script runs with NO ERRORS                       ##
+##################################################################### 
+
+Post Execution, Export the file and check for Errors, If MOs already exists are only present and can be ignored,PLease proceed further ,IF any other Errors are present please post the exported execution log to scripting team and ask to check on the error
+
+Save the Exported log Excel file in Execution logs with Script Naming
+##################################################################### 
+
+#####################################################################
+#######    Proceed with Delta Scripts     #######
+#####################################################################
+
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Pre_Delta")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+xSITE_IDx_Delta_Dynamic_LTE_25.54_25q4
+xSITE_IDx_Delta_Dynamic_LTE_25.55_25q4
+xSITE_IDx_Delta_Dynamic_LTE_26.01_REV26.00_BL
+
+##########################  RET scripts ##########################
+ 
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Pre_RET")
+cmedit get xSITE_IDx BrmBackup.* -t
+ 
+Run RET scripts in Bulk Configuration
+ 
+xSITE_IDx_RET_1_Create_Set_dynamic_script
+xSITE_IDx_RET_ASU_retSubunitRef_dynamic_script
+xSITE_IDx_RET_2_Create_Set_dynamic_script
+
+####### Since radios will be disabled during the pre-integration phase, there is no need to run RET calibration scripts at this stage. #######
+
+If TMA present, run TMA scripts in Bulk Configuration
+
+xSITE_IDx_TMA Script_dynamic_script
+  
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Post_RET")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+*** Once RET scripts are completed check if RETs are created and all rfPortRef are set properly ****
+lt all
+lst near
+hget AntennaNearUnit UniqueId|rfPortRef|State|iuantDeviceType|productNumber
+hget RetSubUnit State|userLabel|reservedby
+hget RetSubUnit iuantBaseStationId|iuantSectorId|electricalAntennaTilt|maxTilt|minTilt|iuantAntennaBearing
+
+
+#####################################################################################################################################
+## Once RET Scripts are completed and RETs are verified, Proceed with Calltest Scripts execution                                    ##
+##                   Bulk Configuration script execution method for Calltest Scripts                                               ##      
+#####################################################################################################################################
+ 
+################################################### call test script ##########################
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Pre_Call_test")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+Run calltest scripts in Bulk Configuration
+ 
+xSITE_IDx_calltest_2_network_relations_xDatex_dynamic_script
+  
+##################################################################### 
+## Check that the script runs with NO ERRORS                       ##
+##################################################################### 
+
+Post Execution, Export the file and check for Errors, If MOs already exists are only present and can be ignored,PLease proceed further ,IF any other Errors are present please post the exported execution log to scripting team and ask to check on the error
+
+Save the Exported log Excel file in Execution logs with Script Naming
+##################################################################### 
+
+###########################To verify if all Pre and New Cellrelations are created  please execute below mention command ###############
+
+lpr EUtranCellRelation
+ 
+############################To check if CRX Baseline was executed .Please execute below mention command : cellsubscriptioncapacity Should be other than 1000.######
+
+get . cellsubscriptioncapacity
+ 
+#############################################################################################################################
+mfbiSupport  check. This parameter has to be in true. Please check using below commands and set to true if found in false
+#############################################################################################################################
+
+get . mfbiSupport
+
+####### If found False, set it to True #######
+
+cmedit get --node xSite_IDx ENodeBFunction. mfbiSupport -t
+
+cmedit set xSite_IDx ExternalENodeBFunction.ExternalENodeBFunctionID==.* mfbisupport:true
+
+cmedit get --node xSite_IDx ENodeBFunction. mfbiSupport -t
+
+get . mfbiSupport
+
+get ^ENodeBFunction. mfbiSupportPolicy|caAwareMfbiIntraCellHo|useBandPrioritiesInSCellEval|prioritizeAdditionalBands
+get ^EUtranCellFDD prioAdditionalFreqBandList|mfbiFreqBandIndPrio
+
+##########################################################################################
+Deblock all ulcompgroups
+##########################################################################################
+st UlCompGroup
+
+cmedit get xSite_IDx UlCompGroup.(administrativeState) -t
+
+cmedit set xSite_IDx UlCompGroup administrativeState=UNLOCKED --force
+
+cmedit get xSite_IDx UlCompGroup.(administrativeState) -t
+
+st UlCompGroup
+hget SectorCarrier= reservedBy
+
+###############################################################################
+cmedit action xSITE_IDx BrmBackupManager=1 createBackup.(name="Post_LTE_Int_xDatex")
+cmedit get xSITE_IDx BrmBackup.* -t
+
+
+###### Restart the  Node post Integration before the post checks ######
+cmedit action xSITE_IDx FieldReplaceableUnit=1 restartUnit.(restartrank=RESTART_COLDWTEST,restartreason=PLANNED_RECONFIGURATION) --force
+
+##########################################
+
+*******************************************************************************
+Commands to check the TermPointToGNB and Unlock/set the ipv6Address on Node
+*******************************************************************************
+st TermPointToGNB
+
+hget Transport=1,Router=NR,InterfaceIPv6=NR,AddressIPv6=1 ^address$
+
+*********************************************************************
+Commands to set ipv6Address address if  TermPointToGNB is created on nodes with xgNB_Namex on colocated nodes
+*********************************************************************
+
+cmedit get xSite_IDx TermPointToGNB.TermPointToGNBId==xgNB_Namex
+cmedit set xSite_IDx TermPointToGNB.TermPointToGNBId==xgNB_Namex administrativeState:LOCKED
+cmedit set xSite_IDx TermPointToGNB.TermPointToGNBId==xgNB_Namex ipv6Address : "xsecondary_IPV6_ENODEB_BEARER_IPx"
+cmedit get xSite_IDx TermPointToGNB.TermPointToGNBId==xgNB_Namex
+cmedit set xSite_IDx TermPointToGNB.TermPointToGNBId==xgNB_Namex administrativeState:UNLOCKED
+
+*********************************************************************
+Commands to set ipv6Address address if  TermPointToGNB is created on nodes with xgNBIdx on colocated nodes
+*********************************************************************
+cmedit get xSite_IDx TermPointToGNB.TermPointToGNBId==310410-000000xgNBIdx
+cmedit set xSite_IDx TermPointToGNB.TermPointToGNBId==310410-000000xgNBIdx administrativeState:LOCKED
+cmedit set xSite_IDx TermPointToGNB.TermPointToGNBId==310410-000000xgNBIdx ipv6Address : "xsecondary_IPV6_ENODEB_BEARER_IPx"
+cmedit get xSite_IDx TermPointToGNB.TermPointToGNBId==310410-000000xgNBIdx
+cmedit set xSite_IDx TermPointToGNB.TermPointToGNBId==310410-000000xgNBIdx administrativeState:UNLOCKED
+
+st TermPointToGNB
+
+##########################################
+
+##########################################
+
+lgaesvmr
+
+##########################################
+##########################################
+Check for any BB Crash by below command
+
+llog -l 
+
+*********************************************************
+From the output, pls check for any instance of BBU restart and inform the leads immediately if we observe any restarts. 
+*********************************************************
+
+******************************************************************************************
+******************************************************************************************
+In the output generated, please check the following - 
+Under Program/Extra section : If you see any BB Restart with any Crash signature, Please inform the lead immediately. 
+
+For example,
+
+Extra:    BB Restart: Emca 1:DSP 10: "LPP_send to invalid virtual pidnpid: 0xf1" OR "BB Restart: Data Plane Processing Fault"
+Extra:    "BB Restart: Data Plane Processing Fault"
+Extra:    Recovery action initiated by BB via BCI, faultId: 0x301 (SwError), faultDescription: Emca 1:DSP 26: "LPP_send to invalid virtual pidnpid 
+          /local/lmr-lm-builds_gmake_small_fem111/workspace/LM_BUILD_lratBbomAasArmLm/bbmc/bbOmMeBl/bbOmMeRcsSwU/src/bbomme_svc_basic_handling_eh_rcs.cc:169
+******************************************************************************************
+
+$$$$ Use the below commands to set the attribute, xx has to be replaced with Radio numbers $$$$
+
+cmedit get xSITE_IDx FreqBandData.(freqBandDataId,vswrSupervisionActive,vswrSupervisionSensitivity,dlFrequencyRange,ulFrequencyRange) -t
+
+cmedit set xSITE_IDx FreqBandData.freqBandDataId vswrSupervisionActive=true --force
+cmedit set xSITE_IDx FreqBandData.freqBandDataId vswrSupervisionSensitivity=70 --force
+
+$$$$ Note $$$$
+
+Make sure this has been set at the end of integration and the FE should not change the connections after this point.
+if FE unplug the fibers and plugin a different radio fiber will result in the auto deletion of this MO. So, the attribute has to be set again once the fiber is plugged in to the right Port.
+
+###############################################################################################################################################################################
+################################	               START of eIDL-Y Config		###############################################################################################
+######## FE needs to complete the IDLy connection on site based on the final connections provided with desired cables as per BTS standard Document ############################################################
+Create the IDL MOs on all the nodes using the IDLy templates based on the configuration 
+Ensure all BBLinks are enabled and required intermelinks are enabled on site along with Ethernet ports
+###############################################################################################################################################################################
+
+
+#####################################################
+########## Sample QA generation Process #############
+#####################################################
+
+Please open a New Tab
+
+amosbatch xSITE_IDx 'lt all;s+;kget all;q'
+
+cd xxxspecified pathxxxxxx
+ls
+zip ###kgetallname###.zip xSITE_IDx.log xLTE_SiteID2x.log
+
+Using kgetall generate the QA report
+
+Once QA discrepecnies are verifed proceed for complete Post checks
+
+********************************** Area Lite Checks *********************************************
+################################################################################################
+Area Lite Checks once  Integration is completed before releasing FE    #########################
+################################################################################################
+
+1. Run the Area lite for the node.
+2. Any GS mismatches needs to be address to scripting team or should be taken care from support end post Integration.
+3. Once GS checks completed please share the screen shoots in RSF and mention the GS audit passed for the node.
+
+############################################################
+##########  Area lite Process for clear GS Mismatch ###############################
+############################################################
+ 
+### Please run the Area lite GS checks once the integration is completed, if there are any discrepancies in the Area lite GS use the below mentioned link inorder to clear the GS mismatch.
+ 
+Please open the Qwest tool "http://192.168.10.12:8025/" hit the conversion tools, select Area Lite conversion.
+ 
+Please add the input files as "Area lite GS log files " and take fresh kget all generate the scripts and follow the below mentioned process.
+ 
+Step 1: Run Area-lite GS checks on the node.
+ 
+Step 2: Use the output(Area-lite discrepancies) to generate the CMCLI commands script that are to be executed on the node.  
+ 
+Step 3: Run the commands on the node.
+ 
+Step 4: Please make sure we post the Area-lite discrepancies as well as the commands/scripts that were run on each node in the RSF.
+
+Step 5: Once GS mismatch taken care of,take a CV and restart the node.
+
+Step 6: Put the status of the cells as per the final status required on the site (Ex: Pre cell status as per pre and  Non commercials/Newly added in locked state)
+
+###############################################################################################################
+
+##########################
+- Save the Above Area lite executions logs with below naming
+
+- xSITE_IDx_Area_lite_Verification_logs_check_xxDatexx_Putty_Logs
+- xSITE_IDx_Area_lite_Execution_logs_check_xxDatexx_ENM_Logs
+
+
+** Recorded CLI session and putty logs needs to be saved in Daily logs folder under Execution Logs folder ***
+
+########################################
+## Putty Post checks get commands ##
+########################################
+lt all
+alt
+hget ^EUtranCell.DD cellBarred|sectorCarrierRef|primaryPlmnReserved|state|additionalPlmnReservedList
+hget ^EUtranCell.DD ^tac|ulChannelBandwidth|dlChannelBandwidth|earfcn|transmissionmode$|freqband$|Cellid|Cellrange|rachroot
+hget SectorCarrier=|SectorEquipmentFunction state|configuredMaxTxPower|availableHwOutputPower|xant|reserved
+hget SectorCarrier=|SectorEquipmentFunction branch
+hget riport|sfpmodule state|data@manufacturerDesignation|serialNumber
+hget ^AuxPlugInUnit|FieldReplaceableUnit State|productData@Name|serialNumber
+hget Sector state|configuredMaxTxPower|availableHwOutputPower|noof[rt]x|sectorFunctionRef|bSChannelBw.L|arfcn|txDirection
+get EUtranFreqRelation cellReselectionPriority
+hget rilink=
+get . rfportref
+sdir
+
+
+###############
+##RET Checks##
+###############
+lt all
+hget AntennaNearUnit UniqueId|rfPortRef|State|iuantDeviceType|productNumber
+hget RetSubUnit State|userLabel|reservedby
+hget RetSubUnit iuantBaseStationId|iuantSectorId|electricalAntennaTilt|maxTilt|minTilt|iuantAntennaBearing
+hget TmaSubUnit tmaType|ulTrafficDelay|dlTrafficDelay|dlAttenuation|state|ulGain|reservedBy
+
+##############################
+## Termpoint checks##
+##############################
+
+st TermPointToENB
+st TermPointToGNB
+st TermPointToGNodeB
+st TermPointToMme
+st termpoint
+st TermPointToGNBCUCP
+st TermPointToAmf
+
+##############################
+## System Constants check ##
+##############################
+scg
+
+##############################
+## NGS Checks ##
+##############################
+
+hget rru|aas isSharedWithExternalMe
+get Synchronization=1,RadioEquipmentClock freqDeviationThreshold
+get NodeGroupSyncMember=1
+st sync
+get . clockstate
+sts
+
+##############################
+## GPS Checks ##
+##############################
+
+gpsstatus | grep Product
+st TimeSyncIO
+### Should be Enabled ###
+lpr TimeSyncIO
+st RadioEquipmentClockReference
+### Should be Unlocked/Enabled ###
+sts
+### GPS should be NO_FAULT ###
+
+####### If GPS comes Disabled, check with FE if GPS is installed properly; if FE confirms GPS installation is pending, mark it as Ongoing/Pending in Report #######
+
+
+##############################
+## Date & Time check ##
+##############################
+
+get DateandTime
+get TimeSettings=1
+
+##########################################
+Check for any BB Crash by below command
+
+llog -l 
+
+*********************************************************
+From the output, pls check for any instance of BBU restart and inform the leads immediately if we observe any restarts. 
+*********************************************************
+
+******************************************************************************************
+******************************************************************************************
+In the output generated, please check the following - 
+Under Program/Extra section : If you see any BB Restart with any Crash signature, Please inform the lead immediately. 
+
+For example,
+
+Extra:    BB Restart: Emca 1:DSP 10: "LPP_send to invalid virtual pidnpid: 0xf1" OR "BB Restart: Data Plane Processing Fault"
+Extra:    "BB Restart: Data Plane Processing Fault"
+Extra:    Recovery action initiated by BB via BCI, faultId: 0x301 (SwError), faultDescription: Emca 1:DSP 26: "LPP_send to invalid virtual pidnpid 
+          /local/lmr-lm-builds_gmake_small_fem111/workspace/LM_BUILD_lratBbomAasArmLm/bbmc/bbOmMeBl/bbOmMeRcsSwU/src/bbomme_svc_basic_handling_eh_rcs.cc:169
+******************************************************************************************
+##############################
+## LKF check ##
+##############################
+
+lget KeyFileManagement  
+(Check if installed LKF sequence number is matching on site )
+hget CapacityKey licensedCapacityLimit|capacityUnit prb 
+hget CapacityKey licensedCapacityLimit|capacityUnit user 
+
+##############################
+## IDLe/IDLy checks ##
+##############################
+
+st EthernetPort
+get . VlanPort
+get . caVlanPortRef
+get . eranVlanPortRef
+get . ExtGNBDUPartnerFunction
+
+###################################### Saving Post checks logs ####################################################
+
+Putty session in which putty Postchecks commands are executed needs to be saved with below standard naming convention
+
+xSITE_IDx_Postchecks_xxDatexx_Putty_Logs
+
+
+CLI session in which CLI post checks commands are executed needs to be saved with below standard naming convention
+
+xSITE_IDx_Postchecks_xxDatexx_ENM_Logs
+
+** Recorded and Saved session of Postchecks logs from ENM and putty needs to be saved in Daily logs folder under Postchecks folder ***
+
+#################################################################################################################
+
+#############################################*** QWEST 360 Post checks *** ###########################################
+####################### Complete the Postchecks for Co-located nodes if any and also for Our Node  ###################
+######### Post HC,Post Kgetalls,Post-MOM,SCG Files needs to be taken for Co-located nodes and also for Our Node ########
+QWEST 360 complete pre-post checks link                                                                      ########
+http://192.168.10.12:8025/login/?next=/                                                                      ########
+												                                                             ########
+QWEST 360 Pre-post HC link                                                                                   ########
+http://192.168.10.16/accounts/login/?next=/                                                                  ########
+#####################################################################################################################
+
+#################################
+Save the QWEST Postchecks logs in below format
+
+xSITE_IDx_QWEST_Postchecks_xxDatexx_Logs
+
+** Downloaded Postchecks QWEST logs needs to be saved in Daily logs folder under Postchecks folder ***
+
+#################################
+
+###########################################################################################################################################
+## Take a BackUp CV and FTP to your folder on OSS                                                                                        ##
+## Make sure to save the CV along with the logs in NAS                                                                                   ##
+## Ensure Post Backup CV are taken for all Nodes (Co-Located and our node                                                                 ##
+###########################################################################################################################################
+
+
+#####################################################################################################################
+###                                       NOKIA Postchecks                                                    #######
+#####################################################################################################################
+#####################################################################################################################
+
+QIC must run and capture logs of AL output & DR1 logs from Nokia Hotkey tool. Note:Ensure no discrepancy between pre and post checks.
+
+######################################################### Post checks completed for the site ############################################
+
+####################################################################################################.
+
+(Putty Commands) -  Please make sure all putty logs are getting saved in putty logs folder in local machine before executing the prechecks commands in putty session
+(CLI Commands) -    Please make sure ENM session is recorded before executing the CLI commands as part of prechecks in ENM CLI.
+
+
+##########################
+
+
+cmedit action xSITE_IDx  BrmBackupManager=1 createBackup.(name="BackUp_Post_LTE_Int_CV_xSITE_IDx")
+
+cmedit get xSITE_IDx BrmBackup.* -t
+
+****  Process to Download Backup CV  ****
+1: Run QIC_Integration command in putty in the node
+2: Type option 38 for CV Download from the Menu
+3: Provide the BrmBackup number of the CV that needs to be downloaded
+4: Tool will ask for the confirmation on the CV name that need to be download, Type Y if the CV name is correct
+5: Provide the ENM details and then tool will provide CLI command for execution.
+6: Execute the provide command in the ENM CLI and press Y key in the putty
+7: CV download will show successful,Please login to WINSCP on the respective ENM and download the CV from the path QIC/CVs in the home folder under respective attuid
+
+#################################
+Save the downloaded post CV's in the folder with below naming 
+
+xSITE_IDx_Post_Backup_xxDatexx_CVs
+
+** Downloaded CV of the node needs to be saved in Daily logs folder under CV folder ***
+
+#######################################################################################################################
+####### Note: Create a folder in your system under the nomenclature "FA_xxSiteIdxx_SOW_xDatex_Engineername" folder name. Put all your logs in the folder, zip it & upload in Qwest #######
+#######################################################################################################################
+
+Note: Share all log's in Qwest with sample FA_Siteid_SOW_Date_Engineername folder name.
