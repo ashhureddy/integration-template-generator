@@ -1665,7 +1665,11 @@ with col_inputs:
 
     ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"])
     edp_file = st.file_uploader("EDP (.xlsx / .xls)", type=["xlsx", "xls"])
-    pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
+    pre_file = None
+    if top_scope != "N2E":
+        pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
+    else:
+        st.caption("N2E has no Pre-checks — Pre Configuration is always shown as \"Nokia\".")
     c1, c2 = st.columns(2)
     with c1:
         user_id = st.text_input("User ID", placeholder="e.g. pr970b")
