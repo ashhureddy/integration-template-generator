@@ -45,6 +45,12 @@ def resolve_dss_template(exact_stem):
 TPL_DSS_4SECTOR = resolve_dss_template("standard")
 TPL_DSS_3SECTOR = resolve_dss_template("stand")
 
+TDIR_N2E = Path(__file__).parent / "templates" / "N2E"
+TPL_N2E_LTE = TDIR_N2E / "N2E_LTE_Integration_Procedure_with_LTE_Node_as_Primary_V4.txt"
+TPL_N2E_5G = TDIR_N2E / "N2E_5G_Integration_Procedure_with_5G_Node_as_Primary_V4.txt"
+TPL_N2E_MMBB = TDIR_N2E / "MMBB_N2E_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
+TPL_N2E_TRIMODE = TDIR_N2E / "N2E_TRIMODE_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
+
 # ============================================================
 # SHARED HELPERS
 # ============================================================
@@ -1228,6 +1234,175 @@ def push_all_controller_siad_rows(siad_rows, edp_index, controller_objs):
     return found_status
 
 
+# ============================================================
+# GENERATOR: N2E (Nokia-to-Ericsson) — no Pre-checks at all, greenfield-style build.
+# Pre Configuration is always the fixed string "Nokia"; Post derived from CIQ as usual.
+# ============================================================
+
+def n2e_node_type(row):
+    """LTE-only (no gNBId) / 5G-only (no eNBId) / MMBB / TMBB (TRIMODE), from Mixed Mode Info."""
+    has_lte = is_populated(row.get("eNBId")) or is_populated(row.get("eNodeB Name"))
+    has_5g = is_populated(row.get("gNBId")) or is_populated(row.get("gNodeB Name"))
+    if has_lte and not has_5g:
+        return "LTE"
+    if has_5g and not has_lte:
+        return "5G"
+    bbu_mode = str(row.get("BBU Mode", "")).strip().upper()
+    if bbu_mode == "MMBB":
+        return "MMBB"
+    if bbu_mode == "TMBB":
+        return "TRIMODE"
+    return None
+
+
+def fill_node_template_n2e(template_text, row, edp_index, user_id, date_str, controller_objs, summary_rows, log):
+    """N2E placeholder fill — confirmed mapping, distinct from MCA's fill_node_template.
+    xxOAMIPAddressxx always from EDP ipv6_enodeb_oam_ip matched by Primary ID, regardless of node type.
+    5G-side EDP values (bearer/SIAD/Vlan) always matched by gNodeB Name, not by whichever identity
+    is Primary — confirmed explicitly for MMBB/TRIMODE, and holds trivially for 5G-only too."""
+    node_type = n2e_node_type(row)
+    primary = row.get("Node to be built as")
+    lte_name, gnb_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+    tpl = template_text
+
+    def sub(placeholder, value, note=""):
+        nonlocal tpl
+        if is_populated(value):
+            tpl = tpl.replace(placeholder, str(value))
+            summary_rows.append({"Item": f"{primary} · {placeholder}", "Source": note, "Value": value, "Note": ""})
+            log(f"✓ {primary} · {placeholder} -> {value}")
+        else:
+            summary_rows.append({"Item": f"{primary} · {placeholder}", "Source": note, "Value": "NOT FOUND", "Note": ""})
+            log(f"✗ {primary} · {placeholder} -> NOT FOUND")
+
+    for ph in ("xSite_IDx", "xSITE_IDx", "xxSiteIdxx"):
+        sub(ph, primary, "Primary ID")
+    sub("xxUserIDxx", user_id, "manual")
+    sub("xDatex", date_str, "manual")
+
+    oam_row = edp_row_for(edp_index, primary)
+    sub("xxOAMIPAddressxx", edp_get(edp_index, oam_row, "ipv6_enodeb_oam_ip"), "EDP · ipv6_enodeb_oam_ip (by Primary ID)")
+
+    if node_type == "LTE":
+        lte_row = edp_row_for(edp_index, primary)  # LTE-only: Primary == eNodeB Name
+        sub("xsecondary_IPV6_ENODEB_BEARER_IPx", edp_get(edp_index, lte_row, "ipv6_enodeb_bearer_ip"), "EDP · ipv6_enodeb_bearer_ip (LTE site ID)")
+        sub("xLTE_IPV6_SIAD_BEARER_IPx", edp_get(edp_index, lte_row, "ipv6_siad_bearer_ip_def_router"), "EDP · ipv6_siad_bearer_ip_def_router")
+        sub("xLTE_Vlan_IDx", edp_get(edp_index, lte_row, "bearer_enodeb_sb_vlan_id"), "EDP · bearer_enodeb_sb_vlan_id")
+
+    elif node_type == "5G":
+        sub("xgNBIdx", row.get("gNBId"), "CIQ · Mixed Mode Info")
+        sub("xgNB_Namex", gnb_name, "CIQ · Mixed Mode Info")
+        gnb_row = edp_row_for(edp_index, primary)  # 5G-only: Primary == gNodeB Name
+        bearer_ip = edp_get(edp_index, gnb_row, "ipv6_enodeb_bearer_ip")
+        sub("xSecondary_IPV6_ENODEB_BEARER_IPx", bearer_ip, "EDP · ipv6_enodeb_bearer_ip (5G Primary ID)")
+        sub("xsecondary_IPV6_ENODEB_BEARER_IPx", bearer_ip, "EDP · ipv6_enodeb_bearer_ip (5G Primary ID)")
+        sub("x5G_IPV6_SIAD_BEARER_IPx", edp_get(edp_index, gnb_row, "ipv6_siad_bearer_ip_def_router"), "EDP · ipv6_siad_bearer_ip_def_router")
+        sub("x5G_Vlan_IDx", edp_get(edp_index, gnb_row, "bearer_enodeb_sb_vlan_id"), "EDP · bearer_enodeb_sb_vlan_id")
+
+    elif node_type in ("MMBB", "TRIMODE"):
+        sub("xgNBIdx", row.get("gNBId"), "CIQ · Mixed Mode Info")
+        sub("xgNB_Namex", gnb_name, "CIQ · Mixed Mode Info")
+        gnb_row = edp_row_for(edp_index, gnb_name)  # always matched by gNodeB Name, regardless of Primary/Secondary
+        bearer_ip = edp_get(edp_index, gnb_row, "ipv6_enodeb_bearer_ip")
+        sub("xSecondary_IPV6_ENODEB_BEARER_IPx", bearer_ip, "EDP · ipv6_enodeb_bearer_ip (by gNodeB Name)")
+        sub("xsecondary_IPV6_ENODEB_BEARER_IPx", bearer_ip, "EDP · ipv6_enodeb_bearer_ip (by gNodeB Name)")
+        sub("x5G_IPV6_SIAD_BEARER_IPx", edp_get(edp_index, gnb_row, "ipv6_siad_bearer_ip_def_router"), "EDP · ipv6_siad_bearer_ip_def_router")
+        sub("x5G_Vlan_IDx", edp_get(edp_index, gnb_row, "bearer_enodeb_sb_vlan_id"), "EDP · bearer_enodeb_sb_vlan_id")
+        ctrl_rows = [r for r in controller_objs if str(r.get("Controller", "")).strip() == "6610"]
+        if ctrl_rows:
+            sub("xController_IDX", ctrl_rows[0].get("Controller ID"), "CIQ · Controller Info")
+
+    return tpl
+
+
+def check_sa_conversion(ciq_wb, node_id):
+    """SA Conversion: is this node's ID present anywhere in the CIQ's NR_SA tab?"""
+    if "NR_SA" not in ciq_wb.sheetnames or not node_id:
+        return False
+    for row in ciq_wb["NR_SA"].iter_rows(values_only=True):
+        if any(str(c).strip() == str(node_id).strip() for c in row if c is not None):
+            return True
+    return False
+
+
+def generate_n2e(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str, log):
+    summary_rows, siad_rows, outputs = [], [], []
+    tpl_paths = {"LTE": TPL_N2E_LTE, "5G": TPL_N2E_5G, "MMBB": TPL_N2E_MMBB, "TRIMODE": TPL_N2E_TRIMODE}
+    sa_conversion_nodes = []
+
+    for row in mm_objs:
+        node_type = n2e_node_type(row)
+        primary = row.get("Node to be built as")
+        if node_type is None:
+            summary_rows.append({"Item": f"Node: {primary}", "Source": "node type detection", "Value": "skipped", "Note": "couldn't determine LTE/5G/MMBB/TRIMODE"})
+            log(f"· {primary}: could not determine node type, skipped")
+            continue
+        tpl_path = tpl_paths[node_type]
+        if not tpl_path.exists():
+            summary_rows.append({"Item": f"Node: {primary}", "Source": f"N2E {node_type} template", "Value": "NOT FOUND", "Note": f"expected file not in templates/N2E/: {tpl_path.name} — this node type's template hasn't been uploaded yet"})
+            log(f"✗ {primary}: N2E {node_type} template file not found, skipped")
+            continue
+        tpl_text = tpl_path.read_text(encoding="utf-8")
+        tpl = fill_node_template_n2e(tpl_text, row, edp_index, user_id, date_str, controller_objs, summary_rows, log)
+        outputs.append((f"{primary}_N2E_{node_type}_Integration_Filled.txt", tpl))
+        push_siad_row(siad_rows, edp_index, primary)
+        if check_sa_conversion(ciq_wb, primary):
+            sa_conversion_nodes.append(primary)
+
+    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log)
+    outputs += add_outputs
+    summary_rows += add_summary
+    dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
+    outputs += dss_outputs
+    summary_rows += dss_summary
+    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
+
+    binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
+
+    pre_line = "Nokia"
+    post_parts = []
+    for row in mm_objs:
+        primary = row.get("Node to be built as")
+        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        is_lte_primary = str(primary).strip().upper() == str(e_name or "").strip().upper()
+        r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) if is_lte_primary else find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        if not r:
+            r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        hw = hw_string(r) or "NOT FOUND"
+        if is_populated(e_name) and is_populated(g_name):
+            secondary = g_name if is_lte_primary else e_name
+            bbu_mode = row.get("BBU Mode")
+            post_parts.append(f"{primary}(P)/{secondary}(S)({bbu_mode})({hw})")
+        else:
+            post_parts.append(f"{primary}({hw})")
+    post_line = " + ".join(post_parts)
+
+    # Carrier ADD — no Pre-checks for N2E, so every cell in the CIQ counts as an addition
+    added = {}
+    eutran_objs = sheet_objs(ciq_wb["eUtran Parameters"]) if "eUtran Parameters" in ciq_wb.sheetnames else []
+    fiveg_objs = sheet_objs(ciq_wb["5G Info"]) if "5G Info" in ciq_wb.sheetnames else []
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        cells = []
+        for r in eutran_objs:
+            c = r.get("EutranCellFDDId")
+            if c and e_name and str(c).startswith(str(e_name)):
+                cells.append(c)
+        for r in fiveg_objs:
+            c = r.get("NRCellDU")
+            if c and g_name and str(c).startswith(str(g_name)):
+                cells.append(c)
+        if cells:
+            added[node] = cells
+
+    classification = {"added": added, "moved": [], "deleted_sectors": {}, "deleted_nodes": [], "retuned": []}
+    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
+    for node in sa_conversion_nodes:
+        scope_of_work_lines.append(f"SA conversion.\t{node}")
+
+    return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
+
 
 def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str, precheck_text, log):
     summary_rows, siad_rows, outputs = [], [], []
@@ -1483,7 +1658,7 @@ col_inputs, col_instructions = st.columns([3, 2])
 
 with col_inputs:
     st.subheader("📤 Inputs")
-    top_scope = st.radio("Scope of work", ["CRAN", "MCA", "CENM"], horizontal=True)
+    top_scope = st.radio("Scope of work", ["CRAN", "MCA", "CENM", "N2E"], horizontal=True)
     cran_sub = None
     if top_scope == "CRAN":
         cran_sub = st.selectbox("CRAN scope", ["CRAN SA Rehome Trip 1", "CRAN SA Rehome Trip 2", "CRAN NSA Rehome"])
@@ -1577,6 +1752,9 @@ if run:
     elif top_scope == "CENM":
         summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_cenm(
             ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log)
+    elif top_scope == "N2E":
+        summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_n2e(
+            ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
     else:  # CRAN
         cran_opts = {
             "CRAN SA Rehome Trip 1": (TPL_CRAN_TRIP1, False, False, "CRAN_Trip1"),
