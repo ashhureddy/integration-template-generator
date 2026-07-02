@@ -3,16 +3,12 @@
 ############                                        Updated with LPA Process                                    ###########
 ###########################################################################################################################
 xxSiteIdxx 			-- Site ID
-#### MixedMode Site Node to be built as Name from MixedMode Info Tab Column A	####
 xTRIMODE_Site_IDx   -- MIXEDMODE Site ID
-#### MixedMode Site eNodeB Name from MixedMode Info Tab Column C	####
 xxUserIDxx 			-- Rename with the UserID				****** Eg: au651d
 xxOAMIPAddressxx    -- Replace this with IP Address of the node ****** IP address shown after running the commands in AMOS
 xDatex				-- mmddyyyy format ****** Eg: 03312020
 xgNBIdx			    -- gNBId
-### Column D from Mixed Mode Info Sheet in CIQ
 xgNB_Namex	        -- gNB Name
-### Column E from Mixed Mode Info Sheet in CIQ
 
 
 ###### Inputs from EDP #####
