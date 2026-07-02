@@ -51,6 +51,10 @@ TPL_N2E_5G = TDIR_N2E / "N2E_5G_Integration_Procedure_with_5G_Node_as_Primary_V4
 TPL_N2E_MMBB = TDIR_N2E / "MMBB_N2E_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
 TPL_N2E_TRIMODE = TDIR_N2E / "N2E_TRIMODE_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
 
+TDIR_NSB = Path(__file__).parent / "templates" / "NSB"
+TPL_NSB_MMBB = TDIR_NSB / "LTE+5G_MMBB_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V13.txt"
+TPL_NSB_TRIMODE = TDIR_NSB / "TRIMODE_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
+
 # ============================================================
 # SHARED HELPERS
 # ============================================================
@@ -1404,6 +1408,128 @@ def generate_n2e(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
 
+# ============================================================
+# GENERATOR: NSB — no Pre-checks (Pre Configuration is always the fixed string "NA").
+# Only 2 templates (MMBB, TRIMODE) — no LTE-only/5G-only variants, per the blueprint.
+# Same confirmed placeholder mapping as N2E's MMBB/TRIMODE, minus the controller ID field
+# (NSB templates don't fill xController_IDX directly — 6610 is purely the universal add-on here too).
+# ============================================================
+
+def nsb_node_type(row):
+    bbu_mode = str(row.get("BBU Mode", "")).strip().upper()
+    if bbu_mode == "MMBB":
+        return "MMBB"
+    if bbu_mode == "TMBB":
+        return "TRIMODE"
+    return None
+
+
+def fill_node_template_nsb(template_text, row, edp_index, user_id, date_str, summary_rows, log):
+    """NSB placeholder fill — confirmed identical to N2E's MMBB/TRIMODE mapping, minus xController_IDX."""
+    primary = row.get("Node to be built as")
+    gnb_name = row.get("gNodeB Name")
+    tpl = template_text
+
+    def sub(placeholder, value, note=""):
+        nonlocal tpl
+        if is_populated(value):
+            tpl = tpl.replace(placeholder, str(value))
+            summary_rows.append({"Item": f"{primary} · {placeholder}", "Source": note, "Value": value, "Note": ""})
+            log(f"✓ {primary} · {placeholder} -> {value}")
+        else:
+            summary_rows.append({"Item": f"{primary} · {placeholder}", "Source": note, "Value": "NOT FOUND", "Note": ""})
+            log(f"✗ {primary} · {placeholder} -> NOT FOUND")
+
+    sub("xxSiteIdxx", primary, "Primary ID")
+    sub("xxUserIDxx", user_id, "manual")
+    sub("xDatex", date_str, "manual")
+    sub("xgNBIdx", row.get("gNBId"), "CIQ · Mixed Mode Info")
+    sub("xgNB_Namex", gnb_name, "CIQ · Mixed Mode Info")
+
+    gnb_row = edp_row_for(edp_index, gnb_name)  # always matched by gNodeB Name, regardless of Primary/Secondary
+    bearer_ip = edp_get(edp_index, gnb_row, "ipv6_enodeb_bearer_ip")
+    sub("xsecondary_IPV6_ENODEB_BEARER_IPx", bearer_ip, "EDP · ipv6_enodeb_bearer_ip (by gNodeB Name)")
+    sub("x5G_IPV6_SIAD_BEARER_IPx", edp_get(edp_index, gnb_row, "ipv6_siad_bearer_ip_def_router"), "EDP · ipv6_siad_bearer_ip_def_router")
+    sub("x5G_Vlan_IDx", edp_get(edp_index, gnb_row, "bearer_enodeb_sb_vlan_id"), "EDP · bearer_enodeb_sb_vlan_id")
+
+    return tpl
+
+
+def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str, log):
+    summary_rows, siad_rows, outputs = [], [], []
+    tpl_paths = {"MMBB": TPL_NSB_MMBB, "TRIMODE": TPL_NSB_TRIMODE}
+
+    for row in mm_objs:
+        node_type = nsb_node_type(row)
+        primary = row.get("Node to be built as")
+        if node_type is None:
+            summary_rows.append({"Item": f"Node: {primary}", "Source": "node type detection", "Value": "skipped", "Note": "NSB only supports MMBB/TMBB — not LTE-only or 5G-only"})
+            log(f"· {primary}: BBU Mode not MMBB/TMBB, skipped")
+            continue
+        tpl_path = tpl_paths[node_type]
+        if not tpl_path.exists():
+            summary_rows.append({"Item": f"Node: {primary}", "Source": f"NSB {node_type} template", "Value": "NOT FOUND", "Note": f"expected file not in templates/NSB/: {tpl_path.name}"})
+            log(f"✗ {primary}: NSB {node_type} template file not found, skipped")
+            continue
+        tpl_text = tpl_path.read_text(encoding="utf-8")
+        tpl = fill_node_template_nsb(tpl_text, row, edp_index, user_id, date_str, summary_rows, log)
+        outputs.append((f"{primary}_NSB_{node_type}_Integration_Filled.txt", tpl))
+        push_siad_row(siad_rows, edp_index, primary)
+
+    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log)
+    outputs += add_outputs
+    summary_rows += add_summary
+    dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
+    outputs += dss_outputs
+    summary_rows += dss_summary
+    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
+
+    binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
+
+    pre_line = "NA"
+    post_parts = []
+    for row in mm_objs:
+        primary = row.get("Node to be built as")
+        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        is_lte_primary = str(primary).strip().upper() == str(e_name or "").strip().upper()
+        r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) if is_lte_primary else find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        if not r:
+            r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        hw = hw_string(r) or "NOT FOUND"
+        if is_populated(e_name) and is_populated(g_name):
+            secondary = g_name if is_lte_primary else e_name
+            bbu_mode = row.get("BBU Mode")
+            post_parts.append(f"{primary}(P)/{secondary}(S)({bbu_mode})({hw})")
+        else:
+            post_parts.append(f"{primary}({hw})")
+    post_line = " + ".join(post_parts)
+
+    # Carrier ADD — no Pre-checks for NSB, so every cell in the CIQ counts as an addition (same rule as N2E)
+    added = {}
+    eutran_objs = sheet_objs(ciq_wb["eUtran Parameters"]) if "eUtran Parameters" in ciq_wb.sheetnames else []
+    fiveg_objs = sheet_objs(ciq_wb["5G Info"]) if "5G Info" in ciq_wb.sheetnames else []
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        cells = []
+        for r in eutran_objs:
+            c = r.get("EutranCellFDDId")
+            if c and e_name and str(c).startswith(str(e_name)):
+                cells.append(c)
+        for r in fiveg_objs:
+            c = r.get("NRCellDU")
+            if c and g_name and str(c).startswith(str(g_name)):
+                cells.append(c)
+        if cells:
+            added[node] = cells
+
+    classification = {"added": added, "moved": [], "deleted_sectors": {}, "deleted_nodes": [], "retuned": []}
+    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
+    scope_of_work_lines.append("IDL Connections:\tNOT YET BUILT — flagged, not implemented")
+
+    return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
+
+
 def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str, precheck_text, log):
     summary_rows, siad_rows, outputs = [], [], []
     tpl_mmbb = TPL_MMBB.read_text(encoding="utf-8")
@@ -1658,7 +1784,7 @@ col_inputs, col_instructions = st.columns([3, 2])
 
 with col_inputs:
     st.subheader("📤 Inputs")
-    top_scope = st.radio("Scope of work", ["CRAN", "MCA", "CENM", "N2E"], horizontal=True)
+    top_scope = st.radio("Scope of work", ["CRAN", "MCA", "CENM", "N2E", "NSB"], horizontal=True)
     cran_sub = None
     if top_scope == "CRAN":
         cran_sub = st.selectbox("CRAN scope", ["CRAN SA Rehome Trip 1", "CRAN SA Rehome Trip 2", "CRAN NSA Rehome"])
@@ -1666,7 +1792,7 @@ with col_inputs:
     ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"])
     edp_file = st.file_uploader("EDP (.xlsx / .xls)", type=["xlsx", "xls"])
     pre_file = None
-    if top_scope != "N2E":
+    if top_scope not in ("N2E", "NSB"):
         pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
     c1, c2 = st.columns(2)
     with c1:
@@ -1756,6 +1882,9 @@ if run:
             ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log)
     elif top_scope == "N2E":
         summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_n2e(
+            ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
+    elif top_scope == "NSB":
+        summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_nsb(
             ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
     else:  # CRAN
         cran_opts = {
