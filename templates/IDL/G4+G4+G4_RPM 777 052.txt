@@ -1,0 +1,163 @@
+##################################################################
+################	G4 BBU + G4 BBU + G4 BBU - connection	################
+##################################################################
+Replace below with the details from CIQ
+
+##2nd_G4_NODE_ID##
+##2nd_G4_NODE_GNB_ID##
+##2nd_G4_5G_NODE_ID##
+##2nd_G4_BBU_ENBID##
+
+##1st_G4_NODE_ID##
+##1st_G4_NODE_GNB_ID#
+##1st_G4_5G_NODE_ID##
+##1st_G4_BBU_ENBID##
+
+##3rd_G4_NODE_ID##
+##3rd_G4_NODE_GNB_ID##
+##3rd_G4_5G_NODE_ID##
+##3rd_G4_BBU_ENBID##
+
+
+#############Commands###############
+
+##1st_G4_NODE_ID##
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_D TnPortID=TN_IDL_D;userLabel=DualCA
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_D1 EthernetPortID=ERAN_DualCA_D1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_D";admOperatingMode=10G_FULL;autoNegEnable=false;userLabel=TN_IDL_D_port;egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;lldpTransmit=DISABLED;supplicant=<empty>;administrativeState=UNLOCKED
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1 VlanPortID=ERAN_NRCA_D1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_D1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_3;vlanId=3
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_D1 VlanPortID=ERAN_CA_D1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_D1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_1;vlanId=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,ENodeBFunction=1 eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_D1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,ENodeBFunction=1,EUtraNetwork=1,ExternalENodeBFunction=310410-##2nd_G4_BBU_ENBID## eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_D1"
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##2nd_G4_5G_NODE_ID## ExtGNBDUPartnerFunctionID=##2nd_G4_5G_NODE_ID##;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1";gNBDUId=1;gNBId=##2nd_G4_NODE_GNB_ID##;gNBIdLength=26
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##2nd_G4_5G_NODE_ID## caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_E TnPortID=TN_IDL_E;userLabel=DualCA
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_E1 EthernetPortID=ERAN_DualCA_E1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_E";admOperatingMode=10G_FULL;autoNegEnable=false;userLabel=TN_IDL_E_port;egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;lldpTransmit=DISABLED;supplicant=<empty>;administrativeState=UNLOCKED
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1 VlanPortID=ERAN_NRCA_E1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_E1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_3;vlanId=3
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_E1 VlanPortID=ERAN_CA_E1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_E1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_1;vlanId=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,ENodeBFunction=1 eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_E1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,ENodeBFunction=1,EUtraNetwork=1,ExternalENodeBFunction=310410-##3rd_G4_BBU_ENBID## eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_E1"
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##3rd_G4_5G_NODE_ID## ExtGNBDUPartnerFunctionID=##3rd_G4_5G_NODE_ID##;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1";gNBDUId=1;gNBId=##3rd_G4_NODE_GNB_ID##;gNBIdLength=26
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##3rd_G4_5G_NODE_ID## caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##1st_G4_NODE_ID##,ManagedElement=##1st_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1"
+
+
+
+
+##2nd_G4_NODE_ID##
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_D TnPortID=TN_IDL_D;userLabel=DualCA
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_D1 EthernetPortID=ERAN_DualCA_D1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_D";admOperatingMode=10G_FULL;autoNegEnable=false;userLabel=TN_IDL_D_port;egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;lldpTransmit=DISABLED;supplicant=<empty>;administrativeState=UNLOCKED
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1 VlanPortID=ERAN_NRCA_D1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_D1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_3;vlanId=3
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_D1 VlanPortID=ERAN_CA_D1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_D1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_1;vlanId=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,ENodeBFunction=1 eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,ENodeBFunction=1,EUtraNetwork=1,ExternalENodeBFunction=310410-##1st_G4_BBU_ENBID## eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_D1"
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##1st_G4_5G_NODE_ID## ExtGNBDUPartnerFunctionID=##1st_G4_5G_NODE_ID##;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1";gNBDUId=1;gNBId=##1st_G4_NODE_GNB_ID##;gNBIdLength=26
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##1st_G4_5G_NODE_ID## caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_E TnPortID=TN_IDL_E;userLabel=DualCA
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_E1 EthernetPortID=ERAN_DualCA_E1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_E";admOperatingMode=10G_FULL;autoNegEnable=false;userLabel=TN_IDL_E_port;egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;lldpTransmit=DISABLED;supplicant=<empty>;administrativeState=UNLOCKED
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1 VlanPortID=ERAN_NRCA_E1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_E1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_3;vlanId=3
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_E1 VlanPortID=ERAN_CA_E1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_E1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_1;vlanId=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,ENodeBFunction=1 eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_E1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,ENodeBFunction=1,EUtraNetwork=1,ExternalENodeBFunction=310410-##3rd_G4_BBU_ENBID## eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_E1"
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##3rd_G4_5G_NODE_ID## ExtGNBDUPartnerFunctionID=##3rd_G4_5G_NODE_ID##;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1";gNBDUId=1;gNBId=##3rd_G4_NODE_GNB_ID##;gNBIdLength=26
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##3rd_G4_5G_NODE_ID## caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##2nd_G4_NODE_ID##,ManagedElement=##2nd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1"
+
+
+
+##3rd_G4_NODE_ID##
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_D TnPortID=TN_IDL_D;userLabel=DualCA
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_D1 EthernetPortID=ERAN_DualCA_D1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_D";admOperatingMode=10G_FULL;autoNegEnable=false;userLabel=TN_IDL_D_port;egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;lldpTransmit=DISABLED;supplicant=<empty>;administrativeState=UNLOCKED
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1 VlanPortID=ERAN_NRCA_D1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_D1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_3;vlanId=3
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_D1 VlanPortID=ERAN_CA_D1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_D1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_1;vlanId=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,ENodeBFunction=1 eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,ENodeBFunction=1,EUtraNetwork=1,ExternalENodeBFunction=310410-##1st_G4_BBU_ENBID## eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_D1"
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##1st_G4_5G_NODE_ID## ExtGNBDUPartnerFunctionID=##1st_G4_5G_NODE_ID##;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1";gNBDUId=1;gNBId=##1st_G4_NODE_GNB_ID##;gNBIdLength=26
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##1st_G4_5G_NODE_ID## caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_D1"
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_E TnPortID=TN_IDL_E;userLabel=DualCA
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_E1 EthernetPortID=ERAN_DualCA_E1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Equipment=1,FieldReplaceableUnit=1,TnPort=TN_IDL_E";admOperatingMode=10G_FULL;autoNegEnable=false;userLabel=TN_IDL_E_port;egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;lldpTransmit=DISABLED;supplicant=<empty>;administrativeState=UNLOCKED
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1 VlanPortID=ERAN_NRCA_E1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_E1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_3;vlanId=3
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_E1 VlanPortID=ERAN_CA_E1;encapsulation="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,EthernetPort=ERAN_DualCA_E1";egressQosClassification=<empty>;egressQosMarking=<empty>;egressQosQueueMap=<empty>;isTagged=True;lowLatencySwitching=false;userLabel=L3vlan_1;vlanId=1
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,ENodeBFunction=1 eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_E1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,ENodeBFunction=1,EUtraNetwork=1,ExternalENodeBFunction=310410-##2nd_G4_BBU_ENBID## eranVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_CA_E1"
+
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##2nd_G4_5G_NODE_ID## ExtGNBDUPartnerFunctionID=##2nd_G4_5G_NODE_ID##;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1";gNBDUId=1;gNBId=##2nd_G4_NODE_GNB_ID##;gNBIdLength=26
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##2nd_G4_5G_NODE_ID## caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1"
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##3rd_G4_NODE_ID##,ManagedElement=##3rd_G4_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA_E1"
