@@ -1103,7 +1103,10 @@ def radio_family(radio_string):
 def build_colocation_groups(ciq_wb):
     """Cell -> canonical co-location group key, from eUtran Parameters' 'Co-Located Technology
     Cell' column (lists peer cell names sharing the same physical radio, spans LTE+5G together).
-    'NA' or blank means the cell isn't co-located with anything else."""
+    'NA' or blank means the cell isn't co-located with anything else. The group is registered
+    under EVERY member's name (the LTE cell itself plus all its listed peers, including 5G
+    cells) — a 5G cell only ever appears as a peer inside an LTE row, never as its own row, so
+    without this it could never find the group it's actually listed in."""
     groups = {}
     if "eUtran Parameters" not in ciq_wb.sheetnames:
         return groups
@@ -1115,7 +1118,9 @@ def build_colocation_groups(ciq_wb):
         if colo_raw and str(colo_raw).strip().upper() != "NA":
             peers = {p.strip() for p in str(colo_raw).split(",") if p.strip()}
             peers.add(cell)
-            groups[cell] = tuple(sorted(peers))
+            group_key = tuple(sorted(peers))
+            for member in peers:
+                groups[member] = group_key
         else:
             groups[cell] = (cell,)
     return groups
