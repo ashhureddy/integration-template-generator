@@ -512,10 +512,7 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
 
     physical_groups = []
     for entries in by_physical_radio.values():
-        labels = []
-        for e in entries:
-            if e["label"] not in labels:
-                labels.append(e["label"])
+        labels = sorted({e["label"] for e in entries if e.get("label")})
         sectors = sorted({e["sector"] for e in entries if e.get("sector")}, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
         physical_groups.append({"labels": tuple(labels), "from": entries[0]["from"], "to": entries[0]["to"], "sectors": sectors})
 
@@ -530,7 +527,7 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
         label_str = labels[0] if len(labels) == 1 else f"[{'|'.join(labels)}]"
         sector_names = sorted(sector_set, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
         is_whole = WHOLE_BAND_SET <= sector_set
-        sectors_str = "" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
+        sectors_str = " sectors" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
         lines.append(f"Radio Swap on:\t{label_str}{sectors_str}\tFrom:\t{from_radio}\tTo:\t{to_radio}")
 
     if dss_outputs_meta:
