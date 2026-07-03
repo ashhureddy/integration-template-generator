@@ -1005,6 +1005,178 @@ def generate_final_connections(ciq_wb, mm_objs):
 
 
 # ============================================================
+# IDL CONNECTIONS (shared by MCA / CENM / NSB — CIQ-only, no Pre-checks PDF)
+#
+# Confirmed logic:
+#  - Trigger: site has 2+ BBU rows in Mixed Mode Info.
+#  - Per node: type (MMBB/TMBB vs LTE-standalone vs 5G-standalone) is read off eNBId/gNBId
+#    presence in Mixed Mode Info; board generation comes from the "DU type" column in
+#    eNB Info (LTE-standalone), gNB Info (5G-standalone), or either (MMBB/TMBB) —
+#    "1st DU type"/"2nd DU type" are explicitly ignored.
+#  - DU type -> generation: 6630/5216 -> G2, 6648/6651 -> G3, 6672 -> G4.
+#  - The site's generation combination (order-independent) is matched against the confirmed
+#    15-template registry. Combinations with both a Preferred and Alternate variant
+#    (G2+G3, G3+G3, G3+G3+G3) generate BOTH files. The 4 known-unsupported 3-BBU
+#    combinations (G2+G2+G4, G2+G3+G4, G3+G3+G4, G3+G4+G4) return "IDL template not found".
+#  - Node ordering for same-generation nodes follows CIQ row order, top = 1st.
+#  - Placeholder filling is generic rather than hardcoded per template: for each node we build
+#    a set of candidate slot-prefixes (global row-position ordinal, per-generation-group
+#    ordinal, and the plain generation label when that generation is a singleton at the site)
+#    and only replace whichever placeholder actually appears in that specific template file —
+#    per your instruction to "just fill whatever placeholders the template has", since the 15
+#    files don't all share one exact naming convention (e.g. G2+G4+G4 uses Node_ID/ENBID
+#    instead of NODE_ID/Node_eNBId).
+# ============================================================
+
+TDIR_IDL = Path(__file__).parent / "templates" / "IDL"
+
+DU_TYPE_TO_GEN = {"6630": "G2", "5216": "G2", "6648": "G3", "6651": "G3", "6672": "G4"}
+
+# combo (sorted tuple of generations) -> list of (filename, variant label)
+IDL_TEMPLATE_REGISTRY = {
+    ("G2", "G2"): [("G2_G2_RPM_777_417.txt", "")],
+    ("G2", "G3"): [("G2__G3_RPM_777_544.txt", "Preferred"), ("G2__G3_RPM_777_098.txt", "Alternate")],
+    ("G2", "G4"): [("G4_G2_RPM_777_543.txt", "IDLe")],
+    ("G3", "G3"): [("G3_G3_RPM_777_052.txt", "Preferred"), ("G3_G3_RPM_777_053.txt", "Alternate")],
+    ("G3", "G4"): [("G4_G3_RPM_777_052.txt", "IDLe")],
+    ("G4", "G4"): [("G4_G4_RPM_777_052.txt", "Preferred")],
+    ("G2", "G2", "G2"): [("G2__G2_G2_RPM_77_417.txt", "")],
+    ("G2", "G2", "G3"): [("G2__G2_G3_RPM_77_417_098.txt", "")],
+    ("G2", "G3", "G3"): [("G2_G3_G3_RPM_777_053_544.txt", "")],
+    ("G3", "G3", "G3"): [("G3__G3__G3_RPM_777_052.txt", "Preferred"), ("G3__G3__G3_RPM_777_053.txt", "Alternate")],
+    ("G2", "G4", "G4"): [("G2_G4_G4_RPM_777_053_543.txt", "")],
+    ("G4", "G4", "G4"): [("G4_G4_G4_RPM_777_052.txt", "")],
+    # ("G2","G2","G4"), ("G2","G3","G4"), ("G3","G3","G4"), ("G3","G4","G4") -> no template exists;
+    # falls through to the "IDL template not found" branch below.
+}
+
+IDL_SUFFIX_CANDIDATES = {
+    "NODE_ID": ["NODE_ID", "Node_ID", "BBU_Node_ID"],
+    "5G_NODE_ID": ["5G_NODE_ID", "5G_NodeID"],
+    "GNB_ID": ["NODE_GNB_ID", "GNBID"],
+    "eNBId": ["Node_eNBId", "ENBID", "BBU_ENBID"],
+}
+
+
+def _ordinal(n):
+    return {1: "1st", 2: "2nd", 3: "3rd"}.get(n, f"{n}th")
+
+
+def get_node_generation(ciq_wb, row):
+    """Board generation (G2/G3/G4) for one Mixed Mode Info row, per confirmed rule."""
+    has_enb = is_populated(row.get("eNBId"))
+    has_gnb = is_populated(row.get("gNBId"))
+    e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+
+    du_type = None
+    if has_enb and has_gnb:  # MMBB/TMBB — either tab carries it
+        r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name)
+        du_type = r.get("DU type") if r else None
+        if not is_populated(du_type):
+            r = find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+            du_type = r.get("DU type") if r else None
+    elif has_enb:  # LTE standalone
+        r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name)
+        du_type = r.get("DU type") if r else None
+    elif has_gnb:  # 5G standalone
+        r = find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        du_type = r.get("DU type") if r else None
+
+    if not is_populated(du_type):
+        return None
+    return DU_TYPE_TO_GEN.get(str(du_type).strip())
+
+
+def _idl_node_values(row):
+    return {
+        "NODE_ID": row.get("Node to be built as"),
+        "5G_NODE_ID": row.get("gNodeB Name"),
+        "GNB_ID": row.get("gNBId"),
+        "eNBId": row.get("eNBId"),
+    }
+
+
+def fill_idl_template(template_text, node_slots, summary_rows, log, template_name):
+    """node_slots: list of (candidate_prefixes, row). For each node/concept, tries every
+    candidate-prefix x suffix-variant combination and fills whichever placeholder actually
+    exists in this template — templates only get the placeholders they actually reference."""
+    tpl = template_text
+    for prefixes, row in node_slots:
+        values = _idl_node_values(row)
+        node_label = row.get("Node to be built as")
+        for concept, value in values.items():
+            for prefix in prefixes:
+                for suffix in IDL_SUFFIX_CANDIDATES[concept]:
+                    placeholder = f"##{prefix}_{suffix}##"
+                    if placeholder in tpl:
+                        if is_populated(value):
+                            tpl = tpl.replace(placeholder, str(value))
+                            summary_rows.append({"Item": f"IDL · {node_label} · {placeholder}", "Source": template_name, "Value": value, "Note": ""})
+                            log(f"✓ IDL {template_name}: {placeholder} -> {value}")
+                        else:
+                            summary_rows.append({"Item": f"IDL · {node_label} · {placeholder}", "Source": template_name, "Value": "NOT FOUND", "Note": ""})
+                            log(f"✗ IDL {template_name}: {placeholder} -> NOT FOUND")
+    return tpl
+
+
+def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log):
+    """Returns (outputs, summary_rows, scope_lines) — same shape as the other generate_* add-ons.
+    Shared by MCA / CENM / NSB. No-ops (returns empty) for single-BBU sites."""
+    outputs, summary_rows, scope_lines = [], [], []
+
+    if len(mm_objs) < 2:
+        return outputs, summary_rows, scope_lines
+
+    nodes = [{"row": row, "gen": get_node_generation(ciq_wb, row)} for row in mm_objs]
+
+    unresolved = [n["row"].get("Node to be built as") for n in nodes if not n["gen"]]
+    if unresolved:
+        note = f"Could not determine board generation (DU type) for: {', '.join(str(u) for u in unresolved)}"
+        summary_rows.append({"Item": "IDL Connections", "Source": "DU type lookup", "Value": "NOT FOUND", "Note": note})
+        log(f"✗ IDL Connections: {note}")
+        scope_lines.append(f"IDL Connections:\tCould not determine board generation\t{', '.join(str(u) for u in unresolved)}")
+        return outputs, summary_rows, scope_lines
+
+    combo = tuple(sorted(n["gen"] for n in nodes))
+    matches = IDL_TEMPLATE_REGISTRY.get(combo)
+
+    if not matches:
+        summary_rows.append({"Item": "IDL Connections", "Source": f"combination {'+'.join(combo)}", "Value": "IDL template not found", "Note": ""})
+        log(f"✗ IDL Connections: IDL template not found for combination {'+'.join(combo)}")
+        scope_lines.append(f"IDL Connections:\tIDL template not found\t{'+'.join(combo)}")
+        return outputs, summary_rows, scope_lines
+
+    gen_counts = {}
+    for n in nodes:
+        gen_counts[n["gen"]] = gen_counts.get(n["gen"], 0) + 1
+    group_seen = {}
+    for i, n in enumerate(nodes, start=1):
+        g = n["gen"]
+        group_seen[g] = group_seen.get(g, 0) + 1
+        candidates = [f"{_ordinal(i)}_{g}", f"{_ordinal(group_seen[g])}_{g}"]
+        if gen_counts[g] == 1:
+            candidates.append(g)
+        n["prefixes"] = list(dict.fromkeys(candidates))  # dedupe, preserve order
+
+    site_id = mm_objs[0].get("Node to be built as", "site")
+    node_slots = [(n["prefixes"], n["row"]) for n in nodes]
+
+    for fname, variant in matches:
+        tpl_path = TDIR_IDL / fname
+        if not tpl_path.exists():
+            summary_rows.append({"Item": "IDL Connections", "Source": f"template {fname}", "Value": "NOT FOUND", "Note": f"expected file not in templates/IDL/: {fname}"})
+            log(f"✗ IDL Connections: template file not found: {fname}")
+            continue
+        tpl_text = tpl_path.read_text(encoding="utf-8")
+        filled = fill_idl_template(tpl_text, node_slots, summary_rows, log, fname)
+        label = "+".join(combo) + (f"_{variant}" if variant else "")
+        outputs.append((f"{site_id}_IDL_Connections_{label}.txt", filled))
+        scope_lines.append(f"IDL Connections:\t{'+'.join(combo)}" + (f" ({variant})" if variant else "") + f"\t{fname}")
+
+    return outputs, summary_rows, scope_lines
+
+
+# ============================================================
 # PRE FIBERS (universal — pulled from Pre-checks' DL/UL Loss table)
 # ============================================================
 
@@ -1492,6 +1664,9 @@ def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
+    idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log)
+    outputs += idl_outputs
+    summary_rows += idl_summary
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
 
@@ -1534,7 +1709,7 @@ def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
 
     classification = {"added": added, "moved": [], "deleted_sectors": {}, "deleted_nodes": [], "retuned": []}
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
-    scope_of_work_lines.append("IDL Connections:\tNOT YET BUILT — flagged, not implemented")
+    scope_of_work_lines += idl_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1567,6 +1742,9 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
+    idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log)
+    outputs += idl_outputs
+    summary_rows += idl_summary
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
@@ -1580,6 +1758,7 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
     radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
+    scope_of_work_lines += idl_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1616,6 +1795,9 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
+    idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log)
+    outputs += idl_outputs
+    summary_rows += idl_summary
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
@@ -1629,6 +1811,7 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
     radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
+    scope_of_work_lines += idl_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
