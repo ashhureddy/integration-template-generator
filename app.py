@@ -260,8 +260,8 @@ def push_controller_siad_row(rows, edp_index, controller_id):
     found = row is not None and anceq_type and "6610" in str(anceq_type)
     rows.append({
         "Node": controller_id,
-        "SIAD CLLI": edp_get(edp_index, row, "SIAD_CLLI") or "NOT FOUND",
-        "Port Size": "1G",
+        "SIAD CLLI": (edp_get(edp_index, row, "SIAD_CLLI") or "NOT FOUND") if found else "NOT FOUND",
+        "Port Size": "1G" if found else "NOT FOUND",
         "Port Facing BBU": (edp_get(edp_index, row, "ANCEQ_SIAD_PORT") or "NOT FOUND") if found else "EDP not published for controller",
     })
     return found
@@ -470,9 +470,10 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
     ctrl_rows = [r for r in controller_objs if str(r.get("Controller", "")).strip() == "6610"]
     for r in ctrl_rows:
         ctrl_id = r.get('Controller ID')
-        lines.append(f"6610 Controller Integration:\t{ctrl_id}")
         if controller_edp_found is not None and controller_edp_found.get(ctrl_id) is False:
-            lines.append(f"6610 Controller Integration:\tEDP is not published for the controller\t{ctrl_id}")
+            lines.append(f"EDP is not published for the controller — {ctrl_id}")
+        else:
+            lines.append(f"6610 Controller Integration:\t{ctrl_id}")
 
     moved_by_pair = {}
     for m in classification.get("moved", []):
@@ -612,9 +613,11 @@ def fill_node_template(base_tpl, row, edp_index, user_id, date_str, summary_rows
     return tpl
 
 
-def generate_6610(controller_objs, user_id, date_str, log):
+def generate_6610(controller_objs, user_id, date_str, log, edp_found=None):
     """Universal add-on: generate the 6610 controller template if Controller Info shows 6610.
-    Applies to ALL scopes (MCA, CENM, CRAN) per the blueprint's 'For ALL SCOPES' rule."""
+    Applies to ALL scopes (MCA, CENM, CRAN) per the blueprint's 'For ALL SCOPES' rule.
+    edp_found: {controller_id: bool} — a controller not confirmed published in EDP gets no
+    IX template at all (nothing reliable to fill it with), just a summary note explaining why."""
     outputs, summary_rows = [], []
     ctrl_rows = [r for r in controller_objs if str(r.get("Controller", "")).strip() == "6610"]
     if not ctrl_rows:
@@ -622,6 +625,10 @@ def generate_6610(controller_objs, user_id, date_str, log):
     base_tpl = TPL_6610.read_text(encoding="utf-8")
     for r in ctrl_rows:
         ctrl_id = r.get("Controller ID")
+        if edp_found is not None and edp_found.get(ctrl_id) is False:
+            summary_rows.append({"Item": "6610 Controller ID", "Source": "CIQ · Controller Info", "Value": ctrl_id, "Note": "EDP not published — 6610 IX template skipped"})
+            log(f"✗ 6610 present but EDP not published for Controller ID {ctrl_id} — IX template skipped")
+            continue
         tpl = base_tpl.replace("##Controller_id##", str(ctrl_id))
         tpl = tpl.replace("xSite_IDx", str(ctrl_id))
         tpl = tpl.replace("xxUserIDxx", user_id)
@@ -1355,13 +1362,13 @@ def generate_n2e(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
         if check_sa_conversion(ciq_wb, primary):
             sa_conversion_nodes.append(primary)
 
-    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log)
+    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
+    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log, controller_edp_found)
     outputs += add_outputs
     summary_rows += add_summary
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
-    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
 
@@ -1478,13 +1485,13 @@ def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
         outputs.append((f"{primary}_NSB_{node_type}_Integration_Filled.txt", tpl))
         push_siad_row(siad_rows, edp_index, primary)
 
-    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log)
+    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
+    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log, controller_edp_found)
     outputs += add_outputs
     summary_rows += add_summary
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
-    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
 
@@ -1553,13 +1560,13 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
             log(f"· {site_id}: BBU Mode = {bbu_mode}, skipped")
             push_siad_row(siad_rows, edp_index, site_id)
 
-    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log)
+    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
+    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log, controller_edp_found)
     outputs += add_outputs
     summary_rows += add_summary
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
-    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
@@ -1602,13 +1609,13 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
             summary_rows.append({"Item": f"Node: {site_id}", "Source": f"BBU Mode = {row.get('BBU Mode')}", "Value": "skipped for template", "Note": "not TMBB — still included in Pre/Post and SIAD"})
             push_siad_row(siad_rows, edp_index, site_id)
 
-    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log)
+    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
+    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log, controller_edp_found)
     outputs += add_outputs
     summary_rows += add_summary
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
-    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
@@ -1753,13 +1760,13 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
 
     outputs.append((f"{target.get('Node to be built as')}_{out_name}_Filled.txt", tpl))
 
-    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log)
+    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
+    add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log, controller_edp_found)
     outputs += add_outputs
     summary_rows += add_summary
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
-    controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
 
     binary_outputs = [(f"Final_Connections_{target.get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))]
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
