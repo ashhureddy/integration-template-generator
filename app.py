@@ -1764,9 +1764,12 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     if pre_fibers_bytes:
         binary_outputs.append((f"Pre_Fibers_{target.get('Node to be built as','site')}.xlsx", pre_fibers_bytes))
 
-    # CRAN has no Carrier ADD/Delete/Move "checks" per the blueprint — only 6610 and DSS ride along here
+    # CRAN's checklist now matches MCA/CENM (Carrier ADD/Delete/Move, Retune) — run the same
+    # classification off the same Sector Del_Movement tab CRAN already reads for role detection.
+    # Pre/Post Configuration stays CRAN's own distinct role-based format, untouched above.
     radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
-    scope_of_work_lines = format_scope_of_work({"added": {}, "moved": [], "deleted_sectors": {}, "deleted_nodes": [], "retuned": []}, controller_objs, dss_labels, controller_edp_found, radio_swaps)
+    classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
+    scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
