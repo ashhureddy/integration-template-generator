@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 import io
+import time
 import zipfile
 from datetime import date
 from pathlib import Path
@@ -1968,19 +1969,247 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
 
 
 # ============================================================
+# CHECKS-PERFORMED PANEL (per-scope checklist, matched against the blueprint) —
+# derives pass/fail per check from the already-computed scope_lines rather than
+# threading new return values through every generate_* function.
+# ============================================================
+
+SCOPE_CHECKLIST = {
+    "CRAN": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks"],
+    "MCA": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks"],
+    "CENM": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks"],
+    "N2E": ["Carrier ADD", "IDL Connections", "DSS checks", "6610 Present", "SA Conversion", "NGS Checks"],
+    "NSB": ["Carrier ADD", "IDL Connections", "DSS checks", "NGS Checks", "6610 Present"],
+}
+
+# label -> function(line) -> True if that scope_lines entry counts as a "found/applicable" hit for this check
+CHECK_MATCHERS = {
+    "Carrier ADD": lambda l: l.startswith("Integration:"),
+    "Carrier delete": lambda l: l.startswith("Deleted Node from ENM:") or l.startswith("Deleted Sector:"),
+    "Carrier moving": lambda l: l.startswith("Moved Sectors:"),
+    "IDL Connections": lambda l: l.startswith("IDL Connections:") and "not found" not in l.lower() and "could not determine" not in l.lower(),
+    "DSS checks": lambda l: l.startswith("DSS Activation:"),
+    "Radio swap": lambda l: l.startswith("Radio Swap on:"),
+    "Retune": lambda l: l.startswith("Retune on:"),
+    "6610 Present": lambda l: l.startswith("6610 Controller Integration:") or l.startswith("EDP is not published for the controller"),
+    "SA Conversion": lambda l: l.startswith("SA conversion."),
+    "NGS Checks": lambda l: False,
+}
+
+# (scope, check label) pairs that aren't wired into the tool yet — shown as not-run rather than a
+# misleading "fail", since a fail here would otherwise look identical to "this site has none of these"
+NOT_BUILT_YET = {
+    ("CRAN", "IDL Connections"), ("N2E", "IDL Connections"),
+    ("CRAN", "NGS Checks"), ("MCA", "NGS Checks"), ("CENM", "NGS Checks"), ("N2E", "NGS Checks"), ("NSB", "NGS Checks"),
+}
+
+
+def derive_check_status(top_scope, scope_lines):
+    checklist = SCOPE_CHECKLIST.get(top_scope, [])
+    lines = scope_lines or []
+    results = []
+    for label in checklist:
+        matcher = CHECK_MATCHERS.get(label, lambda l: False)
+        found = any(matcher(line) for line in lines)
+        results.append({"label": label, "found": found, "not_built": (top_scope, label) in NOT_BUILT_YET})
+    return results
+
+
+def render_checks_panel(container, top_scope, scope_lines):
+    """Reveals each check row in sequence for a live, animated feel."""
+    statuses = derive_check_status(top_scope, scope_lines)
+    with container:
+        st.subheader("Checks Performed")
+        rows_ph = st.empty()
+        html_rows = []
+        for s in statuses:
+            if s["not_built"]:
+                icon_cls, icon_char, label_cls = "fail", "\u2717", "dim"
+            elif s["found"]:
+                icon_cls, icon_char, label_cls = "pass", "\u2713", ""
+            else:
+                icon_cls, icon_char, label_cls = "fail", "\u2717", "dim"
+            suffix = " (not built yet)" if s["not_built"] else ""
+            html_rows.append(
+                f'<div class="qkx-check-row"><div class="qkx-check-icon {icon_cls}">{icon_char}</div>'
+                f'<div class="qkx-check-label {label_cls}">{s["label"]}{suffix}</div></div>'
+            )
+            rows_ph.markdown('<div class="qkx-checklist">' + "".join(html_rows) + "</div>", unsafe_allow_html=True)
+            time.sleep(0.18)
+
+
+# ============================================================
 # UI
 # ============================================================
 
-st.markdown("<h1 style='text-align:center;color:#5b4fe0;margin-bottom:0;'>MASTEC</h1>", unsafe_allow_html=True)
-st.markdown("<h2 style='text-align:center;'>📡 Integration Template Generator</h2>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center;color:gray;'>CIQ + EDP → filled AMOS/CMCLI templates, per scope of work</p>", unsafe_allow_html=True)
-st.divider()
+if "qkx_page" not in st.session_state:
+    st.session_state.qkx_page = "home"
+if "qkx_scope" not in st.session_state:
+    st.session_state.qkx_scope = None
 
-col_inputs, col_instructions = st.columns([3, 2])
+def _qkx_go(page, scope=None):
+    st.session_state.qkx_page = page
+    if scope is not None:
+        st.session_state.qkx_scope = scope
 
-with col_inputs:
-    st.subheader("📤 Inputs")
-    top_scope = st.radio("Scope of work", ["CRAN", "MCA", "CENM", "N2E", "NSB"], horizontal=True)
+# ---- sticky top bar + shared styling (stays put on scroll — every page) ----
+# MasTec brand palette: Prussian Blue #00284e (navy/dark), Endeavour #024ea4 (accent blue), Orange #ff5b24 (highlight)
+st.markdown("""
+<style>
+  @keyframes qkxDrift {
+      0%   { background-position: 0% 50%; }
+      50%  { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+  }
+  .stApp {
+      background: linear-gradient(120deg, #00284e 0%, #013a6b 35%, #024ea4 65%, #00284e 100%);
+      background-size: 300% 300%;
+      animation: qkxDrift 18s ease infinite;
+  }
+  .qkx-topbar {
+      position: sticky; top: 0; z-index: 999;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0.9rem 1.75rem; margin: -1rem -1rem 1.5rem -1rem;
+      background: linear-gradient(90deg, #00284e 0%, #013a6b 100%);
+      border-bottom: 2px solid #ff5b24;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.25);
+  }
+  .qkx-topbar .qkx-logo { font-size: 1.4rem; font-weight: 900; color: #ffffff; letter-spacing: 1px; }
+  .qkx-topbar .qkx-logo span { color: #ff5b24; }
+  .qkx-topbar .qkx-credit { font-size: 0.78rem; color: #cfe0f5; text-align: right; line-height: 1.3; }
+  .qkx-hero { text-align: center; margin: 1rem 0 2.5rem 0; perspective: 800px; }
+  .qkx-hero h1 {
+      font-size: 3.4rem; font-weight: 900; letter-spacing: 4px; margin-bottom: 0.3rem;
+      color: #ffffff; text-shadow: 0 2px 0 #ff5b24, 0 10px 26px rgba(0,0,0,0.35);
+      transform: rotateX(6deg);
+  }
+  .qkx-hero p { color: #cfe0f5; font-size: 1.02rem; }
+  .qkx-card {
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 1.6rem 1.2rem 1.2rem 1.2rem;
+      text-align: center; margin-bottom: 0.7rem;
+      background: linear-gradient(160deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+      backdrop-filter: blur(6px);
+      transform-style: preserve-3d; transform: perspective(700px) rotateX(0deg) translateY(0);
+      transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  }
+  .qkx-card:hover {
+      transform: perspective(700px) rotateX(6deg) translateY(-8px) scale(1.02);
+      box-shadow: 0 18px 34px rgba(0,0,0,0.35), 0 0 0 1px #ff5b24;
+      border-color: #ff5b24;
+  }
+  .qkx-card .qkx-badge {
+      width: 46px; height: 46px; border-radius: 50%; margin: 0 auto 0.6rem auto;
+      background: linear-gradient(135deg, #024ea4, #ff5b24);
+      box-shadow: 0 6px 14px rgba(0,0,0,0.3);
+  }
+  .qkx-card .qkx-title { font-weight: 800; font-size: 1.1rem; margin: 0.3rem 0; color: #ffffff; letter-spacing: 0.5px; }
+  .qkx-card .qkx-desc { font-size: 0.83rem; color: #cfe0f5; min-height: 2.2rem; }
+  div[data-testid="stButton"] button {
+      border-radius: 10px; font-weight: 700; border: 1.5px solid rgba(255,255,255,0.25);
+      background: linear-gradient(135deg, #024ea4, #013a6b); color: #ffffff;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+  div[data-testid="stButton"] button:hover {
+      border-color: #ff5b24; color: #ffffff; transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(255,91,36,0.35);
+  }
+  div[data-testid="stButton"] button:active { transform: translateY(0); }
+  h1, h2, h3, .stMarkdown, label, p { color: #eaf1fb; }
+  div[data-testid="stFileUploader"], div[data-testid="stTextInput"] { color: #eaf1fb; }
+  .qkx-checklist { margin: 0.5rem 0 1.5rem 0; }
+  .qkx-check-row {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.55rem 0.9rem; margin-bottom: 0.4rem; border-radius: 10px;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10);
+      opacity: 0; transform: translateX(-14px);
+      animation: qkxRowIn 0.4s ease forwards;
+  }
+  @keyframes qkxRowIn { to { opacity: 1; transform: translateX(0); } }
+  .qkx-check-icon {
+      width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 0.95rem; flex-shrink: 0;
+  }
+  .qkx-check-icon.pass { background: #1fae62; color: #ffffff; box-shadow: 0 0 10px rgba(31,174,98,0.55); }
+  .qkx-check-icon.fail { background: #3a4a63; color: #9fb2c9; box-shadow: none; }
+  .qkx-check-label { font-weight: 600; color: #eaf1fb; }
+  .qkx-check-label.dim { color: #9fb2c9; }
+</style>
+<div class="qkx-topbar">
+  <div class="qkx-logo">MAS<span>TEC</span></div>
+  <div class="qkx-credit">Made by <b>AKSHATHA KALLUR</b><br>Powered by <b>MASTEC</b></div>
+</div>
+""", unsafe_allow_html=True)
+
+# ---- HOME ----
+if st.session_state.qkx_page == "home":
+    st.markdown("""
+    <div class="qkx-hero">
+      <h1>QUICKIX</h1>
+      <p>CIQ + EDP → filled AMOS/CMCLI templates, per scope of work</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("""<div class="qkx-card"><div class="qkx-badge"></div>
+            <div class="qkx-title">MCA</div>
+            <div class="qkx-desc">Pre-existing sites — MCA, CENM, or CRAN rehome</div></div>""", unsafe_allow_html=True)
+        if st.button("Open →", use_container_width=True, key="qkx_card_mca"):
+            _qkx_go("family")
+    with c2:
+        st.markdown("""<div class="qkx-card"><div class="qkx-badge"></div>
+            <div class="qkx-title">N2E</div>
+            <div class="qkx-desc">New-to-existing site integration</div></div>""", unsafe_allow_html=True)
+        if st.button("Open →", use_container_width=True, key="qkx_card_n2e"):
+            _qkx_go("input", "N2E")
+    with c3:
+        st.markdown("""<div class="qkx-card"><div class="qkx-badge"></div>
+            <div class="qkx-title">NSB</div>
+            <div class="qkx-desc">New site build</div></div>""", unsafe_allow_html=True)
+        if st.button("Open →", use_container_width=True, key="qkx_card_nsb"):
+            _qkx_go("input", "NSB")
+
+    st.divider()
+    st.subheader("Instructions")
+    st.markdown("""
+    1. **Please select your SOW to continue.**
+    2. **Upload** the CIQ and EDP & Pre-checks (optional) for the site
+    3. **Enter** your User ID
+    4. Click **Generate templates**
+    5. **Review**, then **download**
+    """)
+
+# ---- FAMILY CHOICE (MCA / CENM / CRAN) ----
+elif st.session_state.qkx_page == "family":
+    if st.button("← Back"):
+        _qkx_go("home")
+    st.subheader("Choose scope")
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        if st.button("MCA", use_container_width=True, key="qkx_fam_mca"):
+            _qkx_go("input", "MCA")
+    with f2:
+        if st.button("CENM", use_container_width=True, key="qkx_fam_cenm"):
+            _qkx_go("input", "CENM")
+    with f3:
+        if st.button("CRAN", use_container_width=True, key="qkx_fam_cran"):
+            _qkx_go("input", "CRAN")
+
+# ---- INPUT PAGE (all scopes land here — same form + results as before) ----
+elif st.session_state.qkx_page == "input":
+    top_scope = st.session_state.qkx_scope
+    if not top_scope:
+        st.warning("No scope selected.")
+        if st.button("← Back to home"):
+            _qkx_go("home")
+        st.stop()
+
+    back_target = "family" if top_scope in ("MCA", "CENM", "CRAN") else "home"
+    if st.button("← Back"):
+        _qkx_go(back_target)
+
+    st.subheader(f"Inputs — {top_scope}")
     cran_sub = None
     if top_scope == "CRAN":
         cran_sub = st.selectbox("CRAN scope", ["CRAN SA Rehome Trip 1", "CRAN SA Rehome Trip 2", "CRAN NSA Rehome"])
@@ -1997,145 +2226,150 @@ with col_inputs:
         date_str = st.text_input("Execution date (mmddyyyy)", value=date.today().strftime("%m%d%Y"))
     run = st.button("Generate templates →", type="primary", disabled=not (ciq_file and edp_file))
 
-with col_instructions:
-    st.subheader("📋 Instructions")
-    st.markdown("""
-    1. **Pick** CRAN / MCA / CENM (CRAN needs a further Trip-1/Trip-2/NSA choice)
-    2. **Upload** the CIQ and EDP for the site (Pre-checks optional)
-    3. **Enter** your User ID and execution date
-    4. Click **Generate templates**
-    5. **Review**, then **download**
-    """)
-    st.caption("MCA auto-detects MMBB vs TMBB per node from the CIQ. 6610 controller template auto-generates alongside any scope if Controller Info shows 6610.")
+    if run:
+        st.divider()
+        ph_checks = st.container()
+        st.divider()
+        left_col, right_col = st.columns([1, 1])
+        with right_col:
+            ph_prepost = st.container()
+            ph_sow = st.container()
+            ph_siad = st.container()
+            ph_log = st.empty()
+            ph_summary = st.container()
+        with left_col:
+            ph_left = st.container()
 
-st.divider()
-st.subheader("📊 Processing Log")
-log_box = st.empty()
-log_lines = []
+        log_lines = []
 
-def log(msg):
-    log_lines.append(msg)
-    log_box.code("\n".join(log_lines) or "Waiting for file upload...", language=None)
+        def log(msg):
+            log_lines.append(msg)
+            ph_log.code("\n".join(log_lines) or "Processing...", language=None)
 
-log_box.code("Waiting for file upload...", language=None)
+        log("Starting...")
 
-if run:
-    _all_templates = {
-        "MMBB": TPL_MMBB, "TMBB": TPL_TMBB, "cENM": TPL_CENM, "6610": TPL_6610,
-        "CRAN Trip-1": TPL_CRAN_TRIP1, "CRAN Trip-2": TPL_CRAN_TRIP2, "CRAN NSA": TPL_CRAN_NSA,
-        "DSS 4-sector": TPL_DSS_4SECTOR, "DSS 3-sector": TPL_DSS_3SECTOR,
-    }
-    _missing = [f"{label}  (expected: `{path.name}`)" for label, path in _all_templates.items() if not path.exists()]
-    if _missing:
-        st.error(
-            "Some template files aren't in `templates/MCA/` in the repo — check the exact filenames match "
-            "(GitHub sometimes changes spacing/characters on manual upload):\n\n"
-            + "\n".join(f"- {m}" for m in _missing)
-        )
-        st.stop()
-
-    log("Reading CIQ workbook...")
-    try:
-        ciq_wb = load_workbook_any(ciq_file.read(), ciq_file.name)
-    except Exception as e:
-        st.error(f"This CIQ couldn't be read as either .xlsx or legacy .xls. "
-                  f"It may be corrupted, or its content doesn't match its extension — try re-saving "
-                  f"it as .xlsx in Excel and re-uploading. Error detail: {e}")
-        st.stop()
-    if "Mixed Mode Info" not in ciq_wb.sheetnames:
-        st.error('Could not find a "Mixed Mode Info" tab in the CIQ.')
-        st.stop()
-    mm_objs = sheet_objs(ciq_wb["Mixed Mode Info"])
-    controller_objs = sheet_objs(ciq_wb["Controller Info"]) if "Controller Info" in ciq_wb.sheetnames else []
-
-    log("Reading EDP workbook...")
-    edp_bytes = edp_file.read()
-    try:
-        edp_wb = load_workbook_any(edp_bytes, edp_file.name)
-    except Exception as e:
-        st.error(f"This EDP couldn't be read (tried both .xlsx and legacy .xls handling). "
-                  f"Try re-saving it as .xlsx in Excel and re-uploading. Error detail: {e}")
-        st.stop()
-    edp_index = build_edp_index(edp_wb)
-    if not edp_index:
-        st.error('Could not locate the EDP header row (expected a column "EDP_SITE_ID" and "SITE_NAME").')
-        st.stop()
-
-    precheck_text = ""
-    if pre_file:
-        log("Extracting Pre-checks PDF text...")
-        precheck_text = extract_pdf_text(pre_file.read())
-
-    pre_line = post_line = None
-    uid = user_id or "xxUserIDxx"
-    dstr = date_str or "xxDatexx"
-
-    if top_scope == "MCA":
-        summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_mca(
-            ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log)
-    elif top_scope == "CENM":
-        summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_cenm(
-            ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log)
-    elif top_scope == "N2E":
-        summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_n2e(
-            ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
-    elif top_scope == "NSB":
-        summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_nsb(
-            ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
-    else:  # CRAN
-        cran_opts = {
-            "CRAN SA Rehome Trip 1": (TPL_CRAN_TRIP1, False, False, "CRAN_Trip1"),
-            "CRAN SA Rehome Trip 2": (TPL_CRAN_TRIP2, True, False, "CRAN_Trip2"),
-            "CRAN NSA Rehome": (TPL_CRAN_NSA, True, True, "CRAN_NSA"),
+        _all_templates = {
+            "MMBB": TPL_MMBB, "TMBB": TPL_TMBB, "cENM": TPL_CENM, "6610": TPL_6610,
+            "CRAN Trip-1": TPL_CRAN_TRIP1, "CRAN Trip-2": TPL_CRAN_TRIP2, "CRAN NSA": TPL_CRAN_NSA,
+            "DSS 4-sector": TPL_DSS_4SECTOR, "DSS 3-sector": TPL_DSS_3SECTOR,
         }
-        tpl_path, inc_src, need_6673, out_name = cran_opts[cran_sub]
-        summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_cran(
-            ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log,
-            tpl_path, inc_src, need_6673, out_name)
+        _missing = [f"{label}  (expected: `{path.name}`)" for label, path in _all_templates.items() if not path.exists()]
+        if _missing:
+            st.error(
+                "Some template files aren't in `templates/MCA/` in the repo — check the exact filenames match "
+                "(GitHub sometimes changes spacing/characters on manual upload):\n\n"
+                + "\n".join(f"- {m}" for m in _missing)
+            )
+            st.stop()
 
-    log("Done.")
+        log("Reading CIQ workbook...")
+        try:
+            ciq_wb = load_workbook_any(ciq_file.read(), ciq_file.name)
+        except Exception as e:
+            st.error(f"This CIQ couldn't be read as either .xlsx or legacy .xls. "
+                      f"It may be corrupted, or its content doesn't match its extension — try re-saving "
+                      f"it as .xlsx in Excel and re-uploading. Error detail: {e}")
+            st.stop()
+        if "Mixed Mode Info" not in ciq_wb.sheetnames:
+            st.error('Could not find a "Mixed Mode Info" tab in the CIQ.')
+            st.stop()
+        mm_objs = sheet_objs(ciq_wb["Mixed Mode Info"])
+        controller_objs = sheet_objs(ciq_wb["Controller Info"]) if "Controller Info" in ciq_wb.sheetnames else []
 
-    st.divider()
-    st.subheader("✅ Extraction summary")
-    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+        log("Reading EDP workbook...")
+        edp_bytes = edp_file.read()
+        try:
+            edp_wb = load_workbook_any(edp_bytes, edp_file.name)
+        except Exception as e:
+            st.error(f"This EDP couldn't be read (tried both .xlsx and legacy .xls handling). "
+                      f"Try re-saving it as .xlsx in Excel and re-uploading. Error detail: {e}")
+            st.stop()
+        edp_index = build_edp_index(edp_wb)
+        if not edp_index:
+            st.error('Could not locate the EDP header row (expected a column "EDP_SITE_ID" and "SITE_NAME").')
+            st.stop()
 
-    if pre_line and post_line:
-        st.subheader("🔀 Pre / Post configuration")
-        st.code(f"Pre Configuration:  {pre_line}\nPost Configuration: {post_line}", language=None)
+        precheck_text = ""
+        if pre_file:
+            log("Extracting Pre-checks PDF text...")
+            precheck_text = extract_pdf_text(pre_file.read())
 
-    if siad_rows:
-        st.subheader("🔌 SIAD port assignment")
-        st.dataframe(pd.DataFrame(siad_rows), use_container_width=True, hide_index=True)
+        pre_line = post_line = None
+        uid = user_id or "xxUserIDxx"
+        dstr = date_str or "xxDatexx"
 
-    if scope_lines:
-        st.subheader("📋 Scope of work summary")
-        st.code("\n".join(scope_lines_to_readable_text(scope_lines)), language=None)
-        with st.expander("📋 Copy tab-separated version for Excel/Notepad"):
-            st.text_area("Tab-separated (select all, copy, paste into Excel — lands in columns)",
-                          "\n".join(scope_lines), height=150, key="sow_raw")
+        if top_scope == "MCA":
+            summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_mca(
+                ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log)
+        elif top_scope == "CENM":
+            summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_cenm(
+                ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log)
+        elif top_scope == "N2E":
+            summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_n2e(
+                ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
+        elif top_scope == "NSB":
+            summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_nsb(
+                ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
+        else:  # CRAN
+            cran_opts = {
+                "CRAN SA Rehome Trip 1": (TPL_CRAN_TRIP1, False, False, "CRAN_Trip1"),
+                "CRAN SA Rehome Trip 2": (TPL_CRAN_TRIP2, True, False, "CRAN_Trip2"),
+                "CRAN NSA Rehome": (TPL_CRAN_NSA, True, True, "CRAN_NSA"),
+            }
+            tpl_path, inc_src, need_6673, out_name = cran_opts[cran_sub]
+            summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_cran(
+                ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log,
+                tpl_path, inc_src, need_6673, out_name)
 
-    if outputs:
-        st.subheader("📄 Generated output")
-        for name, text in outputs:
-            unresolved = highlight_unresolved(text)
-            with st.expander(f"{name}  ({'⚠ ' + str(len(unresolved)) + ' unresolved' if unresolved else '✓ fully resolved'})"):
-                st.text_area("Preview", text, height=300, key=name)
-                st.download_button("⬇ Download .txt", text, file_name=name, key=f"dl_{name}")
+        log("Done.")
 
-    if binary_outputs:
-        st.subheader("📊 Excel outputs")
-        for name, data in binary_outputs:
-            st.download_button(f"⬇ Download {name}", data, file_name=name, key=f"dl_bin_{name}")
+        render_checks_panel(ph_checks, top_scope, scope_lines)
 
-    if outputs or binary_outputs:
-        if len(outputs) + len(binary_outputs) > 1:
-            zip_buf = io.BytesIO()
-            with zipfile.ZipFile(zip_buf, "w") as zf:
+        with ph_prepost:
+            if pre_line and post_line:
+                st.subheader("Pre / Post configuration")
+                st.code(f"Pre Configuration:  {pre_line}\nPost Configuration: {post_line}", language=None)
+
+        with ph_sow:
+            if scope_lines:
+                st.subheader("Scope of work summary")
+                st.code("\n".join(scope_lines_to_readable_text(scope_lines)), language=None)
+                with st.expander("Copy tab-separated version for Excel/Notepad"):
+                    st.text_area("Tab-separated (select all, copy, paste into Excel — lands in columns)",
+                                  "\n".join(scope_lines), height=150, key="sow_raw")
+
+        with ph_siad:
+            if siad_rows:
+                st.subheader("SIAD port assignment")
+                st.dataframe(pd.DataFrame(siad_rows), use_container_width=True, hide_index=True)
+
+        with ph_summary:
+            st.subheader("Extraction summary")
+            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+        with ph_left:
+            if outputs:
+                st.subheader("Generated output")
                 for name, text in outputs:
-                    zf.writestr(name, text)
+                    unresolved = highlight_unresolved(text)
+                    with st.expander(f"{name}  ({str(len(unresolved)) + ' unresolved' if unresolved else 'fully resolved'})"):
+                        st.text_area("Preview", text, height=300, key=name)
+                        st.download_button("Download .txt", text, file_name=name, key=f"dl_{name}")
+
+            if binary_outputs:
+                st.subheader("Excel outputs")
                 for name, data in binary_outputs:
-                    zf.writestr(name, data)
-            st.download_button("⬇ Download all as .zip", zip_buf.getvalue(), file_name="generated_templates.zip")
+                    st.download_button(f"Download {name}", data, file_name=name, key=f"dl_bin_{name}")
+
+            if outputs or binary_outputs:
+                if len(outputs) + len(binary_outputs) > 1:
+                    zip_buf = io.BytesIO()
+                    with zipfile.ZipFile(zip_buf, "w") as zf:
+                        for name, text in outputs:
+                            zf.writestr(name, text)
+                        for name, data in binary_outputs:
+                            zf.writestr(name, data)
+                    st.download_button("Download all as .zip", zip_buf.getvalue(), file_name="generated_templates.zip")
 
 st.divider()
 st.caption("Made by **AKSHATHA KALLUR** | Powered by **MASTEC** | © 2026")
