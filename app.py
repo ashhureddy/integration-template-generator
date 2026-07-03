@@ -1769,6 +1769,7 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     # Pre/Post Configuration stays CRAN's own distinct role-based format, untouched above.
     radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
     classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
+    classification["deleted_nodes"] = []  # every CRAN rehome vacates a source node — not a noteworthy anomaly here, unlike MCA/CENM
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
