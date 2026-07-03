@@ -2016,26 +2016,36 @@ def derive_check_status(top_scope, scope_lines):
 
 
 def render_checks_panel(container, top_scope, scope_lines):
-    """Reveals each check row in sequence for a live, animated feel."""
+    """Reveals each check row in sequence, pauses, then fades out and is fully removed
+    so the results below can take its place (per the requested checks -> disappear -> reveal outputs flow).
+    `container` must be an st.empty() placeholder so it can be cleared afterward."""
     statuses = derive_check_status(top_scope, scope_lines)
-    with container:
-        st.subheader("Checks Performed")
-        rows_ph = st.empty()
-        html_rows = []
-        for s in statuses:
-            if s["not_built"]:
-                icon_cls, icon_char, label_cls = "fail", "\u2717", "dim"
-            elif s["found"]:
-                icon_cls, icon_char, label_cls = "pass", "\u2713", ""
-            else:
-                icon_cls, icon_char, label_cls = "fail", "\u2717", "dim"
-            suffix = " (not built yet)" if s["not_built"] else ""
-            html_rows.append(
-                f'<div class="qkx-check-row"><div class="qkx-check-icon {icon_cls}">{icon_char}</div>'
-                f'<div class="qkx-check-label {label_cls}">{s["label"]}{suffix}</div></div>'
+    with container.container():
+        with st.container(border=True):
+            st.subheader("Checks Performed")
+            rows_ph = st.empty()
+            html_rows = []
+            for s in statuses:
+                if s["not_built"]:
+                    icon_cls, icon_char, label_cls = "fail", "\u2717", "dim"
+                elif s["found"]:
+                    icon_cls, icon_char, label_cls = "pass", "\u2713", ""
+                else:
+                    icon_cls, icon_char, label_cls = "fail", "\u2717", "dim"
+                suffix = " (not built yet)" if s["not_built"] else ""
+                html_rows.append(
+                    f'<div class="qkx-check-row"><div class="qkx-check-icon {icon_cls}">{icon_char}</div>'
+                    f'<div class="qkx-check-label {label_cls}">{s["label"]}{suffix}</div></div>'
+                )
+                rows_ph.markdown('<div class="qkx-checklist">' + "".join(html_rows) + "</div>", unsafe_allow_html=True)
+                time.sleep(0.18)
+            time.sleep(0.6)  # let the completed checklist register before it fades away
+            rows_ph.markdown(
+                '<div class="qkx-checklist qkx-checks-fadeout">' + "".join(html_rows) + "</div>",
+                unsafe_allow_html=True,
             )
-            rows_ph.markdown('<div class="qkx-checklist">' + "".join(html_rows) + "</div>", unsafe_allow_html=True)
-            time.sleep(0.18)
+        time.sleep(0.55)  # match the fade-out animation duration
+    container.empty()  # fully removed — the results below then animate in via the global 3D reveal
 
 
 # ============================================================
@@ -2062,17 +2072,17 @@ st.markdown("""
       100% { background-position: 0% 50%; }
   }
   .stApp {
-      background: linear-gradient(120deg, #00284e 0%, #013a6b 35%, #024ea4 65%, #00284e 100%);
+      background: linear-gradient(120deg, #011b36 0%, #012a4e 40%, #013a6b 70%, #011b36 100%);
       background-size: 300% 300%;
-      animation: qkxDrift 18s ease infinite;
+      animation: qkxDrift 26s ease infinite;
   }
   .qkx-topbar {
       position: sticky; top: 0; z-index: 999;
       display: flex; justify-content: space-between; align-items: center;
       padding: 0.9rem 1.75rem; margin: -1rem -1rem 1.5rem -1rem;
-      background: linear-gradient(90deg, #00284e 0%, #013a6b 100%);
-      border-bottom: 2px solid #ff5b24;
-      box-shadow: 0 4px 18px rgba(0,0,0,0.25);
+      background: linear-gradient(90deg, #011b36 0%, #012a4e 100%);
+      border-bottom: 1px solid rgba(255,91,36,0.55);
+      box-shadow: 0 4px 18px rgba(0,0,0,0.35), 0 2px 12px rgba(255,91,36,0.15);
   }
   .qkx-topbar .qkx-logo { font-size: 1.4rem; font-weight: 900; color: #ffffff; letter-spacing: 1px; }
   .qkx-topbar .qkx-logo span { color: #ff5b24; }
@@ -2080,44 +2090,64 @@ st.markdown("""
   .qkx-hero { text-align: center; margin: 1rem 0 2.5rem 0; perspective: 800px; }
   .qkx-hero h1 {
       font-size: 3.4rem; font-weight: 900; letter-spacing: 4px; margin-bottom: 0.3rem;
-      color: #ffffff; text-shadow: 0 2px 0 #ff5b24, 0 10px 26px rgba(0,0,0,0.35);
+      color: #ffffff; text-shadow: 0 0 22px rgba(255,91,36,0.45), 0 10px 26px rgba(0,0,0,0.45);
       transform: rotateX(6deg);
   }
   .qkx-hero p { color: #cfe0f5; font-size: 1.02rem; }
   .qkx-card {
-      border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 1.6rem 1.2rem 1.2rem 1.2rem;
+      border: 1px solid rgba(255,255,255,0.14); border-radius: 16px; padding: 1.6rem 1.2rem 1.2rem 1.2rem;
       text-align: center; margin-bottom: 0.7rem;
-      background: linear-gradient(160deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+      background: linear-gradient(160deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
       backdrop-filter: blur(6px);
       transform-style: preserve-3d; transform: perspective(700px) rotateX(0deg) translateY(0);
       transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
   }
   .qkx-card:hover {
       transform: perspective(700px) rotateX(6deg) translateY(-8px) scale(1.02);
-      box-shadow: 0 18px 34px rgba(0,0,0,0.35), 0 0 0 1px #ff5b24;
-      border-color: #ff5b24;
+      box-shadow: 0 18px 34px rgba(0,0,0,0.4), 0 0 24px rgba(255,91,36,0.25);
+      border-color: rgba(255,91,36,0.55);
   }
   .qkx-card .qkx-badge {
       width: 46px; height: 46px; border-radius: 50%; margin: 0 auto 0.6rem auto;
       background: linear-gradient(135deg, #024ea4, #ff5b24);
-      box-shadow: 0 6px 14px rgba(0,0,0,0.3);
+      box-shadow: 0 6px 14px rgba(0,0,0,0.35);
   }
   .qkx-card .qkx-title { font-weight: 800; font-size: 1.1rem; margin: 0.3rem 0; color: #ffffff; letter-spacing: 0.5px; }
   .qkx-card .qkx-desc { font-size: 0.83rem; color: #cfe0f5; min-height: 2.2rem; }
+
+  /* Native Streamlit bordered containers (st.container(border=True)) — styled as our panels */
+  div[data-testid="stVerticalBlockBorderWrapper"] {
+      background: rgba(255,255,255,0.05) !important;
+      border: 1px solid rgba(255,255,255,0.16) !important;
+      border-radius: 14px !important;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 10px 24px rgba(0,0,0,0.25);
+  }
+
   div[data-testid="stButton"] button {
       border-radius: 10px; font-weight: 700; border: 1.5px solid rgba(255,255,255,0.25);
       background: linear-gradient(135deg, #024ea4, #013a6b); color: #ffffff;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
       transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
   }
   div[data-testid="stButton"] button:hover {
-      border-color: #ff5b24; color: #ffffff; transform: translateY(-2px);
-      box-shadow: 0 8px 20px rgba(255,91,36,0.35);
+      border-color: rgba(255,91,36,0.6); color: #ffffff; transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(255,91,36,0.4);
   }
   div[data-testid="stButton"] button:active { transform: translateY(0); }
-  h1, h2, h3, .stMarkdown, label, p { color: #eaf1fb; }
-  div[data-testid="stFileUploader"], div[data-testid="stTextInput"] { color: #eaf1fb; }
-  .qkx-checklist { margin: 0.5rem 0 1.5rem 0; }
+
+  /* Force readable light text everywhere except inside the (light-background) file uploader chip/dropzone */
+  h1, h2, h3, h4, p, span, label, .stMarkdown, .stCaption,
+  div[data-testid="stWidgetLabel"] p,
+  div[data-testid="stFileUploaderDropzoneInstructions"] span,
+  div[data-testid="stFileUploaderDropzoneInstructions"] small {
+      color: #f0f5fc !important;
+  }
+  div[data-testid="stTextInput"] input {
+      background: rgba(255,255,255,0.92) !important; color: #012a4e !important;
+  }
+
+  .qkx-checklist { margin: 0.5rem 0 0.5rem 0; }
   .qkx-check-row {
       display: flex; align-items: center; gap: 0.75rem;
       padding: 0.55rem 0.9rem; margin-bottom: 0.4rem; border-radius: 10px;
@@ -2126,15 +2156,79 @@ st.markdown("""
       animation: qkxRowIn 0.4s ease forwards;
   }
   @keyframes qkxRowIn { to { opacity: 1; transform: translateX(0); } }
+  .qkx-checks-fadeout { animation: qkxFadeOut 0.55s ease forwards; }
+  @keyframes qkxFadeOut {
+      to { opacity: 0; transform: perspective(700px) rotateX(-8deg) translateY(-10px) scale(0.97); }
+  }
   .qkx-check-icon {
       width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
       font-weight: 900; font-size: 0.95rem; flex-shrink: 0;
   }
-  .qkx-check-icon.pass { background: #1fae62; color: #ffffff; box-shadow: 0 0 10px rgba(31,174,98,0.55); }
+  .qkx-check-icon.pass { background: linear-gradient(135deg, #024ea4, #17c3a2); color: #ffffff; box-shadow: 0 0 10px rgba(23,195,162,0.5); }
   .qkx-check-icon.fail { background: #3a4a63; color: #9fb2c9; box-shadow: none; }
   .qkx-check-label { font-weight: 600; color: #eaf1fb; }
   .qkx-check-label.dim { color: #9fb2c9; }
+
+  /* 3D pop-in for results that mount after the Checks panel disappears */
+  @keyframes qkxReveal3D {
+      0%   { opacity: 0; transform: perspective(1000px) rotateX(-10deg) translateY(22px) scale(0.96); }
+      100% { opacity: 1; transform: perspective(1000px) rotateX(0deg) translateY(0) scale(1); }
+  }
+  div[data-testid="stVerticalBlockBorderWrapper"],
+  div[data-testid="stDataFrame"],
+  div[data-testid="stExpander"],
+  div[data-testid="stCodeBlock"] {
+      animation: qkxReveal3D 0.55s cubic-bezier(0.2,0.8,0.2,1) both;
+  }
+
+  /* ---- Dora.run-inspired: soft floating "3D objects" drifting behind the content ---- */
+  .qkx-blob {
+      position: fixed; border-radius: 50%; filter: blur(60px); z-index: -1; pointer-events: none;
+      opacity: 0.55;
+  }
+  .qkx-blob-1 {
+      width: 420px; height: 420px; top: -120px; left: -100px;
+      background: radial-gradient(circle at 30% 30%, #ff5b24, transparent 70%);
+      animation: qkxFloat1 22s ease-in-out infinite;
+  }
+  .qkx-blob-2 {
+      width: 520px; height: 520px; bottom: -160px; right: -140px;
+      background: radial-gradient(circle at 60% 40%, #024ea4, transparent 70%);
+      animation: qkxFloat2 26s ease-in-out infinite;
+  }
+  .qkx-blob-3 {
+      width: 340px; height: 340px; top: 45%; left: 60%;
+      background: radial-gradient(circle at 50% 50%, #3fa9ff, transparent 70%);
+      animation: qkxFloat3 30s ease-in-out infinite;
+  }
+  @keyframes qkxFloat1 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50%      { transform: translate(60px, 40px) scale(1.08); }
+  }
+  @keyframes qkxFloat2 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50%      { transform: translate(-50px, -60px) scale(1.1); }
+  }
+  @keyframes qkxFloat3 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50%      { transform: translate(-40px, 30px) scale(0.94); }
+  }
+
+  /* deeper glass + bigger playful tilt on cards, closer to Dora's floating-object hover feel */
+  .qkx-card, div[data-testid="stVerticalBlockBorderWrapper"] {
+      backdrop-filter: blur(14px) saturate(140%);
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+  }
+  .qkx-card {
+      transition: transform 0.35s cubic-bezier(0.2,0.8,0.2,1), box-shadow 0.35s ease, border-color 0.3s ease;
+  }
+  .qkx-card:hover {
+      transform: perspective(900px) rotateX(9deg) rotateY(-3deg) translateY(-10px) scale(1.03);
+  }
 </style>
+<div class="qkx-blob qkx-blob-1"></div>
+<div class="qkx-blob qkx-blob-2"></div>
+<div class="qkx-blob qkx-blob-3"></div>
 <div class="qkx-topbar">
   <div class="qkx-logo">MAS<span>TEC</span></div>
   <div class="qkx-credit">Made by <b>AKSHATHA KALLUR</b><br>Powered by <b>MASTEC</b></div>
@@ -2210,35 +2304,40 @@ elif st.session_state.qkx_page == "input":
         _qkx_go(back_target)
 
     st.subheader(f"Inputs — {top_scope}")
-    cran_sub = None
-    if top_scope == "CRAN":
-        cran_sub = st.selectbox("CRAN scope", ["CRAN SA Rehome Trip 1", "CRAN SA Rehome Trip 2", "CRAN NSA Rehome"])
+    col_form, _col_spacer = st.columns([3, 2])
+    with col_form:
+        with st.container(border=True):
+            cran_sub = None
+            if top_scope == "CRAN":
+                cran_sub = st.selectbox("CRAN scope", ["CRAN SA Rehome Trip 1", "CRAN SA Rehome Trip 2", "CRAN NSA Rehome"])
 
-    ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"])
-    edp_file = st.file_uploader("EDP (.xlsx / .xls)", type=["xlsx", "xls"])
-    pre_file = None
-    if top_scope not in ("N2E", "NSB"):
-        pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
-    c1, c2 = st.columns(2)
-    with c1:
-        user_id = st.text_input("User ID", placeholder="e.g. pr970b")
-    with c2:
-        date_str = st.text_input("Execution date (mmddyyyy)", value=date.today().strftime("%m%d%Y"))
-    run = st.button("Generate templates →", type="primary", disabled=not (ciq_file and edp_file))
+            ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"])
+            edp_file = st.file_uploader("EDP (.xlsx / .xls)", type=["xlsx", "xls"])
+            pre_file = None
+            if top_scope not in ("N2E", "NSB"):
+                pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
+            c1, c2 = st.columns(2)
+            with c1:
+                user_id = st.text_input("User ID", placeholder="e.g. pr970b")
+            with c2:
+                date_str = st.text_input("Execution date (mmddyyyy)", value=date.today().strftime("%m%d%Y"))
+            run = st.button("Generate templates →", type="primary", disabled=not (ciq_file and edp_file))
 
     if run:
         st.divider()
-        ph_checks = st.container()
+        ph_checks = st.empty()
         st.divider()
         left_col, right_col = st.columns([1, 1])
         with right_col:
-            ph_prepost = st.container()
-            ph_sow = st.container()
-            ph_siad = st.container()
-            ph_log = st.empty()
-            ph_summary = st.container()
+            ph_prepost = st.container(border=True)
+            ph_sow = st.container(border=True)
+            ph_siad = st.container(border=True)
+            log_card = st.container(border=True)
+            with log_card:
+                ph_log = st.empty()
+            ph_summary = st.container(border=True)
         with left_col:
-            ph_left = st.container()
+            ph_left = st.container(border=True)
 
         log_lines = []
 
@@ -2370,6 +2469,3 @@ elif st.session_state.qkx_page == "input":
                         for name, data in binary_outputs:
                             zf.writestr(name, data)
                     st.download_button("Download all as .zip", zip_buf.getvalue(), file_name="generated_templates.zip")
-
-st.divider()
-st.caption("Made by **AKSHATHA KALLUR** | Powered by **MASTEC** | © 2026")
