@@ -2061,6 +2061,7 @@ def _qkx_go(page, scope=None):
     st.session_state.qkx_page = page
     if scope is not None:
         st.session_state.qkx_scope = scope
+    st.rerun()
 
 # ---- sticky top bar + shared styling (stays put on scroll — every page) ----
 # MasTec brand palette used as ACCENTS only now: Prussian Blue #00284e, Endeavour #024ea4, Orange #ff5b24.
@@ -2081,7 +2082,7 @@ st.markdown("""
       box-shadow: 0 4px 18px rgba(0,0,0,0.2);
   }
   .qkx-topbar .qkx-logo { font-size: 1.4rem; font-weight: 900; color: #ffffff; letter-spacing: 1px; }
-  .qkx-topbar .qkx-logo span { color: #ff5b24; }
+  .qkx-topbar .qkx-logo span { color: #ffffff; }
   .qkx-topbar .qkx-credit { font-size: 0.78rem; color: #cfe0f5; text-align: right; line-height: 1.3; }
 
   .qkx-hero { text-align: center; margin: 1rem 0 2.5rem 0; }
@@ -2152,7 +2153,7 @@ if st.session_state.qkx_page == "home":
     st.markdown("""
     <div class="qkx-hero">
       <h1>QUICKIX</h1>
-      <p>CIQ + EDP → filled AMOS/CMCLI templates, per scope of work</p>
+      <p>SOW analysis and Integration templates generator</p>
     </div>
     """, unsafe_allow_html=True)
 
