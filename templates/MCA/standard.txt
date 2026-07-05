@@ -164,28 +164,6 @@ cmedit get xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDDId==*_9*,admin
 cmedit set xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDD==*_9*) administrativestate:SHUTTINGDOWN
 cmedit get xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDDId==*_9*,administrativeState , operationalState) -t
 
-#######################################################################################
-###########							ACTIVATE DSS FEATURES					###########
-#######################################################################################
-
-cmedit get xxMMBB_Primary_Node_Namexx CapacityState.CapacityStateId==CXC4012411;FeatureState.FeatureStateId==CXC4012543;FeatureState.FeatureStateId==CXC4012537;FeatureState.FeatureStateId==CXC4012507;FeatureState.FeatureStateId==CXC4012015;FeatureState.FeatureStateId==CXC4011018;FeatureState.FeatureStateId==CXC4011823 --output priColl collName2
-cmedit get collName2 CapacityState.(capacityStateId,description,featureState,licenseState,serviceState);FeatureState.(description,featureState,featureStateId,licenseState,serviceState) -t
-
-cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4012537) featureState:ACTIVATED      --force
-cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4011823) featureState:ACTIVATED      --force
-cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4011018) featureState:ACTIVATED      --force
-cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4012015) featureState:ACTIVATED      --force
-cmedit set xxMMBB_Primary_Node_Namexx capacityState.(FeatureStateId==CXC4012411) featureState:ACTIVATED    --force
-cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4011802) featureState:ACTIVATED      --force
-cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4012543) featureState:ACTIVATED      --force
-cmedit set xxMMBB_Primary_Node_Namexx FeatureState.(FeatureStateId==CXC4012507) featureState:ACTIVATED      --force
-
-
-cmedit get xxMMBB_Primary_Node_Namexx CapacityState.CapacityStateId==CXC4012411;FeatureState.FeatureStateId==CXC4012543;FeatureState.FeatureStateId==CXC4012537;FeatureState.FeatureStateId==CXC4012507;FeatureState.FeatureStateId==CXC4012015;FeatureState.FeatureStateId==CXC4011018;FeatureState.FeatureStateId==CXC4011823 --output priColl collName2
-cmedit get collName2 CapacityState.(capacityStateId,description,featureState,licenseState,serviceState);FeatureState.(description,featureState,featureStateId,licenseState,serviceState) -t
-collection delete collName2
-
-
 
 #######################################################################################
 #######################################################################################
@@ -226,8 +204,6 @@ cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedE
 
 cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,ENodeBFunction=1,EUtranCellFDD=xxLTE_Site_IDxx_XD_1,MimoSleepFunction=1 sleepEndTime:"05:00",sleepMode:OFF,sleepStartTime:"02:00",switchDownMonitorDurTimer:30,switchDownPrbThreshold:10,switchDownRrcConnThreshold:5,switchUpMonitorDurTimer:5,switchUpPrbThreshold:30,switchUpRrcConnThreshold:50
 
-cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4011808 featureState:DEACTIVATED      --force
-cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4012507 featureState:ACTIVATED        --force
 cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4012543 featureState:ACTIVATED        --force
 cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4012581 featureState:ACTIVATED        --force
 cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4012583 featureState:ACTIVATED        --force
@@ -239,25 +215,6 @@ cmedit set xxMMBB_Primary_Node_Namexx FeatureState=CXC4012583 featureState:ACTIV
 ////# ESS     : FALSE  #
 ////# non_ESS : TRUE   #
 ////####################
-
-
-*****************5G*****************************************************
-
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XA_1 siWindowLength:20,csiRsPeriodicity:20,pdschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER",puschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER"
-
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XB_1 siWindowLength:20,csiRsPeriodicity:20,pdschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER",puschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER"
-
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XC_1 siWindowLength:20,csiRsPeriodicity:20,pdschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER",puschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER"
-
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XD_1 siWindowLength:20,csiRsPeriodicity:20,pdschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER",puschStartPrbStrategy:"RANDOM_START_LOWER_OR_HIGHER"
-
-//////////////////////////////////////////
-/// This needs to be cmedit set xxMMBB_Primary_Node_Namexx for 2X2 config///
-//////////////////////////////////////////
-cmedit set xxMMBB_Primary_Node_Namexx NRCellDU=xx5G_NR_Node_Namexx_N00XA_1 csiRsConfig2P:{aRestriction=<empty>,csiRsControl2Ports=0},csiRsConfig8P={csiRsControl8Ports=0}
-cmedit set xxMMBB_Primary_Node_Namexx NRCellDU=xx5G_NR_Node_Namexx_N00XB_1 csiRsConfig2P:{aRestriction=<empty>,csiRsControl2Ports=0},csiRsConfig8P={csiRsControl8Ports=0}
-cmedit set xxMMBB_Primary_Node_Namexx NRCellDU=xx5G_NR_Node_Namexx_N00XC_1 csiRsConfig2P:{aRestriction=<empty>,csiRsControl2Ports=0},csiRsConfig8P={csiRsControl8Ports=0}
-cmedit set xxMMBB_Primary_Node_Namexx NRCellDU=xx5G_NR_Node_Namexx_N00XD_1 csiRsConfig2P:{aRestriction=<empty>,csiRsControl2Ports=0},csiRsConfig8P={csiRsControl8Ports=0}
 
 
 #################################
@@ -280,16 +237,16 @@ cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId,ssboffset,ssbduration
 
 #### Update essScPairId & essScLocalId
 
-cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==*N00XA_1) essScPairId:essScPairId_A,essScLocalId:essScLocalId_A
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==xx5G_NRSectorCarrier_Alphaxx) essScPairId:essScPairId_A,essScLocalId:essScLocalId_A
 cmedit set xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId==xxLTE_SectorCarrier_No_Alphaxx) essScPairId:essScPairId_A,essScLocalId:essScLocalId_A
 
-cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==*N00XB_1) essScPairId:essScPairId_B,essScLocalId:essScLocalId_B
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==xx5G_NRSectorCarrier_Betaxx) essScPairId:essScPairId_B,essScLocalId:essScLocalId_B
 cmedit set xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId==xxLTE_SectorCarrier_No_Betaxx) essScPairId:essScPairId_B,essScLocalId:essScLocalId_B
 
-cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==*N00XC_1) essScPairId:essScPairId_C,essScLocalId:essScLocalId_C
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==xx5G_NRSectorCarrier_Gammaxx) essScPairId:essScPairId_C,essScLocalId:essScLocalId_C
 cmedit set xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId==xxLTE_SectorCarrier_No_Gammaxx) essScPairId:essScPairId_C,essScLocalId:essScLocalId_C
 
-cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==*N00XD_1) essScPairId:essScPairId_D,essScLocalId:essScLocalId_D
+cmedit set xxMMBB_Primary_Node_Namexx NRSectorCarrier.(NRSectorCarrierId==xx5G_NRSectorCarrier_Deltaxx) essScPairId:essScPairId_D,essScLocalId:essScLocalId_D
 cmedit set xxMMBB_Primary_Node_Namexx SectorCarrier.(SectorCarrierId==xxLTE_SectorCarrier_No_Deltaxx) essScPairId:essScPairId_D,essScLocalId:essScLocalId_D
 
 
@@ -302,16 +259,6 @@ cmedit get xxMMBB_Primary_Node_Namexx EUtranCellFDD.(EUtranCellFDDId,sectorCarri
 cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.(NRCellDUId,ssboffset,ssbduration,) -t
 
 
-cmedit get xxMMBB_Primary_Node_Namexx NRCellDU.NRCellDUId==xxMMBB_Primary_Node_Namexx_N00X*,DlOuterLoop.DlOuterLoopId==1
-cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XA_1,DlOuterLoop=1
-cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XB_1,DlOuterLoop=1
-cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XC_1,DlOuterLoop=1
-cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XD_1,DlOuterLoop=1
-
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XA_1,DlOuterLoop=1 dualOuterLoopEnabled : true
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XB_1,DlOuterLoop=1 dualOuterLoopEnabled : true
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XC_1,DlOuterLoop=1 dualOuterLoopEnabled : true
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxMMBB_Primary_Node_Namexx,ManagedElement=xxMMBB_Primary_Node_Namexx,GNBDUFunction=1,NRCellDU=xx5G_NR_Node_Namexx_N00XD_1,DlOuterLoop=1 dualOuterLoopEnabled : true
 
 
 ##################################### IMPORTANT ###############################################################################################
