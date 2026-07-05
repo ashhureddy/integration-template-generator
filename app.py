@@ -1030,6 +1030,7 @@ def generate_final_connections(ciq_wb, mm_objs):
 # ============================================================
 
 TDIR_IDL = Path(__file__).parent / "templates" / "IDL"
+TDIR_N2E_IDL = Path(__file__).parent / "templates" / "N2E" / "IDL"
 
 DU_TYPE_TO_GEN = {"6630": "G2", "5216": "G2", "6648": "G3", "6651": "G3", "6672": "G4"}
 
@@ -1049,6 +1050,15 @@ IDL_TEMPLATE_REGISTRY = {
     ("G4", "G4", "G4"): [("G4+G4+G4_RPM 777 052.txt", "")],
     # ("G2","G2","G4"), ("G2","G3","G4"), ("G3","G3","G4"), ("G3","G4","G4") -> no template exists;
     # falls through to the "IDL Template not found" branch below.
+}
+
+# N2E confirmed to support only these 2 combinations (not the full 15) — reuses the same
+# file content/naming as the shared set, just from its own templates/N2E/IDL/ folder.
+N2E_IDL_TEMPLATE_REGISTRY = {
+    ("G3", "G3"): [("G3+G3_RPM 777 052.txt", "Preferred"), ("G3+G3_RPM 777 053.txt", "Alternate")],
+    ("G4", "G4"): [("G4+G4_RPM 777 052.txt", "Preferred")],
+    # every other combination -> "IDL Template not found" for N2E specifically, even though
+    # MCA/CENM/NSB support it via the full registry above.
 }
 
 IDL_SUFFIX_CANDIDATES = {
@@ -1120,9 +1130,12 @@ def fill_idl_template(template_text, node_slots, summary_rows, log, template_nam
     return tpl
 
 
-def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log):
+def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log, template_dir=None, registry=None):
     """Returns (outputs, summary_rows, scope_lines) — same shape as the other generate_* add-ons.
-    Shared by MCA / CENM / NSB. No-ops (returns empty) for single-BBU sites."""
+    Shared by MCA / CENM / NSB (default template_dir/registry). N2E passes its own restricted
+    registry (only G3+G3, G4+G4) and its own templates/N2E/IDL/ folder. No-ops for single-BBU sites."""
+    template_dir = template_dir if template_dir is not None else TDIR_IDL
+    registry = registry if registry is not None else IDL_TEMPLATE_REGISTRY
     outputs, summary_rows, scope_lines = [], [], []
 
     if len(mm_objs) < 2:
@@ -1139,7 +1152,7 @@ def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log):
         return outputs, summary_rows, scope_lines
 
     combo = tuple(sorted(n["gen"] for n in nodes))
-    matches = IDL_TEMPLATE_REGISTRY.get(combo)
+    matches = registry.get(combo)
 
     if not matches:
         summary_rows.append({"Item": "IDL Connections", "Source": f"combination {'+'.join(combo)}", "Value": "IDL Template not found", "Note": ""})
@@ -1163,9 +1176,9 @@ def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log):
     node_slots = [(n["prefixes"], n["row"]) for n in nodes]
 
     for fname, variant in matches:
-        tpl_path = TDIR_IDL / fname
+        tpl_path = template_dir / fname
         if not tpl_path.exists():
-            summary_rows.append({"Item": "IDL Connections", "Source": f"template {fname}", "Value": "NOT FOUND", "Note": f"expected file not in templates/IDL/: {fname}"})
+            summary_rows.append({"Item": "IDL Connections", "Source": f"template {fname}", "Value": "NOT FOUND", "Note": f"expected file not in {template_dir}/: {fname}"})
             log(f"✗ IDL Connections: template file not found: {fname}")
             continue
         tpl_text = tpl_path.read_text(encoding="utf-8")
@@ -1233,6 +1246,11 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
 
     cell_to_node = _ngs_build_cell_node_map(ciq_wb, mm_objs)
     node_names = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
+    # Whether each node has an LTE side at all — only eUtran Parameters carries the
+    # "Co-Located Technology Cell" column, so a 5G-only node can never declare a reference
+    # back; requiring bidirectional confirmation for an LTE<->5G pair would be structurally
+    # impossible to satisfy and produce a false negative on every genuinely-shared-radio site.
+    has_lte = {r.get("Node to be built as"): is_populated(r.get("eNBId")) for r in mm_objs}
 
     # directional_refs[(from_node, to_node)] = list of every (from_cell, to_cell) pair seen
     directional_refs = {}
@@ -1259,7 +1277,9 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
             checked_pairs.add(pair_key)
             a_to_b = directional_refs.get((node_a, node_b), [])
             b_to_a = directional_refs.get((node_b, node_a), [])
-            if a_to_b and b_to_a:
+            both_lte = has_lte.get(node_a) and has_lte.get(node_b)
+            confirmed = (a_to_b and b_to_a) if both_lte else (a_to_b or b_to_a)
+            if confirmed:
                 bands = set()
                 for own_cell, ref_cell in a_to_b + b_to_a:
                     for c in (own_cell, ref_cell):
@@ -1642,6 +1662,10 @@ def generate_n2e(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
+    idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(
+        ciq_wb, mm_objs, user_id, date_str, log, template_dir=TDIR_N2E_IDL, registry=N2E_IDL_TEMPLATE_REGISTRY)
+    outputs += idl_outputs
+    summary_rows += idl_summary
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
 
@@ -1686,6 +1710,7 @@ def generate_n2e(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
     for node in sa_conversion_nodes:
         scope_of_work_lines.append(f"SA conversion.\t{node}")
+    scope_of_work_lines += idl_scope_lines
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
     summary_rows += ngs_summary
     scope_of_work_lines += ngs_scope_lines
@@ -2090,7 +2115,7 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
 # ============================================================
 
 SCOPE_CHECKLIST = {
-    "CRAN": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks"],
+    "CRAN": ["Carrier ADD", "Carrier delete", "Carrier moving", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks"],
     "MCA": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks"],
     "CENM": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks"],
     "N2E": ["Carrier ADD", "IDL Connections", "DSS checks", "6610 Present", "SA Conversion", "NGS Checks"],
@@ -2113,9 +2138,7 @@ CHECK_MATCHERS = {
 
 # (scope, check label) pairs that aren't wired into the tool yet — shown as not-run rather than a
 # misleading "fail", since a fail here would otherwise look identical to "this site has none of these"
-NOT_BUILT_YET = {
-    ("CRAN", "IDL Connections"), ("N2E", "IDL Connections"),
-}
+NOT_BUILT_YET = set()
 
 
 def derive_check_status(top_scope, scope_lines):
