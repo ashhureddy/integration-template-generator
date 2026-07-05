@@ -1178,6 +1178,106 @@ def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log):
 
 
 # ============================================================
+# NGS CHECKS (all scopes — CIQ-only, no template output)
+#
+# Confirmed logic:
+#  - Trigger: site has 2+ BBUs (same as IDL Connections).
+#  - Data source: eUtran Parameters tab, "Co-Located Technology Cell" column (comma-separated
+#    list of cell names sharing the same physical radio as that row's cell).
+#  - Detection: build a cellname -> owning-node map (from eUtran Parameters' EutranCellFDDId and
+#    5G Info's cell id, both matched back to a node via eNBId/gNBId), then for every pair of
+#    different nodes at the site, check whether a cell on Node A references a cell on Node B
+#    AND a cell on Node B references a cell on Node A (bidirectional, per your original
+#    description — "mapped for the BBU2 sectors... & vice versa"). If both directions are
+#    confirmed, the two nodes are sharing a physical radio -> NGS applies.
+#  - No template file is generated — this only ever contributes a line to the Scope of Work
+#    (and, by extension, the Checks Performed panel, since that reads Scope of Work lines).
+# ============================================================
+
+def _ngs_build_cell_node_map(ciq_wb, mm_objs):
+    """cell name (LTE or 5G) -> owning node's 'Node to be built as', via eNBId/gNBId match."""
+    enbid_to_node = {str(r.get("eNBId")).strip(): r.get("Node to be built as") for r in mm_objs if is_populated(r.get("eNBId"))}
+    gnbid_to_node = {str(r.get("gNBId")).strip(): r.get("Node to be built as") for r in mm_objs if is_populated(r.get("gNBId"))}
+
+    cell_to_node = {}
+    if "eUtran Parameters" in ciq_wb.sheetnames:
+        for row in sheet_objs(ciq_wb["eUtran Parameters"]):
+            cell_name = row.get("EutranCellFDDId")
+            node = enbid_to_node.get(str(row.get("eNBId")).strip())
+            if cell_name and node:
+                cell_to_node[str(cell_name).strip()] = node
+    if "5G Info" in ciq_wb.sheetnames:
+        for row in sheet_objs(ciq_wb["5G Info"]):
+            cell_name = row.get("NRCellDU") or row.get("gNodeB Name")
+            node = gnbid_to_node.get(str(row.get("gNBId")).strip())
+            if cell_name and node:
+                cell_to_node[str(cell_name).strip()] = node
+    return cell_to_node
+
+
+def _ngs_cell_band(cell_name):
+    """Band label for either an LTE or a 5G cell name, whichever pattern matches."""
+    label, _sector = lte_band_label(cell_name)
+    if label:
+        return label
+    label, _sector = nr_band_label(cell_name)
+    return label
+
+
+def generate_ngs_checks(ciq_wb, mm_objs, log):
+    """Returns (summary_rows, scope_lines). No file outputs — pure detection."""
+    summary_rows, scope_lines = [], []
+
+    if len(mm_objs) < 2 or "eUtran Parameters" not in ciq_wb.sheetnames:
+        return summary_rows, scope_lines
+
+    cell_to_node = _ngs_build_cell_node_map(ciq_wb, mm_objs)
+    node_names = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
+
+    # directional_refs[(from_node, to_node)] = list of every (from_cell, to_cell) pair seen
+    directional_refs = {}
+    for row in sheet_objs(ciq_wb["eUtran Parameters"]):
+        own_cell = row.get("EutranCellFDDId")
+        raw = row.get("Co-Located Technology Cell")
+        if not is_populated(own_cell) or not is_populated(raw) or str(raw).strip().upper() in ("NA", "N/A"):
+            continue
+        own_node = cell_to_node.get(str(own_cell).strip())
+        if not own_node:
+            continue
+        for ref_cell in str(raw).split(","):
+            ref_cell = ref_cell.strip()
+            ref_node = cell_to_node.get(ref_cell)
+            if ref_node and ref_node != own_node:
+                directional_refs.setdefault((own_node, ref_node), []).append((own_cell, ref_cell))
+
+    checked_pairs = set()
+    for i, node_a in enumerate(node_names):
+        for node_b in node_names[i + 1:]:
+            pair_key = frozenset((node_a, node_b))
+            if pair_key in checked_pairs:
+                continue
+            checked_pairs.add(pair_key)
+            a_to_b = directional_refs.get((node_a, node_b), [])
+            b_to_a = directional_refs.get((node_b, node_a), [])
+            if a_to_b and b_to_a:
+                bands = set()
+                for own_cell, ref_cell in a_to_b + b_to_a:
+                    for c in (own_cell, ref_cell):
+                        band = _ngs_cell_band(c)
+                        if band:
+                            bands.add(band)
+                band_list = ", ".join(sorted(bands)) if bands else "band not determined"
+                summary_rows.append({
+                    "Item": "NGS Checks", "Source": f"{node_a} <-> {node_b}",
+                    "Value": "radio shared", "Note": f"bands: {band_list}",
+                })
+                log(f"\u2713 NGS Checks: {node_a} <-> {node_b} share a radio (bands: {band_list})")
+                scope_lines.append(f"NGS Activation on :\t{band_list}\t{node_a} <-> {node_b}")
+
+    return summary_rows, scope_lines
+
+
+# ============================================================
 # PRE FIBERS (universal — pulled from Pre-checks' DL/UL Loss table)
 # ============================================================
 
@@ -1586,6 +1686,9 @@ def generate_n2e(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
     for node in sa_conversion_nodes:
         scope_of_work_lines.append(f"SA conversion.\t{node}")
+    ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
+    summary_rows += ngs_summary
+    scope_of_work_lines += ngs_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1668,6 +1771,8 @@ def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += idl_outputs
     summary_rows += idl_summary
+    ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
+    summary_rows += ngs_summary
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
 
@@ -1711,6 +1816,7 @@ def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     classification = {"added": added, "moved": [], "deleted_sectors": {}, "deleted_nodes": [], "retuned": []}
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
     scope_of_work_lines += idl_scope_lines
+    scope_of_work_lines += ngs_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1746,6 +1852,8 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += idl_outputs
     summary_rows += idl_summary
+    ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
+    summary_rows += ngs_summary
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
@@ -1760,6 +1868,7 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
     scope_of_work_lines += idl_scope_lines
+    scope_of_work_lines += ngs_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1799,6 +1908,8 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += idl_outputs
     summary_rows += idl_summary
+    ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
+    summary_rows += ngs_summary
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
@@ -1813,6 +1924,7 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
     scope_of_work_lines += idl_scope_lines
+    scope_of_work_lines += ngs_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1964,6 +2076,9 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
     classification["deleted_nodes"] = []  # every CRAN rehome vacates a source node — not a noteworthy anomaly here, unlike MCA/CENM
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
+    ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
+    summary_rows += ngs_summary
+    scope_of_work_lines += ngs_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1993,14 +2108,13 @@ CHECK_MATCHERS = {
     "Retune": lambda l: l.startswith("Retune on:"),
     "6610 Present": lambda l: l.startswith("6610 Controller Integration:") or l.startswith("EDP is not published for the controller"),
     "SA Conversion": lambda l: l.startswith("SA conversion."),
-    "NGS Checks": lambda l: False,
+    "NGS Checks": lambda l: l.startswith("NGS Activation on :"),
 }
 
 # (scope, check label) pairs that aren't wired into the tool yet — shown as not-run rather than a
 # misleading "fail", since a fail here would otherwise look identical to "this site has none of these"
 NOT_BUILT_YET = {
     ("CRAN", "IDL Connections"), ("N2E", "IDL Connections"),
-    ("CRAN", "NGS Checks"), ("MCA", "NGS Checks"), ("CENM", "NGS Checks"), ("N2E", "NGS Checks"), ("NSB", "NGS Checks"),
 }
 
 
