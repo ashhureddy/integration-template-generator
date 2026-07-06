@@ -1342,7 +1342,7 @@ def generate_pre_fibers(precheck_text):
     """One Excel file per CIQ: Cells + DUS/XMU (S.No) - RRU from Pre-checks' DL/UL Loss table,
     plus a blank 'Pre fibers' column for manual fill-in."""
     import openpyxl
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Font, PatternFill, Border, Side
     rows = extract_dl_ul_loss_rows(precheck_text)
     if not rows:
         return None
@@ -1351,12 +1351,17 @@ def generate_pre_fibers(precheck_text):
     ws.title = "Sheet1"
     HEADER_FILL = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
     HEADER_FONT = Font(bold=True, color="FFFFFF")
+    thin = Side(style="thin", color="000000")
+    BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
     ws.append(["Cells", "DUS/XMU (S.No) - RRU", "Pre fibers"])
     for cell in ws[1]:
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
+        cell.border = BORDER
     for r in rows:
         ws.append([r["Cells"], r["DUS/XMU (S.No) - RRU"], None])
+        for cell in ws[ws.max_row]:
+            cell.border = BORDER
     ws.column_dimensions["A"].width = 24
     ws.column_dimensions["B"].width = 90
     ws.column_dimensions["C"].width = 14
