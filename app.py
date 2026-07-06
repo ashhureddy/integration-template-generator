@@ -482,6 +482,11 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
         moved_by_pair.setdefault(key, []).append(m["cell"])
     WHOLE_BAND_SET = {"Alpha", "Beta", "Gamma"}
     for (from_node, to_node), cells in moved_by_pair.items():
+        if not is_populated(to_node) or not any(is_populated(c) for c in cells):
+            # Malformed Sector Del_Movement row (missing Target Node name / Source Sector) —
+            # flag it plainly instead of emitting a garbled "Moved Sectors: [] ... To: None" line.
+            lines.append(f"Moved Sectors:\tCHECK CIQ — incomplete Sector Del_Movement row\tFrom:\t{from_node or 'NOT FOUND'}\tTo:\t{to_node or 'NOT FOUND'}")
+            continue
         labels = dedupe_labels(cells)
         label_str = labels[0] if len(labels) == 1 else f"[{'/'.join(labels)}]"
         per_label_moved = {}
@@ -516,7 +521,22 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
     for entries in by_physical_radio.values():
         labels = sorted({e["label"] for e in entries if e.get("label")})
         sectors = sorted({e["sector"] for e in entries if e.get("sector")}, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
-        physical_groups.append({"labels": tuple(labels), "from": entries[0]["from"], "to": entries[0]["to"], "sectors": sectors})
+        # Combine every distinct from/to radio token across all entries in this physical-radio
+        # group (e.g. a PCS_1 cell and an AWS_1 cell sharing one radio can genuinely have
+        # different originating radio families) — taking only entries[0] silently dropped the
+        # others' real radio info.
+        from_tokens, to_tokens = [], []
+        for e in entries:
+            for tok in str(e["from"]).replace("RRU ", "", 1).split("+"):
+                if tok and tok not in from_tokens:
+                    from_tokens.append(tok)
+            for tok in str(e["to"]).replace("RRU ", "", 1).split("+"):
+                if tok and tok not in to_tokens:
+                    to_tokens.append(tok)
+        sort_key = lambda t: (not t[0].isdigit(), t)
+        combined_from = "RRU " + "+".join(sorted(from_tokens, key=sort_key))
+        combined_to = "RRU " + "+".join(sorted(to_tokens, key=sort_key))
+        physical_groups.append({"labels": tuple(labels), "from": combined_from, "to": combined_to, "sectors": sectors})
 
     # Step 2: merge physical-radio groups together when the swap signature (same bands, same From/To)
     # is identical — e.g. Alpha's radio and Beta's radio both swapped the same way
@@ -1110,7 +1130,12 @@ def _idl_node_values(row):
 def fill_idl_template(template_text, node_slots, summary_rows, log, template_name):
     """node_slots: list of (candidate_prefixes, row). For each node/concept, tries every
     candidate-prefix x suffix-variant combination and fills whichever placeholder actually
-    exists in this template — templates only get the placeholders they actually reference."""
+    exists in this template — templates only get the placeholders they actually reference.
+
+    Divider/hash handling (per confirmed instruction: placeholders are filled ALONG WITH their
+    surrounding hashes, leaving just the bare value):
+    - 4-hash forms like ####G2_NODE_ID#### are replaced entirely with the value.
+    - Bare ##<prefix>_NODE## tokens are replaced entirely with the node's ID."""
     tpl = template_text
     for prefixes, row in node_slots:
         values = _idl_node_values(row)
@@ -1119,6 +1144,9 @@ def fill_idl_template(template_text, node_slots, summary_rows, log, template_nam
             for prefix in prefixes:
                 for suffix in IDL_SUFFIX_CANDIDATES[concept]:
                     placeholder = f"##{prefix}_{suffix}##"
+                    divider_form = f"####{prefix}_{suffix}####"
+                    if divider_form in tpl and is_populated(value):
+                        tpl = tpl.replace(divider_form, str(value))
                     if placeholder in tpl:
                         if is_populated(value):
                             tpl = tpl.replace(placeholder, str(value))
@@ -1127,6 +1155,12 @@ def fill_idl_template(template_text, node_slots, summary_rows, log, template_nam
                         else:
                             summary_rows.append({"Item": f"IDL · {node_label} · {placeholder}", "Source": template_name, "Value": "NOT FOUND", "Note": ""})
                             log(f"✗ IDL {template_name}: {placeholder} -> NOT FOUND")
+        # bare "_NODE" tokens (e.g. ##1st_G3_NODE##) — filled entirely with the node's ID
+        if is_populated(node_label):
+            for prefix in prefixes:
+                node_divider = f"##{prefix}_NODE##"
+                if node_divider in tpl:
+                    tpl = tpl.replace(node_divider, str(node_label))
     return tpl
 
 
@@ -1180,6 +1214,7 @@ def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log, template_d
         if not tpl_path.exists():
             summary_rows.append({"Item": "IDL Connections", "Source": f"template {fname}", "Value": "NOT FOUND", "Note": f"expected file not in {template_dir}/: {fname}"})
             log(f"✗ IDL Connections: template file not found: {fname}")
+            scope_lines.append(f"IDL Connections:\ttemplate file missing from repo\t{fname}")
             continue
         tpl_text = tpl_path.read_text(encoding="utf-8")
         filled = fill_idl_template(tpl_text, node_slots, summary_rows, log, fname)
@@ -1302,7 +1337,8 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
 # ============================================================
 
 DL_UL_LOSS_ROW_RE = re.compile(
-    r'(\S+)\s+(?:Up|Down)\s+\d+\s+.*?((?:Baseband|XMU)\S*.*?Port\s+D\d)', re.DOTALL
+    r'(\S+)\s+(?:Up|Down)\s+\d+\s+(?:(?!\S+\s+(?:Up|Down)\s+\d+).)*?'
+    r'((?:Baseband|XMU)\S*(?:(?!\S+\s+(?:Up|Down)\s+\d+).)*?Port\s+D\d)', re.DOTALL
 )
 
 def extract_dl_ul_loss_rows(precheck_text):
@@ -2126,8 +2162,8 @@ SCOPE_CHECKLIST = {
 CHECK_MATCHERS = {
     "Carrier ADD": lambda l: l.startswith("Integration:"),
     "Carrier delete": lambda l: l.startswith("Deleted Node from ENM:") or l.startswith("Deleted Sector:"),
-    "Carrier moving": lambda l: l.startswith("Moved Sectors:"),
-    "IDL Connections": lambda l: l.startswith("IDL Connections:") and "not found" not in l.lower() and "could not determine" not in l.lower(),
+    "Carrier moving": lambda l: l.startswith("Moved Sectors:") and "CHECK CIQ" not in l,
+    "IDL Connections": lambda l: l.startswith("IDL Connections:") and "not found" not in l.lower() and "could not determine" not in l.lower() and "missing" not in l.lower(),
     "DSS checks": lambda l: l.startswith("DSS Activation:"),
     "Radio swap": lambda l: l.startswith("Radio Swap on:"),
     "Retune": lambda l: l.startswith("Retune on:"),
