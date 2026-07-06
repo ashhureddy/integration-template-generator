@@ -29,6 +29,7 @@ def resolve_template(exact_name, keyword):
 TPL_MMBB = resolve_template("LTE+5G_MMBB_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V11.txt", "MMBB_Integration")
 TPL_TMBB = resolve_template("TRIMODE_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V10.txt", "TRIMODE_Integration")
 TPL_CENM = resolve_template("cENM_TRIMODE_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V4.txt", "cENM_TRIMODE")
+TPL_CENM_MMBB = resolve_template("cENM_MMBB_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V4.txt", "cENM_MMBB")
 TPL_6610 = resolve_template("6610 Controller Integration Procedure_25Q3_Updated_V12.txt", "6610")
 TPL_CRAN_TRIP1 = resolve_template("CRAN_TO_CRAN_Rehome_Pre-integration_Trip-1_Procedure_for_SA_Sites_V2.txt", "Trip-1")
 TPL_CRAN_TRIP2 = resolve_template("CRAN_TO_CRAN_Rehome_and_6673_Sidehaul_Change_With_MPST_Trip-2_Procedure_for_SA_Sites_V1.txt", "Trip-2")
@@ -125,7 +126,7 @@ def sheet_objs(ws):
     for r in rows[1:]:
         if not any(str(c).strip() for c in r if c is not None):
             continue
-        objs.append({headers[i]: (r[i] if i < len(r) else "") for i in range(len(headers))})
+        objs.append({headers[i]: (r[i].strip() if isinstance(r[i], str) else r[i]) if i < len(r) else "" for i in range(len(headers))})
     return objs
 
 
@@ -511,41 +512,22 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
     for r in classification.get("retuned", []):
         lines.append(f"Retune on:\t{r['label']}\tFrom:\t{r['from']}\tTo:\t{r['to']}")
 
-    # Step 1: group by physical radio (co-location) — gives the correct set of bands per unit
-    by_physical_radio = {}
-    for r in (radio_swaps or []):
-        key = r.get("group_key", (r["from"], r["to"]))
-        by_physical_radio.setdefault(key, []).append(r)
-
-    physical_groups = []
-    for entries in by_physical_radio.values():
-        labels = sorted({e["label"] for e in entries if e.get("label")})
-        sectors = sorted({e["sector"] for e in entries if e.get("sector")}, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
-        # Combine every distinct from/to radio token across all entries in this physical-radio
-        # group (e.g. a PCS_1 cell and an AWS_1 cell sharing one radio can genuinely have
-        # different originating radio families) — taking only entries[0] silently dropped the
-        # others' real radio info.
-        from_tokens, to_tokens = [], []
-        for e in entries:
-            for tok in str(e["from"]).replace("RRU ", "", 1).split("+"):
-                if tok and tok not in from_tokens:
-                    from_tokens.append(tok)
-            for tok in str(e["to"]).replace("RRU ", "", 1).split("+"):
-                if tok and tok not in to_tokens:
-                    to_tokens.append(tok)
-        sort_key = lambda t: (not t[0].isdigit(), t)
-        combined_from = "RRU " + "+".join(sorted(from_tokens, key=sort_key))
-        combined_to = "RRU " + "+".join(sorted(to_tokens, key=sort_key))
-        physical_groups.append({"labels": tuple(labels), "from": combined_from, "to": combined_to, "sectors": sectors})
-
-    # Step 2: merge physical-radio groups together when the swap signature (same bands, same From/To)
-    # is identical — e.g. Alpha's radio and Beta's radio both swapped the same way
+    # Group by the actual swap SIGNATURE (From -> To), not by physical co-location. Co-located
+    # bands (e.g. PCS_1 and AWS_1 sharing one antenna group) can have genuinely different radio
+    # compositions (e.g. PCS_1 alone has a daisy-chained secondary radio) — blending them by
+    # co-location silently combined unrelated radio tokens. Only bands that share the identical
+    # From/To signature get combined into one bracketed line; sectors merge the same way.
     merged = {}
-    for g in physical_groups:
-        sig = (g["labels"], g["from"], g["to"])
-        merged.setdefault(sig, set()).update(g["sectors"])
+    for r in (radio_swaps or []):
+        sig = (r["from"], r["to"])
+        merged.setdefault(sig, {"labels": set(), "sectors": set()})
+        merged[sig]["labels"].add(r["label"])
+        merged[sig]["sectors"].add(r["sector"])
 
-    for (labels, from_radio, to_radio), sector_set in merged.items():
+    for (from_radio, to_radio), grp in merged.items():
+        labels = tuple(sorted(grp["labels"]))
+        sector_set = grp["sectors"]
+
         label_str = labels[0] if len(labels) == 1 else f"[{'|'.join(labels)}]"
         sector_names = sorted(sector_set, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
         is_whole = WHOLE_BAND_SET <= sector_set
@@ -930,7 +912,7 @@ def sheet_objs_dedup_first(ws):
     for r in rows[1:]:
         if not any(str(c).strip() for c in r if c is not None):
             continue
-        objs.append({h: (r[i] if i < len(r) else None) for h, i in header_idx})
+        objs.append({h: ((r[i].strip() if isinstance(r[i], str) else r[i]) if i < len(r) else None) for h, i in header_idx})
     return objs
 
 
@@ -960,20 +942,18 @@ def generate_final_connections(ciq_wb, mm_objs):
     BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     def write_header_row(ws, r, cols, ncols):
-        for c in range(1, ncols + 1):
+        for c in range(1, len(cols) + 1):
             cell = ws.cell(row=r, column=c)
             cell.fill = HEADER_FILL
             cell.border = BORDER
-            if c <= len(cols):
-                cell.value = cols[c - 1]
-                cell.font = HEADER_FONT
+            cell.value = cols[c - 1]
+            cell.font = HEADER_FONT
 
     def write_data_row(ws, r, row, cols, ncols):
-        for c in range(1, ncols + 1):
+        for c in range(1, len(cols) + 1):
             cell = ws.cell(row=r, column=c)
             cell.border = BORDER
-            if c <= len(cols):
-                cell.value = row.get(cols[c - 1])
+            cell.value = row.get(cols[c - 1])
 
     out_wb = openpyxl.Workbook()
     ws = out_wb.active
@@ -988,7 +968,11 @@ def generate_final_connections(ciq_wb, mm_objs):
     write_header_row(ws, r, MM_COLS, len(MM_COLS)); r += 1
     xmu_rows_to_add = []
     for row in mm_objs:
-        write_data_row(ws, r, row, MM_COLS, len(MM_COLS)); r += 1
+        clean_row = dict(row)
+        for k in ("eNBId", "eNodeB Name", "gNBId", "gNodeB Name"):
+            if not is_populated(clean_row.get(k)):
+                clean_row[k] = None
+        write_data_row(ws, r, clean_row, MM_COLS, len(MM_COLS)); r += 1
         primary = row.get("Node to be built as")
         e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
         is_lte_primary = str(primary).strip().upper() == str(e_name or "").strip().upper()
@@ -1338,7 +1322,7 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
 
 DL_UL_LOSS_ROW_RE = re.compile(
     r'(\S+)\s+(?:Up|Down)\s+\d+\s+(?:(?!\S+\s+(?:Up|Down)\s+\d+).)*?'
-    r'((?:Baseband|XMU)\S*(?:(?!\S+\s+(?:Up|Down)\s+\d+).)*?Port\s+D\d)', re.DOTALL
+    r'((?:Baseband|XMU|:\s*RRU)\S*(?:(?!\S+\s+(?:Up|Down)\s+\d+).)*Port\s+D\d)', re.DOTALL
 )
 
 def extract_dl_ul_loss_rows(precheck_text):
@@ -1358,13 +1342,19 @@ def generate_pre_fibers(precheck_text):
     """One Excel file per CIQ: Cells + DUS/XMU (S.No) - RRU from Pre-checks' DL/UL Loss table,
     plus a blank 'Pre fibers' column for manual fill-in."""
     import openpyxl
+    from openpyxl.styles import Font, PatternFill
     rows = extract_dl_ul_loss_rows(precheck_text)
     if not rows:
         return None
     out_wb = openpyxl.Workbook()
     ws = out_wb.active
     ws.title = "Sheet1"
+    HEADER_FILL = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    HEADER_FONT = Font(bold=True, color="FFFFFF")
     ws.append(["Cells", "DUS/XMU (S.No) - RRU", "Pre fibers"])
+    for cell in ws[1]:
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
     for r in rows:
         ws.append([r["Cells"], r["DUS/XMU (S.No) - RRU"], None])
     ws.column_dimensions["A"].width = 24
@@ -1380,7 +1370,7 @@ def generate_pre_fibers(precheck_text):
 # RADIO SWAP (universal — compares Pre-checks' DL/UL Loss radio type against the CIQ's RRU Type)
 # ============================================================
 
-RADIO_TYPE_RE = re.compile(r'RRU[-\w]*\s*\(([^,]+),')
+RADIO_TYPE_RE = re.compile(r'RRU[-\w]*\s*\(([^,)]+),')
 
 def extract_precheck_radio_types(precheck_text):
     """Reuses the same DL/UL Loss row match as Pre Fibers, but pulls the radio product type
@@ -1940,23 +1930,36 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
 
 def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str, precheck_text, log):
     summary_rows, siad_rows, outputs = [], [], []
-    tpl_cenm = TPL_CENM.read_text(encoding="utf-8")
+    tpl_cenm_tmbb = TPL_CENM.read_text(encoding="utf-8")
+    tpl_cenm_mmbb = TPL_CENM_MMBB.read_text(encoding="utf-8") if TPL_CENM_MMBB.exists() else None
 
     tmbb_rows = [r for r in mm_objs if str(r.get("BBU Mode", "")).strip() == "TMBB"]
-    if not tmbb_rows:
-        summary_rows.append({"Item": "Node identification", "Source": "CIQ · Mixed Mode Info", "Value": "NOT FOUND", "Note": "CENM expects a BBU Mode = TMBB row"})
+    mmbb_rows = [r for r in mm_objs if str(r.get("BBU Mode", "")).strip() == "MMBB"]
+    if not tmbb_rows and not mmbb_rows:
+        summary_rows.append({"Item": "Node identification", "Source": "CIQ · Mixed Mode Info", "Value": "NOT FOUND", "Note": "CENM expects a BBU Mode = TMBB or MMBB row"})
         return summary_rows, None, None, siad_rows, outputs, [], []
 
     for row in tmbb_rows:
         site_id = row.get("Node to be built as")
-        tpl = fill_node_template(tpl_cenm, row, edp_index, user_id, date_str, summary_rows, log)
+        tpl = fill_node_template(tpl_cenm_tmbb, row, edp_index, user_id, date_str, summary_rows, log)
         outputs.append((f"{site_id}_cENM_TMBB_Integration_Filled.txt", tpl))
         push_siad_row(siad_rows, edp_index, site_id)
 
+    for row in mmbb_rows:
+        site_id = row.get("Node to be built as")
+        if tpl_cenm_mmbb is None:
+            summary_rows.append({"Item": f"Node: {site_id}", "Source": "CENM MMBB template", "Value": "NOT FOUND", "Note": f"expected file not in templates/MCA/: {TPL_CENM_MMBB.name}"})
+            log(f"✗ {site_id}: CENM MMBB template file not found, skipped")
+            push_siad_row(siad_rows, edp_index, site_id)
+            continue
+        tpl = fill_node_template(tpl_cenm_mmbb, row, edp_index, user_id, date_str, summary_rows, log)
+        outputs.append((f"{site_id}_cENM_MMBB_Integration_Filled.txt", tpl))
+        push_siad_row(siad_rows, edp_index, site_id)
+
     for row in mm_objs:
-        if str(row.get("BBU Mode", "")).strip() != "TMBB":
+        if str(row.get("BBU Mode", "")).strip() not in ("TMBB", "MMBB"):
             site_id = row.get("Node to be built as")
-            summary_rows.append({"Item": f"Node: {site_id}", "Source": f"BBU Mode = {row.get('BBU Mode')}", "Value": "skipped for template", "Note": "not TMBB — still included in Pre/Post and SIAD"})
+            summary_rows.append({"Item": f"Node: {site_id}", "Source": f"BBU Mode = {row.get('BBU Mode')}", "Value": "skipped for template", "Note": "not TMBB/MMBB — still included in Pre/Post and SIAD"})
             push_siad_row(siad_rows, edp_index, site_id)
 
     controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
