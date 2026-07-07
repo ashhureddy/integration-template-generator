@@ -2023,7 +2023,9 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
         return summary_rows, None, None, siad_rows, outputs, [], []
 
     delmove = sheet_objs(ciq_wb["Sector Del_Movement"])
-    source_id = delmove[0].get("Source Node name") if delmove else None
+    target_name = target.get("Node to be built as")
+    source_row = next((r for r in delmove if str(r.get("Target Node name", "")).strip().upper() == str(target_name).strip().upper()), None)
+    source_id = source_row.get("Source Node name") if source_row else (delmove[0].get("Source Node name") if delmove else None)
 
     target_poles, source_poles = {}, {}
     if "5G Info" in ciq_wb.sheetnames:
@@ -2116,8 +2118,15 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     target_hw = hw_string(target_row) or "NOT FOUND"
     source_hw = pre_hw_string(precheck_text, source_id) or "NOT FOUND (no Pre-checks match)"
 
-    pre_line = f"{lte.get('Node to be built as')}({lte_hw_pre}) + {macro_primary}(P)/{macro_secondary}(S)(MMBB)({macro_hw_pre}) + {source_id}({source_hw})"
-    post_line = f"{lte.get('Node to be built as')}({lte_hw_post}) + {macro_primary}(P)/{macro_secondary}(S)(MMBB)({macro_hw_post}) + {target.get('Node to be built as')}({target_hw})"
+    lte_node = lte.get("Node to be built as")
+    already_listed = {str(lte_node).strip().upper(), str(macro_primary).strip().upper()}
+    source_is_distinct = is_populated(source_id) and str(source_id).strip().upper() not in already_listed
+
+    pre_line = f"{lte_node}({lte_hw_pre}) + {macro_primary}(P)/{macro_secondary}(S)(MMBB)({macro_hw_pre})"
+    if source_is_distinct:
+        pre_line += f" + {source_id}({source_hw})"
+
+    post_line = f"{lte_node}({lte_hw_post}) + {macro_primary}(P)/{macro_secondary}(S)(MMBB)({macro_hw_post}) + {target.get('Node to be built as')}({target_hw})"
 
     push_siad_row(siad_rows, edp_index, macro.get("Node to be built as"))
     push_siad_row(siad_rows, edp_index, lte.get("Node to be built as"))
