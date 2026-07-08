@@ -30,7 +30,7 @@ xxTarget_SiteIdxx_Pole_N077B_2        - From CIQ 5G Info  Column D
 xxTarget_SiteIdxx_Pole_N077C_2        - From CIQ 5G Info  Column D
 xxMacro_MMBB_SiteIdxx			      - From CIQ Sector Del_Movement tab Column A
 xxMacro_MMBB_gNB_Namexx               - From CIQ Mixed Mode info Column E
-xxMacro_MMBB_gNBIdxx                    - From CIQ Mixed Mode info Column D
+xxMacro_5G_gNBIdxx                    - From CIQ Mixed Mode info Column D
 xxLTE_SiteIdxx			              - From CIQ Sector Del_Movement tab Column A
 xxUserIDxx                            - Rename with the UserID		****** Eg: VV640M
 xxDatexx		                      - mmddyyyy format ## Eg: 05172026
@@ -199,9 +199,9 @@ lget KeyFileManagement
 hget CapacityKey licensedCapacityLimit|capacityUnit prb 
 hget CapacityKey licensedCapacityLimit|capacityUnit user 
 
-################################################################
-## Sctp Profile checks ON MMBB/SOURCE CRAN AND TARGET CRAN NODE##
-#################################################################
+##################################################################
+## Sctp Profile checks ON MMBB/SOURCE CRAN AND TARGET CRAN NODE ##
+##################################################################
 
 lpr Transport=1,Router=
 lpr Transport=1,SctpEndpoint=
@@ -259,6 +259,21 @@ hget Transport=1,Ptp=1,BoundaryOrdinaryClock=1,PtpBcOcPort=1 associatedGrandmast
 lpr Router=ptp
 lpr Ptp=1
 lpr RadioEquipmentClockReference=ptp
+
+#############################################################################################################################################
+## Check for the Transport Port Prior to migration of Existing Board in case if we are performing the Backup CV load method post migration ##
+#############################################################################################################################################
+ 
+###################################################################################################################################################################################
+## 1. This check has to be performed on site which involves the BB5216 to BB6630 migration or BB6630 to BB5216 migration                                                         ##
+## 2. When ever the Baseband boards are getting migrated BB5216 to BB6630 or Vice versa in that case the Pre/Post Transport Ports should be same                                 ##
+## 3. Prior to the BB5216 to BB6630 or Vice versa check the transport in the Pre as well as the transport port provided in the Radio node Project file are same [SiteInstall.xml]## 
+## 4. If you find any mismatch in the transport as per Pre and the site install script post in RSF, inform Leads and wait for confirmation.                                      ##
+## 5. This is applicable for the scenario which involves the BB5216 to BB6630 or Vice versa migration and Upon migration Loading the Backup CV form the Previous Board.          ## 
+## 6. Transport Port Information : BB5216 : TN_B & TN_C are Optical / TN_A is Ethernet                                                                                           ## 
+## 7. Transport Port Information : BB6630 : TN_A & TN_B are Optical / TN_C & TN_D are Ethernet                                                                                   ## 
+## 8. Note:- If the Backup CV is being loaded with incorrect transport port on site then it will leads to the crashing of the BB5216/BB6630.                                     ##
+###################################################################################################################################################################################
 
 ########################################################################
 check for recurring alarms (please make a note to run in a separate tab)
@@ -1818,7 +1833,7 @@ Case 1:
 cmedit action xxTarget_SiteIdxx BrmBackupManager=1 createBackup.(name="Pre_ERAN_MOS_Creation")
 cmedit get xxTarget_SiteIdxx BrmBackup.* -t
 
-cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,GNBDUFunction=1,ExtGNBDUPartnerFunction=xxMacro_MMBB_gNB_Namexx ExtGNBDUPartnerFunctionID=xxMacro_MMBB_gNB_Namexx;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,Transport=1,VlanPort=ERAN_NRCA";gNBDUId=1;gNBId=xxMacro_MMBB_gNBIdxx;gNBIdLength=26
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,GNBDUFunction=1,ExtGNBDUPartnerFunction=xxMacro_MMBB_gNB_Namexx ExtGNBDUPartnerFunctionID=xxMacro_MMBB_gNB_Namexx;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,Transport=1,VlanPort=ERAN_NRCA";gNBDUId=1;gNBId=xxMacro_5G_gNBIdxx;gNBIdLength=26
 
 cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,GNBDUFunction=1,ExtGNBDUPartnerFunction=xxMacro_MMBB_gNB_Namexx caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,Transport=1,VlanPort=ERAN_NRCA"
 
@@ -1836,7 +1851,7 @@ cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement
 
 cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,Transport=1,VlanPort=ERAN_NRCA"
 
-cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,GNBDUFunction=1,ExtGNBDUPartnerFunction=xxMacro_MMBB_gNB_Namexx ExtGNBDUPartnerFunctionID=xxMacro_MMBB_gNB_Namexx;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,Transport=1,VlanPort=ERAN_NRCA";gNBDUId=1;gNBId=xxMacro_MMBB_gNBIdxx;gNBIdLength=26
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,GNBDUFunction=1,ExtGNBDUPartnerFunction=xxMacro_MMBB_gNB_Namexx ExtGNBDUPartnerFunctionID=xxMacro_MMBB_gNB_Namexx;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,Transport=1,VlanPort=ERAN_NRCA";gNBDUId=1;gNBId=xxMacro_5G_gNBIdxx;gNBIdLength=26
 
 cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,GNBDUFunction=1,ExtGNBDUPartnerFunction=xxMacro_MMBB_gNB_Namexx caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=xxTarget_SiteIdxx,ManagedElement=xxTarget_SiteIdxx,Transport=1,VlanPort=ERAN_NRCA"
 
@@ -3023,6 +3038,24 @@ hget RfPort rfPortId
 hget RiLink riPortRef1|riPortRef2|operationalState|transportType|fronthaulDeviceLineRate|availabilityStatusRiLinkId
 hget RfBranch dlAttenuation|ulAttenuation|ulTrafficDelay|dlTrafficDelay
 sdir
+
+##########################################################################################################################################################################################
+## Digital Tilt Check [Please ensure that if CBAND/DOD is newly added or retuned, tilt verification has to be performed & ensure that digitalTilt is set for all the CBAND/DOD sectors] ##
+##########################################################################################################################################################################################
+
+####### Digital tilt should be set as per Pre. For newly added tilt set the value as per CIQ #######
+
+hget CommonBeamforming digitalTilt|usedDigitalTilt
+
+cmedit get xxSiteIdxx CommonBeamforming.digitalTilt -t
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxSiteIdxx,ManagedElement=xxSiteIdxx,GNBDUFunction=1,NRSectorCarrier=xxSiteIdxx_xxSectorIdxx,CommonBeamforming=1 digitalTilt : <tilt_value>
+
+cmedit get xxSiteIdxx CommonBeamforming.digitalTilt -t
+
+hget CommonBeamforming digitalTilt|usedDigitalTilt
+
+####### Check that the digital tilt is correctly set #######
 
 ###############
 ##RET Checks##
