@@ -959,6 +959,24 @@ hget Sector state|configuredMaxTxPower|availableHwOutputPower|noof[rt]x|sectorFu
 
 hget ^NRCell|syncsignal cellBarred|state|cellRange|cellState|nRSectorCarrier|cellState|cellReservedForOperator
 
+##########################################################################################################################################################################################
+## Digital Tilt Check [Please ensure that if CBAND/DOD is newly added or retuned, tilt verification has to be performed & ensure that digitalTilt is set for all the CBAND/DOD sectors] ##
+##########################################################################################################################################################################################
+
+####### Digital tilt should be set as per Pre. For newly added tilt set the value as per CIQ #######
+
+hget CommonBeamforming digitalTilt|usedDigitalTilt
+
+cmedit get xxSiteIdxx CommonBeamforming.digitalTilt -t
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxSiteIdxx,ManagedElement=xxSiteIdxx,GNBDUFunction=1,NRSectorCarrier=xxSiteIdxx_xxSectorIdxx,CommonBeamforming=1 digitalTilt : <tilt_value>
+
+cmedit get xxSiteIdxx CommonBeamforming.digitalTilt -t
+
+hget CommonBeamforming digitalTilt|usedDigitalTilt
+
+####### Check that the digital tilt is correctly set #######
+
 ##########################################
 ###  Hardware Unit Checks  - Description #
 ##########################################
