@@ -1052,7 +1052,8 @@ IDL_TEMPLATE_REGISTRY = {
     ("G3", "G3", "G3"): [("G3+ G3+ G3_RPM 777 052.txt", "Preferred"), ("G3+ G3+ G3_RPM 777 053.txt", "Alternate")],
     ("G2", "G4", "G4"): [("G2+G4+G4_RPM_777_053_543.txt", "")],
     ("G4", "G4", "G4"): [("G4+G4+G4_RPM 777 052.txt", "")],
-    # ("G2","G2","G4"), ("G2","G3","G4"), ("G3","G3","G4"), ("G3","G4","G4") -> no template exists;
+    ("G3", "G4", "G4"): [("G3 + G4 + G4_RPM_777_052.txt", "")],
+    # ("G2","G2","G4"), ("G2","G3","G4"), ("G3","G3","G4") -> no template exists;
     # falls through to the "IDL Template not found" branch below.
 }
 
