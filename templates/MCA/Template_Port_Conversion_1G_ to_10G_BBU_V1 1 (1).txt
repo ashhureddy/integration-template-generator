@@ -1,0 +1,115 @@
+Template to change the Port to 10G at BBU end, when scheduled for port conversion
+
+xSiteIDx -- Replace with the Site ID.
+
+#############IMPORTANT#############
+Part of Prechecks
+1. If the TN Port in pre for BB5216 or BB6630 is TN_A,please escalate to leads as TN_A port will not support 10G. (If port is TN_B in pre,please proceed). 
+2. FeatureState=CXC4011838 if found missing on site with board 6630 and BB5216 please escalate to leads
+3. FeatureState=CXC4011838 will not be present on board 6651 and 6648,please proceed and no need to escalate here.
+
+get CXC4011838
+#######################################
+
+
+###################
+Take Pre Backup CV
+###################
+cmedit action xSiteIDx  BrmBackupManager=1 createBackup.(name="BackUp_Pre_1G_10G_conversion_CV_xxSiteIdxx")
+
+cmedit get xSiteIDx BrmBackup.* -t
+
+###################
+For Pre CV Download
+###################
+###################################################################################################################################################
+## If qic_integration tool is not configured run the below command in putty once ENM ID is entered                                               ##
+##  /home/shared/bk199e/qic_integration.sh                                                                                                       ##
+## [Attention: Make sure this command is executed once ENM ID is entered in putty and Do not run this command after logging in to the node]      ##
+###################################################################################################################################################
+
+########################################################################################
+- Using the tool once configured
+- Login to node in putty and run the command  qic_integration
+- Select option 38 for CV download 
+- Enter the BrmBackup number of the CV that you want to download
+- Verify the CV that you want to dowload and type Yes to proceed further
+- Enter the ENM ID and type enter
+- Execute the command displayed in the putty in the desired ENM in CMCLI
+- proceed to download the CV in the winscp in the path in the desired ENM
+
+
+
+################################################################
+Please activate the fail safe before proceeding with port change
+################################################################
+
+## Activating the Fail Safe ##
+cmedit get xSiteIDx BrmFailsafeBackup.*
+cmedit set  xSiteIDx BrmFailsafeBackup timeoutLength=3000
+cmedit action xSiteIDx BrmFailsafeBackup=1 activate
+cmedit get xSiteIDx BrmFailsafeBackup.*
+
+
+###########################################################################################################################
+## Proceed to activate the 10GE feature and admOperatingMode:10G_FULL and autoNegEnable:false once fail safe is activated #
+###########################################################################################################################
+
+#################################################################################################################################################################################################
+## FeatureState=CXC4011838 will be applicable only for BB6630 and BB5216 (6651 and 6648 will not have this feature, if board type is 6651 and 6648 ignore the feature state activation command )#
+#################################################################################################################################################################################################
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSiteIDx,ManagedElement=xSiteIDx,SystemFunctions=1,Lm=1,FeatureState=CXC4011838 featureState=ACTIVATED
+
+#################################################################################################################################################################################################
+admOperatingMode:10G_FULL and autoNegEnable:false update command for 6651 and 6648
+#################################################################################################################################################################################################
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSiteIDx,ManagedElement=xSiteIDx,Transport=1,EthernetPort=TN_IDL_B admOperatingMode:10G_FULL;autoNegEnable:false
+
+#################################################################################################################################################################################################
+admOperatingMode:10G_FULL and autoNegEnable:false update command for BB5216 and BB6630
+#################################################################################################################################################################################################
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSiteIDx,ManagedElement=xSiteIDx,Transport=1,EthernetPort=TN_B admOperatingMode:10G_FULL;autoNegEnable:false
+
+
+####################################################################################################################################################################
+Deactivation of the Fail Safe mode has to be done only once port is changed to 10G from MPST and connectivity is established to the node with 10GE port size
+******* Ensure Fail safe is deactivated without fail as if the deactivation is missed port will revert to pre status and will loose connectivity*******
+####################################################################################################################################################################
+
+##Deactivate the Fail Safe mode ##
+
+cmedit action xSiteIDx BrmFailsafeBackup=1 deactivate
+
+
+cmedit get xSiteIDx BrmFailsafeBackup.*
+
+
+###################
+Take Post Backup CV
+###################
+cmedit action xSiteIDx  BrmBackupManager=1 createBackup.(name="BackUp_Post_1G_10G_conversion_CV_xxSiteIdxx")
+
+cmedit get xSiteIDx BrmBackup.* -t
+
+###################
+For Post CV Download
+###################
+###################################################################################################################################################
+## If qic_integration tool is not configured run the below command in putty once ENM ID is entered                                               ##
+##  /home/shared/bk199e/qic_integration.sh                                                                                                       ##
+## [Attention: Make sure this command is executed once ENM ID is entered in putty and Do not run this command after logging in to the node]      ##
+###################################################################################################################################################
+
+########################################################################################
+- Using the tool once configured
+- Login to node in putty and run the command  qic_integration
+- Select option 38 for CV download 
+- Enter the BrmBackup number of the CV that you want to download
+- Verify the CV that you want to dowload and type Yes to proceed further
+- Enter the ENM ID and type enter
+- Execute the command displayed in the putty in the desired ENM in CMCLI
+- proceed to download the CV in the winscp in the path in the desired ENM
+
+
