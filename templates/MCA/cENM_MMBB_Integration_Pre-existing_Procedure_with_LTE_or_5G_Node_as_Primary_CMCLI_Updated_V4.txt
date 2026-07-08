@@ -1,4 +1,4 @@
-############           cENM  Mixedmode Integration Procedure [5G NR or LTE as Primary] - for MMBB Sites                #############
+############           cENM  TRIMODE Integration Procedure [5G NR or LTE as Primary] - for TMBB Sites                #############
 ##############################################################################################################################
 ##                                            Updated with the LPA Process                                                  ##
 ##############################################################################################################################
@@ -266,6 +266,21 @@ hget Transport=1,Ptp=1,BoundaryOrdinaryClock=1,PtpBcOcPort=1 associatedGrandmast
 lpr Router=ptp
 lpr Ptp
 lpr RadioEquipmentClockReference=ptp
+
+#############################################################################################################################################
+## Check for the Transport Port Prior to migration of Existing Board in case if we are performing the Backup CV load method post migration ##
+#############################################################################################################################################
+
+###################################################################################################################################################################################
+## 1. This check has to be performed on site which involves the BB5216 to BB6630 migration or BB6630 to BB5216 migration                                                         ##
+## 2. When ever the Baseband boards are getting migrated BB5216 to BB6630 or Vice versa in that case the Pre/Post Transport Ports should be same                                 ##
+## 3. Prior to the BB5216 to BB6630 or Vice versa check the transport in the Pre as well as the transport port provided in the Radio node Project file are same [SiteInstall.xml]## 
+## 4. If you find any mismatch in the transport as per Pre and the site install script post in RSF, inform Leads and wait for confirmation.                                      ##
+## 5. This is applicable for the scenario which involves the BB5216 to BB6630 or Vice versa migration and Upon migration Loading the Backup CV form the Previous Board.          ## 
+## 6. Transport Port Information : BB5216 : TN_B & TN_C are Optical / TN_A is Ethernet                                                                                           ## 
+## 7. Transport Port Information : BB6630 : TN_A & TN_B are Optical / TN_C & TN_D are Ethernet                                                                                   ## 
+## 8. Note:- If the Backup CV is being loaded with incorrect transport port on site then it will leads to the crashing of the BB5216/BB6630.                                     ##
+###################################################################################################################################################################################
 
 ########################################################################
 check for recurring alarms (please make a note to run in a separate tab)
@@ -3417,6 +3432,23 @@ hget RiLink riPortRef1|riPortRef2|operationalState|transportType|fronthaulDevice
 hget RfBranch dlAttenuation|ulAttenuation|ulTrafficDelay|dlTrafficDelay
 sdir
 
+##########################################################################################################################################################################################
+## Digital Tilt Check [Please ensure that if CBAND/DOD is newly added or retuned, tilt verification has to be performed & ensure that digitalTilt is set for all the CBAND/DOD sectors] ##
+##########################################################################################################################################################################################
+
+####### Digital tilt should be set as per Pre. For newly added tilt set the value as per CIQ #######
+
+hget CommonBeamforming digitalTilt|usedDigitalTilt
+
+cmedit get xxSiteIdxx CommonBeamforming.digitalTilt -t
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxSiteIdxx,ManagedElement=xxSiteIdxx,GNBDUFunction=1,NRSectorCarrier=xxSiteIdxx_xxSectorIdxx,CommonBeamforming=1 digitalTilt : <tilt_value>
+
+cmedit get xxSiteIdxx CommonBeamforming.digitalTilt -t
+
+hget CommonBeamforming digitalTilt|usedDigitalTilt
+
+####### Check that the digital tilt is correctly set #######
 
 ###############
 ##RET Checks##
