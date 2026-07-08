@@ -30,7 +30,7 @@ xxTarget_SiteIdxx_Pole_N077B_2        - From CIQ 5G Info  Column D
 xxTarget_SiteIdxx_Pole_N077C_2        - From CIQ 5G Info  Column D
 xxMacro_MMBB_SiteIdxx			      - From CIQ Sector Del_Movement tab Column A
 xxMacro_MMBB_gNB_Namexx               - From CIQ Mixed Mode info Column E
-xxMacro_MMBB_gNBIdxx                    - From CIQ Mixed Mode info Column D
+xxMacro_5G_gNBIdxx                    - From CIQ Mixed Mode info Column D
 xxLTE_SiteIdxx			              - From CIQ Sector Del_Movement tab Column A
 xxUserIDxx                            - Rename with the UserID		****** Eg: VV640M
 xxDatexx		                      - mmddyyyy format ## Eg: 05172026
