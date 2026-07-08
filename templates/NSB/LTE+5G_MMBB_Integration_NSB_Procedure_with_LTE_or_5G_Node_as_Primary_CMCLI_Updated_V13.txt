@@ -5,6 +5,8 @@
 
 xxSiteIdxx 			-- Site ID
 #### MixedMode Site Node to be built as Name from MixedMode Info Tab Column A	####
+xLTE_SiteID2x      	- 2nd Co-located Site ID From CIQ Mixed Mode info Column A
+xLTE_SiteID3x      	- 3rd Co-located Site ID From CIQ Mixed Mode info Column A
 xxUserIDxx 			-- Rename with the UserID				****** Eg: au651d					
 xDatex				-- mmddyyyy format ****** Eg: 03312020
 xgNBIdx			    -- gNBId
@@ -92,7 +94,7 @@ Check enrollment Status post loading Site install File , If Found Discrepancies 
 
 ####### oamNodeCredential should be loaded with the respective ENM #######
 
-amos xxSiteIdxx
+amos xSite_IDx
 lt all
 
 get SecM=1,CertM=1,NodeCredential=oamNodeCredential subjectName
@@ -108,7 +110,7 @@ get SecM=1,CertM=1,NodeCredential=oamNodeCredential subjectName
 
 ENM CLI Command
 --------------- 
-cmedit get xxSiteIdxx NodeCredential.(subjectName) -t
+cmedit get xSite_IDx NodeCredential.(subjectName) -t
 
 #######################################################################################################
 Setting supervision to true once Connectivity to the node is established post loading Site install File
@@ -178,47 +180,47 @@ Based on the location of the site, set the time zone. ##### Refer to Column N "T
 
 Based on the location of the site, set the time zone.
 
-cmedit get xxSiteIdxx DateAndTime.TimeZone -t
+cmedit get xSite_IDx DateAndTime.TimeZone -t
  
 Eastern Sites 
-cmedit set xxSiteIdxx DateAndTime=1 timeZone:"US/Eastern"
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Eastern"
  
 Central Sites 
-cmedit set xxSiteIdxx DateAndTime=1 timeZone:"US/Central"
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Central"
  
 Mountain Sites 
-cmedit set xxSiteIdxx DateAndTime=1 timeZone:"US/Mountain"
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Mountain"
  
 Arizona Sites 
-cmedit set xxSiteIdxx DateAndTime=1 timeZone:"US/Arizona"
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Arizona"
  
 Pacific Sites
-cmedit set xxSiteIdxx DateAndTime=1 timeZone:"US/Pacific"
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Pacific"
 
-cmedit get xxSiteIdxx DateAndTime.TimeZone -t
+cmedit get xSite_IDx DateAndTime.TimeZone -t
 
 get DateandTime
  
 ********************************************************
 
-cmedit get xxSiteIdxx TimeSettings.*
+cmedit get xSite_IDx TimeSettings.*
 
 Eastern Sites 
-cmedit set xxSiteIdxx TimeSettings=1 timeOffset:"-05:00"
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-05:00"
  
 Central Sites 
-cmedit set xxSiteIdxx TimeSettings=1 timeOffset:"-06:00"
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-06:00"
  
 Mountain Sites 
-cmedit set xxSiteIdxx TimeSettings=1 timeOffset:"-07:00"
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-07:00"
  
 Arizona Sites 
-cmedit set xxSiteIdxx TimeSettings=1 timeOffset:"-07:00"
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-07:00"
  
 Pacific Sites
-cmedit set xxSiteIdxx TimeSettings=1 timeOffset:"-08:00"
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-08:00"
  
-cmedit get xxSiteIdxx TimeSettings.*
+cmedit get xSite_IDx TimeSettings.*
 
 get TimeSettings=1
  
@@ -232,32 +234,32 @@ Commands to update networkelement timeZone to same as Node timezone in the ENM
  
 ###########################################################################################################################################################
 
-cmedit get *xxSiteIdxx* NetworkElement.(timeZone,utcOffset) -t
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
 
 Eastern Sites 
-cmedit set xxSiteIdxx networkelement timeZone:"US/Eastern"
+cmedit set xSite_IDx networkelement timeZone:"US/Eastern"
 
 Central Sites 
-cmedit set xxSiteIdxx networkelement timeZone:"US/Central"
+cmedit set xSite_IDx networkelement timeZone:"US/Central"
 
 Mountain Sites 
-cmedit set xxSiteIdxx networkelement timeZone:"US/Mountain"
+cmedit set xSite_IDx networkelement timeZone:"US/Mountain"
  
 Arizona Sites 
-cmedit set xxSiteIdxx networkelement timeZone:"US/Arizona"
+cmedit set xSite_IDx networkelement timeZone:"US/Arizona"
 
 Pacific Sites
-cmedit set xxSiteIdxx networkelement timeZone:"US/Pacific"
+cmedit set xSite_IDx networkelement timeZone:"US/Pacific"
  
-cmedit get *xxSiteIdxx* NetworkElement.(timeZone,utcOffset) -t
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
 
 ##########################################################################################################
 Both ENM and Node end to have same timeZone when checked with below get commands upon setting the timezone
 ##########################################################################################################
 
-cmedit get *xxSiteIdxx* NetworkElement.(timeZone,utcOffset) -t
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
 
-cmedit get *xxSiteIdxx* DateAndTime.TimeZone -t
+cmedit get *xSite_IDx* DateAndTime.TimeZone -t
 
 ##############################################################################################################################################################
  
@@ -265,9 +267,9 @@ cmedit get *xxSiteIdxx* DateAndTime.TimeZone -t
  
 ########  daylightSavingTimeStartDate and daylightSavingTimeEndDate set commands ########
  
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxSiteIdxx,ManagedElement=xxSiteIdxx,NodeSupport=1,TimeSettings=1 daylightSavingTimeStartDate:{dayRule="Sun>=8",month=MARCH,time="02:00"} --force
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSite_IDx,ManagedElement=xSite_IDx,NodeSupport=1,TimeSettings=1 daylightSavingTimeStartDate:{dayRule="Sun>=8",month=MARCH,time="02:00"} --force
  
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxSiteIdxx,ManagedElement=xxSiteIdxx,NodeSupport=1,TimeSettings=1 daylightSavingTimeEndDate:{dayRule="Sun>=1",month=NOVEMBER,time="02:00"} --force
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSite_IDx,ManagedElement=xSite_IDx,NodeSupport=1,TimeSettings=1 daylightSavingTimeEndDate:{dayRule="Sun>=1",month=NOVEMBER,time="02:00"} --force
  
  
 Note: For Arizona/Hawaii sites,  daylightSavingTimeOffset should be 0 since there is no daylightsaving observed.Please verify on site
@@ -453,14 +455,14 @@ cmedit action xxSiteIdxx FieldReplaceableUnit=1 restartUnit.(restartrank=RESTART
 Once Node is reachable, Check Sync State
 ########################################
 
-cmedit get NetworkElement=xxSiteIdxx,CmFunction=1
+cmedit get NetworkElement=xSite_IDx,CmFunction=1
 
 ######################################################
 If Node found Unsync'd, initiate CM sync & check again
 ######################################################
 
-cmedit action NetworkElement=xxSiteIdxx,CmFunction=1 sync 
-cmedit get NetworkElement=xxSiteIdxx,CmFunction=1
+cmedit action NetworkElement=xSite_IDx,CmFunction=1 sync 
+cmedit get NetworkElement=xSite_IDx,CmFunction=1
 
 #######################################################################
 ##  sctp check commands for MMBB nodes with 5G or LTE as primary  ## 
@@ -570,15 +572,15 @@ cmedit set xxSiteIdxx TermPointToGNB.TermPointToGNBId==xgNB_Namex administrative
 #####################################################################################################################################################################
 #####################################################################################################################################################################
 
-cmedit action xxSiteIdxx BrmBackupManager=1 createBackup.(name="Pre_Network_relations_1")
-cmedit get xxSiteIdxx BrmBackup.* -t
+cmedit action xSite_IDx BrmBackupManager=1 createBackup.(name="Pre_Network_relations_1")
+cmedit get xSite_IDx BrmBackup.* -t
 
 ####### For Any NR Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
 For "Instance Validation Error : MO created earlier by import file", Check the Bulk Import Created Job List & make sure No other Job is Validated/Running for the same Node.
 Thereby, Delete the previously validated file, then Reimport the script file, Re-Validate & Re-Execute.
 For Errors received due to Nodes being "Unsynchronized" during Job execution, Resync the Node & ensure that the Node is Sync'd in ENM. Then Re-Validate & Re-Execute the Job. #######
 
-xxSiteIdxx_01_1_network_relations_xDatex_dynamic_script
+xSite_IDx_01_1_network_relations_xDatex_dynamic_script
 
 ####### NR1 if fails, Cant move forward as NR2/3 and Radio scripts cant be executed. Without Radio scripts No Sectors will be created and no furthers scripts can be executed. Needs to be fixed to proceed further #######
 
@@ -793,11 +795,11 @@ st UlCompGroup
 hget SectorCarrier= reservedBy
 
 ####### Ideally UlCompGroup should already be in Locked state; If otherwise, please execute below commands to lock UlCompGroup #######
-cmedit get xxSiteIdxx UlCompGroup.(administrativeState) -t
+cmedit get xSite_IDx UlCompGroup.(administrativeState) -t
 
-cmedit set xxSiteIdxx UlCompGroup administrativeState:LOCKED --force
+cmedit set xSite_IDx UlCompGroup administrativeState:LOCKED --force
 
-cmedit get xxSiteIdxx UlCompGroup.(administrativeState) -t
+cmedit get xSite_IDx UlCompGroup.(administrativeState) -t
 
 st UlCompGroup
 
@@ -1217,9 +1219,9 @@ get FeatureState=CXC4012218
 
 
 ##To Activate the features##
-cmedit set xxSiteIdxx FeatureState.(FeatureStateId==CXC4012015) featureState:ACTIVATED
-cmedit set xxSiteIdxx FeatureState.(FeatureStateId==CXC4011018) featureState:ACTIVATED
-cmedit set xxSiteIdxx FeatureState.(FeatureStateId==CXC4012218) featureState:ACTIVATED
+cmedit set xSite_IDx FeatureState.(FeatureStateId==CXC4012015) featureState:ACTIVATED
+cmedit set xSite_IDx FeatureState.(FeatureStateId==CXC4011018) featureState:ACTIVATED
+cmedit set xSite_IDx FeatureState.(FeatureStateId==CXC4012218) featureState:ACTIVATED
 
 get FeatureState=CXC4012015
 # Check if the feature is activated # Features for mixed mode which are activated for LTE*
@@ -1232,14 +1234,14 @@ get FeatureState=CXC4012218
 Once Node is reachable, Check Sync State
 ########################################
 
-cmedit get NetworkElement=xxSiteIdxx,CmFunction=1
+cmedit get NetworkElement=xSite_IDx,CmFunction=1
 
 ######################################################
 If Node found Unsync'd, initiate CM sync & check again
 #####################################################
 
-cmedit action NetworkElement=xxSiteIdxx,CmFunction=1 sync 
-cmedit get NetworkElement=xxSiteIdxx,CmFunction=1
+cmedit action NetworkElement=xSite_IDx,CmFunction=1 sync 
+cmedit get NetworkElement=xSite_IDx,CmFunction=1
 
 
 ********************************** Area Lite Checks *********************************************
@@ -1362,11 +1364,11 @@ Extra:    Recovery action initiated by BB via BCI, faultId: 0x301 (SwError), fau
 
 Please open a New Tab
 
-amosbatch xxSiteIdxx 'lt all;s+;kget all;q'
+amosbatch xSite_IDx 'lt all;s+;kget all;q'
 
 cd xxxspecified pathxxxxxx
 ls
-zip ###kgetallname###.zip xxSiteIdxx.log xLTE_SiteID2x.log
+zip ###kgetallname###.zip xSite_IDx.log xLTE_SiteID2x.log
 
 Using kget all generate the QA report
 
@@ -1646,6 +1648,24 @@ hget RfPort rfPortId
 hget RiLink riPortRef1|riPortRef2|operationalState|transportType|fronthaulDeviceLineRate|availabilityStatusRiLinkId
 hget RfBranch dlAttenuation|ulAttenuation|ulTrafficDelay|dlTrafficDelay
 sdir
+
+##########################################################################################################################################################################################
+## Digital Tilt Check [Please ensure that if CBAND/DOD is newly added or retuned, tilt verification has to be performed & ensure that digitalTilt is set for all the CBAND/DOD sectors] ##
+##########################################################################################################################################################################################
+
+####### Digital tilt should be set as per Pre. For newly added tilt set the value as per CIQ #######
+
+hget CommonBeamforming digitalTilt|usedDigitalTilt
+
+cmedit get xxSiteIdxx CommonBeamforming.digitalTilt -t
+
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxSiteIdxx,ManagedElement=xxSiteIdxx,GNBDUFunction=1,NRSectorCarrier=xxSiteIdxx_xxSectorIdxx,CommonBeamforming=1 digitalTilt : <tilt_value>
+
+cmedit get xxSiteIdxx CommonBeamforming.digitalTilt -t
+
+hget CommonBeamforming digitalTilt|usedDigitalTilt
+
+####### Check that the digital tilt is correctly set #######
 
 ###############
 ##RET Checks##
@@ -2054,11 +2074,11 @@ Delta_Dynamic_MMBB_26.01_REV26.00_NR
 st amf
 
 ####### Ensure that amf admin state are in Unlocked state, if not Unlock the amf termpoints #######
-cmedit get xxSiteIdxx TermPointToAmf.(administrativeState,Operationalstate) -t
+cmedit get xSite_IDx TermPointToAmf.(administrativeState,Operationalstate) -t
 
-cmedit set xxSiteIdxx TermPointToAmf administrativeState=UNLOCKED
+cmedit set xSite_IDx TermPointToAmf administrativeState=UNLOCKED
 
-cmedit get xxSiteIdxx TermPointToAmf.(administrativeState,Operationalstate) -t
+cmedit get xSite_IDx TermPointToAmf.(administrativeState,Operationalstate) -t
 
 
 st amf
