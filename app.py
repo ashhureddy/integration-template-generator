@@ -31,6 +31,7 @@ TPL_TMBB = resolve_template("TRIMODE_Integration_Pre-existing_Procedure_with_LTE
 TPL_CENM = resolve_template("cENM_TRIMODE_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V4.txt", "cENM_TRIMODE")
 TPL_CENM_MMBB = resolve_template("cENM_MMBB_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V4.txt", "cENM_MMBB")
 TPL_6610 = resolve_template("6610 Controller Integration Procedure_25Q3_Updated_V12.txt", "6610")
+TPL_PORT_CONVERSION = resolve_template("Template_Port_Conversion_1G_to_10G_BBU_V1_1.txt", "Port_Conversion")
 TPL_CRAN_TRIP1 = resolve_template("CRAN_TO_CRAN_Rehome_Pre-integration_Trip-1_Procedure_for_SA_Sites_V2.txt", "Trip-1")
 TPL_CRAN_TRIP2 = resolve_template("CRAN_TO_CRAN_Rehome_and_6673_Sidehaul_Change_With_MPST_Trip-2_Procedure_for_SA_Sites_V1.txt", "Trip-2")
 TPL_CRAN_NSA = resolve_template("CRAN_TO_CRAN_Rehome_Integration_and_Cutover_Procedure_for_NSA_Sites_V2.txt", "NSA_Sites")
@@ -1052,8 +1053,7 @@ IDL_TEMPLATE_REGISTRY = {
     ("G3", "G3", "G3"): [("G3+ G3+ G3_RPM 777 052.txt", "Preferred"), ("G3+ G3+ G3_RPM 777 053.txt", "Alternate")],
     ("G2", "G4", "G4"): [("G2+G4+G4_RPM_777_053_543.txt", "")],
     ("G4", "G4", "G4"): [("G4+G4+G4_RPM 777 052.txt", "")],
-    ("G3", "G4", "G4"): [("G3 + G4 + G4_RPM_777_052.txt", "")],
-    # ("G2","G2","G4"), ("G2","G3","G4"), ("G3","G3","G4") -> no template exists;
+    # ("G2","G2","G4"), ("G2","G3","G4"), ("G3","G3","G4"), ("G3","G4","G4") -> no template exists;
     # falls through to the "IDL Template not found" branch below.
 }
 
@@ -1315,6 +1315,98 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
                 scope_lines.append(f"NGS Activation on :\t{band_list}\t{node_a} <-> {node_b}")
 
     return summary_rows, scope_lines
+
+
+# ============================================================
+# PORT CONVERSION (MCA / CENM / CRAN — CIQ + Pre-checks + EDP)
+#
+# Confirmed logic:
+#  - Rule 1: no board swap. Pre-checks' Hardware Status Information reports the node's actual
+#    baseband model (via extract_pre_hw, already used elsewhere for Pre/Post configuration) —
+#    if its generation doesn't match the CIQ's DU-type-derived generation, a board swap is
+#    already in progress and Port Conversion doesn't apply (the OpMode difference is explained
+#    by the swap, not a pure port-speed change).
+#  - Rule 2: Pre-checks' "Transport Fiber link Status" table shows the board's relevant port
+#    (below) at OpMode = 1G_FULL, while the EDP's SIAD_PORT_SIZE_BBU already shows 10G for that
+#    same node — i.e. the port hasn't been converted yet, but the EDP already calls for it.
+#  - Rule 3: which port to check depends on board generation:
+#      G2 -> TN_A or TN_B      G3 -> TN_IDL_B      G4 -> TN_IDL_C
+#  - Output: "Port speed 1G to 10G conversion with MPST: <NodeID>." — plain sentence, not
+#    tab-separated like the other Scope of Work lines (confirmed).
+# ============================================================
+
+PORT_BY_GEN = {"G2": ["TN_A", "TN_B"], "G3": ["TN_IDL_B"], "G4": ["TN_IDL_C"]}
+
+TRANSPORT_FIBER_ROW_RE = re.compile(
+    r'(\S+)\s+(\S+)\s+(\d+)\s+(TN_A|TN_B|TN_IDL_B|TN_IDL_C)\s+\S+\s+\d+\s+(\S+)\s+(?:true|false)'
+)
+
+
+def extract_transport_fiber_opmode(precheck_text, node, port_labels):
+    """OpMode string for the first Transport Fiber link Status row matching this node and
+    one of its generation's relevant port labels, or None if no such row exists."""
+    if not precheck_text or not node:
+        return None
+    node_u = str(node).strip().upper()
+    for m in TRANSPORT_FIBER_ROW_RE.finditer(precheck_text):
+        row_node, board, lnh, port, opmode = m.groups()
+        if row_node.strip().upper() == node_u and port in port_labels:
+            return opmode
+    return None
+
+
+def generate_port_conversion_checks(ciq_wb, mm_objs, edp_index, precheck_text, log):
+    """Returns (outputs, summary_rows, scope_lines). Shared by MCA / CENM / CRAN.
+    Generation is read from Pre-checks' Hardware Status (the board that CURRENTLY exists),
+    not the CIQ's target/post board — the template applies to whatever board is actually in
+    Pre-checks right now, regardless of what it's being swapped to (confirmed: this template is
+    for the board that's in Pre, not the board in the CIQ's post state). G4 is excluded outright
+    since it's the newest board (can never be a Pre-checks-side board here) and the template has
+    no G4/TN_IDL_C content."""
+    outputs, summary_rows, scope_lines = [], [], []
+    if not precheck_text:
+        return outputs, summary_rows, scope_lines
+
+    tpl_text = TPL_PORT_CONVERSION.read_text(encoding="utf-8") if TPL_PORT_CONVERSION.exists() else None
+
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        if not node:
+            continue
+
+        pre_model = extract_pre_hw(precheck_text, node)
+        pre_gen = DU_TYPE_TO_GEN.get(str(pre_model).strip()) if pre_model else None
+        if pre_gen not in ("G2", "G3"):
+            continue  # G4 (or undetectable) in Pre-checks — template doesn't apply here at all
+        port_labels = PORT_BY_GEN[pre_gen]
+
+        opmode = extract_transport_fiber_opmode(precheck_text, node, port_labels)
+        if not opmode or "1G" not in opmode.upper():
+            continue  # not currently 1G in Pre-checks — nothing pending
+
+        edp_row = edp_row_for(edp_index, node)
+        siad_port_size = edp_get(edp_index, edp_row, "SIAD_PORT_SIZE_BBU") if edp_row else None
+        if not is_populated(siad_port_size) or "10G" not in str(siad_port_size).upper():
+            continue  # EDP doesn't call for 10G — nothing pending
+
+        # Confirmed mismatch on a G2/G3 Pre-checks board — always show display line and always
+        # generate the template, regardless of what the CIQ's target board ends up being.
+        summary_rows.append({
+            "Item": "Port Conversion", "Source": node,
+            "Value": "1G -> 10G pending", "Note": f"Pre-checks board: {pre_gen}, port: {'/'.join(port_labels)}, EDP SIAD_PORT_SIZE_BBU: {siad_port_size}",
+        })
+        log(f"\u2713 Port Conversion: {node} — 1G in Pre-checks ({pre_gen} board), EDP calls for 10G")
+        scope_lines.append(f"Port speed 1G to 10G conversion with MPST: {node}.")
+
+        if tpl_text is None:
+            summary_rows.append({"Item": "Port Conversion", "Source": f"template {TPL_PORT_CONVERSION.name}", "Value": "NOT FOUND", "Note": f"expected file not in templates/MCA/: {TPL_PORT_CONVERSION.name}"})
+            log(f"\u2717 Port Conversion: template file not found for {node}")
+            continue
+
+        filled = tpl_text.replace("xxSiteIdxx", str(node)).replace("xSiteIDx", str(node))
+        outputs.append((f"{node}_Port_Conversion_1G_to_10G.txt", filled))
+
+    return outputs, summary_rows, scope_lines
 
 
 # ============================================================
@@ -1926,6 +2018,10 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
     scope_of_work_lines += idl_scope_lines
     scope_of_work_lines += ngs_scope_lines
+    pc_outputs, pc_summary, pc_scope_lines = generate_port_conversion_checks(ciq_wb, mm_objs, edp_index, precheck_text, log)
+    outputs += pc_outputs
+    summary_rows += pc_summary
+    scope_of_work_lines += pc_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1995,6 +2091,10 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
     scope_of_work_lines += idl_scope_lines
     scope_of_work_lines += ngs_scope_lines
+    pc_outputs, pc_summary, pc_scope_lines = generate_port_conversion_checks(ciq_wb, mm_objs, edp_index, precheck_text, log)
+    outputs += pc_outputs
+    summary_rows += pc_summary
+    scope_of_work_lines += pc_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -2158,6 +2258,10 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
     summary_rows += ngs_summary
     scope_of_work_lines += ngs_scope_lines
+    pc_outputs, pc_summary, pc_scope_lines = generate_port_conversion_checks(ciq_wb, mm_objs, edp_index, precheck_text, log)
+    outputs += pc_outputs
+    summary_rows += pc_summary
+    scope_of_work_lines += pc_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -2169,9 +2273,9 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
 # ============================================================
 
 SCOPE_CHECKLIST = {
-    "CRAN": ["Carrier ADD", "Carrier delete", "Carrier moving", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks"],
-    "MCA": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks"],
-    "CENM": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks"],
+    "CRAN": ["Carrier ADD", "Carrier delete", "Carrier moving", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
+    "MCA": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
+    "CENM": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
     "N2E": ["Carrier ADD", "IDL Connections", "DSS checks", "6610 Present", "SA Conversion", "NGS Checks"],
     "NSB": ["Carrier ADD", "IDL Connections", "DSS checks", "NGS Checks", "6610 Present"],
 }
@@ -2188,6 +2292,7 @@ CHECK_MATCHERS = {
     "6610 Present": lambda l: l.startswith("6610 Controller Integration:") or l.startswith("EDP is not published for the controller"),
     "SA Conversion": lambda l: l.startswith("SA conversion."),
     "NGS Checks": lambda l: l.startswith("NGS Activation on :"),
+    "Port Conversion": lambda l: l.startswith("Port speed 1G to 10G conversion with MPST:"),
 }
 
 # (scope, check label) pairs that aren't wired into the tool yet — shown as not-run rather than a
