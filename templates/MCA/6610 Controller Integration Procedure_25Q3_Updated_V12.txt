@@ -11,9 +11,9 @@ xDatex				--	mmddyyyy format ## Eg: 03312023
 ## Start of the Process ##
 ##########################
 
-cmedit get ##Controller_id## ComConnectivityInformation.* 
-cmedit get ##Controller_id## NetworkElement=##Controller_id##,CmFunction=1
-cmedit get ##Controller_id## networkelement.*
+cmedit get xSite_IDx ComConnectivityInformation.* 
+cmedit get xSite_IDx NetworkElement=xSite_IDx,CmFunction=1
+cmedit get xSite_IDx networkelement.*
 
 ####### Ideally, the command would return "0 instance(s)" response.
 If any exception output "1 instance(s)" is received, verify that parameters are set as per required values. Also, the NE would be in UNSYNCHRONIZED state at this stage.#######
@@ -571,47 +571,47 @@ Based on the location of the site, set the time zone. ##### Refer to Column N "T
 
 Based on the location of the site, set the time zone.
 
-cmedit get ##Controller_id## DateAndTime.TimeZone -t
+cmedit get xSite_IDx DateAndTime.TimeZone -t
  
 Eastern Sites 
-cmedit set ##Controller_id## DateAndTime=1 timeZone:"US/Eastern"
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Eastern"
  
 Central Sites 
-cmedit set ##Controller_id## DateAndTime=1 timeZone:"US/Central"
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Central"
  
 Mountain Sites 
-cmedit set ##Controller_id## DateAndTime=1 timeZone:"US/Mountain"
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Mountain"
  
 Arizona Sites 
-cmedit set ##Controller_id## DateAndTime=1 timeZone:"US/Arizona"
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Arizona"
  
 Pacific Sites
-cmedit set ##Controller_id## DateAndTime=1 timeZone:"US/Pacific"
+cmedit set xSite_IDx DateAndTime=1 timeZone:"US/Pacific"
 
-cmedit get ##Controller_id## DateAndTime.TimeZone -t
+cmedit get xSite_IDx DateAndTime.TimeZone -t
 
 get DateandTime
  
 ********************************************************
 
-cmedit get ##Controller_id## TimeSettings.*
+cmedit get xSite_IDx TimeSettings.*
 
 Eastern Sites 
-cmedit set ##Controller_id## TimeSettings=1 timeOffset:"-05:00"
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-05:00"
  
 Central Sites 
-cmedit set ##Controller_id## TimeSettings=1 timeOffset:"-06:00"
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-06:00"
  
 Mountain Sites 
-cmedit set ##Controller_id## TimeSettings=1 timeOffset:"-07:00"
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-07:00"
  
 Arizona Sites 
-cmedit set ##Controller_id## TimeSettings=1 timeOffset:"-07:00"
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-07:00"
  
 Pacific Sites
-cmedit set ##Controller_id## TimeSettings=1 timeOffset:"-08:00"
+cmedit set xSite_IDx TimeSettings=1 timeOffset:"-08:00"
  
-cmedit get ##Controller_id## TimeSettings.*
+cmedit get xSite_IDx TimeSettings.*
 
 get TimeSettings=1
  
@@ -625,32 +625,32 @@ Commands to update networkelement timeZone to same as Node timezone in the ENM
  
 ###########################################################################################################################################################
 
-cmedit get *##Controller_id##* NetworkElement.(timeZone,utcOffset) -t
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
 
 Eastern Sites 
-cmedit set ##Controller_id## networkelement timeZone:"US/Eastern"
+cmedit set xSite_IDx networkelement timeZone:"US/Eastern"
 
 Central Sites 
-cmedit set ##Controller_id## networkelement timeZone:"US/Central"
+cmedit set xSite_IDx networkelement timeZone:"US/Central"
 
 Mountain Sites 
-cmedit set ##Controller_id## networkelement timeZone:"US/Mountain"
+cmedit set xSite_IDx networkelement timeZone:"US/Mountain"
  
 Arizona Sites 
-cmedit set ##Controller_id## networkelement timeZone:"US/Arizona"
+cmedit set xSite_IDx networkelement timeZone:"US/Arizona"
 
 Pacific Sites
-cmedit set ##Controller_id## networkelement timeZone:"US/Pacific"
+cmedit set xSite_IDx networkelement timeZone:"US/Pacific"
  
-cmedit get *##Controller_id##* NetworkElement.(timeZone,utcOffset) -t
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
 
 ##########################################################################################################
 Both ENM and Node end to have same timeZone when checked with below get commands upon setting the timezone
 ##########################################################################################################
 
-cmedit get *##Controller_id##* NetworkElement.(timeZone,utcOffset) -t
+cmedit get *xSite_IDx* NetworkElement.(timeZone,utcOffset) -t
 
-cmedit get *##Controller_id##* DateAndTime.TimeZone -t
+cmedit get *xSite_IDx* DateAndTime.TimeZone -t
 
 ##############################################################################################################################################################
  
@@ -658,9 +658,9 @@ cmedit get *##Controller_id##* DateAndTime.TimeZone -t
  
 ########  daylightSavingTimeStartDate and daylightSavingTimeEndDate set commands ########
  
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,NodeSupport=1,TimeSettings=1 daylightSavingTimeStartDate:{dayRule="Sun>=8",month=MARCH,time="02:00"} --force
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSite_IDx,ManagedElement=xSite_IDx,NodeSupport=1,TimeSettings=1 daylightSavingTimeStartDate:{dayRule="Sun>=8",month=MARCH,time="02:00"} --force
  
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Controller_id##,ManagedElement=##Controller_id##,NodeSupport=1,TimeSettings=1 daylightSavingTimeEndDate:{dayRule="Sun>=1",month=NOVEMBER,time="02:00"} --force
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xSite_IDx,ManagedElement=xSite_IDx,NodeSupport=1,TimeSettings=1 daylightSavingTimeEndDate:{dayRule="Sun>=1",month=NOVEMBER,time="02:00"} --force
 
 Note: For Arizona/Hawaii sites,  daylightSavingTimeOffset should be 0 since there is no daylightsaving observed.Please verify on site
 
@@ -771,7 +771,7 @@ get SecM=1,CertM=1,NodeCredential=oamNodeCredential
 
 ENM CLI Command
 --------------- 
-cmedit get ##Controller_id## NodeCredential.(subjectName) -t
+cmedit get xSite_IDx NodeCredential.(subjectName) -t
 
 
 ############
