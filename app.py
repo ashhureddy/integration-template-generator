@@ -428,11 +428,15 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
         if str(src_node).strip().upper() == str(tgt_node).strip().upper():
             if retuned:
                 label, _ = lte_band_label(src_sector)
+                if not label:
+                    label, _ = nr_band_label(src_sector)
                 result["retuned"].append({"label": label, "from": f"{src_dl}/{src_bw}", "to": f"{tgt_dl}/{tgt_bw}"})
         else:
             result["moved"].append({"cell": src_sector, "from_node": src_node, "to_node": tgt_node})
             if retuned:
                 label, _ = lte_band_label(tgt_sector)
+                if not label:
+                    label, _ = nr_band_label(tgt_sector)
                 result["retuned"].append({"label": label, "from": f"{src_dl}/{src_bw}", "to": f"{tgt_dl}/{tgt_bw}"})
 
     # ADD: any CIQ cell (LTE or 5G) not present in Pre-checks and not already accounted for as moved/deleted
@@ -1053,7 +1057,8 @@ IDL_TEMPLATE_REGISTRY = {
     ("G3", "G3", "G3"): [("G3+ G3+ G3_RPM 777 052.txt", "Preferred"), ("G3+ G3+ G3_RPM 777 053.txt", "Alternate")],
     ("G2", "G4", "G4"): [("G2+G4+G4_RPM_777_053_543.txt", "")],
     ("G4", "G4", "G4"): [("G4+G4+G4_RPM 777 052.txt", "")],
-    # ("G2","G2","G4"), ("G2","G3","G4"), ("G3","G3","G4"), ("G3","G4","G4") -> no template exists;
+    ("G3", "G4", "G4"): [("G3 + G4 + G4_RPM_777_052.txt", "")],
+    # ("G2","G2","G4"), ("G2","G3","G4"), ("G3","G3","G4") -> no template exists;
     # falls through to the "IDL Template not found" branch below.
 }
 
