@@ -56,6 +56,7 @@ TPL_N2E_TRIMODE = TDIR_N2E / "N2E_TRIMODE_Integration_Procedure_with_LTE_or_5G_N
 
 TDIR_NSB = Path(__file__).parent / "templates" / "NSB"
 TDIR_STATIC = Path(__file__).parent / "templates" / "Static"
+TDIR_MCA_IDL_CRAN = Path(__file__).parent / "templates" / "MCA" / "IDL_CRAN"
 TPL_NSB_MMBB = TDIR_NSB / "LTE+5G_MMBB_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V13.txt"
 TPL_NSB_TRIMODE = TDIR_NSB / "TRIMODE_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
 
@@ -1079,6 +1080,23 @@ N2E_IDL_TEMPLATE_REGISTRY = {
     # MCA/CENM/NSB support it via the full registry above.
 }
 
+# MCA sites with a node ending in "F" (CRAN-styled node present, but NOT going through an actual
+# CRAN rehome) use this SEPARATE registry entirely, replacing the standard IDL_TEMPLATE_REGISTRY
+# for that site — confirmed. Every combo here includes exactly one G3 node (the "F" node).
+# Filenames below are best-guess from each template's own header text — confirm exact GitHub
+# filenames once uploaded, same as every other template registry.
+MCA_CRAN_IDL_REGISTRY = {
+    ("G2", "G3"): [("G2 BBU+G3 BBU Dafi 6673 Connections Build Type (L-1) and (L-1-1).txt", "")],
+    ("G2", "G2", "G3"): [
+        ("G2 BBU+G2 BBU+G3 BBU Dafi 6673 Connections Build Type (L-2) and (L-2-1).txt", "L-2"),
+        ("G2 BBU+G2 BBU+G3 BBU Dafi 6673 Connections Build Type (L-2B) and (L-2B-1).txt", "L-2B"),
+    ],
+    ("G2", "G2", "G2", "G3"): [("G2 BBU+G2 BBU+G2 BBU+G3 BBU Dafi 6673 Connections Build Type (L-3B) and (L-3B-1).txt", "")],
+    ("G2", "G3", "G4"): [("G2 BBU+G4 BBU+ G3 BBU 6673 Connections Via Dafi Build Type (L-10) and (L-10-1)].txt", "")],
+    ("G3", "G4", "G4"): [("G4 BBU+G4 BBU+G3 BBU 6673 Connections Via Dafi Build Type (L-11) and (L-11-1)].txt", "")],
+    ("G2", "G3", "G4", "G4"): [("G2 BBU + G4 BBU + G4 BBU + G3 BBU 6673 Connections Via Dafi Build Type (L-12) and (L-12-1).txt", "")],
+}
+
 IDL_SUFFIX_CANDIDATES = {
     "NODE_ID": ["NODE_ID", "Node_ID", "BBU_Node_ID"],
     "5G_NODE_ID": ["5G_NODE_ID", "5G_NodeID"],
@@ -2035,7 +2053,12 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
-    idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log)
+    has_cran_node = any(str(r.get("Node to be built as", "")).strip().upper().endswith("F") for r in mm_objs)
+    if has_cran_node:
+        idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(
+            ciq_wb, mm_objs, user_id, date_str, log, template_dir=TDIR_MCA_IDL_CRAN, registry=MCA_CRAN_IDL_REGISTRY)
+    else:
+        idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += idl_outputs
     summary_rows += idl_summary
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
