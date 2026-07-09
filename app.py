@@ -581,7 +581,7 @@ def scope_lines_to_readable_text(scope_lines):
         if row["From"] or row["To"]:
             out.append(f"{row['Category']}: {row['Details']}  From: {row['From']}  To: {row['To']}")
         else:
-            out.append(f"{row['Category']}: {row['Details']}")
+            out.append(f"{row['Category']}: {row['Details']}" if row["Details"] else row["Category"])
     return out
 
 
