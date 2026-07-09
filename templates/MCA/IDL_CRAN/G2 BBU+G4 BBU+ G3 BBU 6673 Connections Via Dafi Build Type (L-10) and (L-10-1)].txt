@@ -7,7 +7,7 @@
 ##G2_Node_eNBId##
 
 ##G4_NODE_ID##
-##G4_NODE_GNB_ID#
+##G4_NODE_GNB_ID##
 ##G4_5G_NODE_ID##
 ##G4_BBU_ENBID##
 
@@ -65,6 +65,6 @@ cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##
 
 cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA"
 
-cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##G4_5G_NODE_ID## ExtGNBDUPartnerFunctionID=##G4_5G_NODE_ID##;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA";gNBDUId=1;gNBId=##G4_NODE_GNB_ID##;gNBIdLength=26
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##G4_5G_NODE_ID## ExtGNBDUPartnerFunctionID=##G4_5G_NODE_ID##;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA";gNBDUId=1;gNBId=##G4_NODE_GNB_ID###;gNBIdLength=26
 
 cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##G4_5G_NODE_ID## caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA"
