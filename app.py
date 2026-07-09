@@ -1450,7 +1450,7 @@ def extract_dl_ul_loss_rows(precheck_text):
 
 STATIC_OUTPUT_FILES = [
     "Integration_Checklist_v3.xlsx",
-    "Global_Local_Script_Execution_Order.xlsx",
+    "Global Local Script Execution Order.xlsx",
 ]
 
 
