@@ -2,7 +2,7 @@
 ################	G2 BBU + G4 BBU + G4 BBU + G3 BBU 6673 Connections Via Dafi Build Type (L-12) and (L-12-1)) ################
 ####################################################
 ##1st_G4_NODE_ID##
-##1st_G4_NODE_GNB_ID#
+##1st_G4_NODE_GNB_ID##
 ##1st_G4_5G_NODE_ID##
 ##1st_G4_BBU_ENBID##
 
@@ -115,7 +115,7 @@ cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##
 
 cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,GNBDUFunction=1 caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA"
 
-cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##1st_G4_5G_NODE_ID## ExtGNBDUPartnerFunctionID=##1st_G4_5G_NODE_ID##;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA";gNBDUId=1;gNBId=##1st_G4_NODE_GNB_ID##;gNBIdLength=26
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##1st_G4_5G_NODE_ID## ExtGNBDUPartnerFunctionID=##1st_G4_5G_NODE_ID##;caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA";gNBDUId=1;gNBId=##1st_G4_NODE_GNB_ID###;gNBIdLength=26
 
 cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,GNBDUFunction=1,ExtGNBDUPartnerFunction=##1st_G4_5G_NODE_ID## caVlanPortRef="SubNetwork=ONRM_ROOT_MO,MeContext=##G3_NODE_ID##,ManagedElement=##G3_NODE_ID##,Transport=1,VlanPort=ERAN_NRCA"
 
