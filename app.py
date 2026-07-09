@@ -210,7 +210,9 @@ def extract_pre_hw(text, node_name):
     esc = re.escape(node_name)
     # some Pre-checks PDF versions insert an extra ISO-timestamp token between ENABLED and the
     # actual product name (seen on newer AAS/5216-style hardware rows) — (?:\S+\s+)? skips it if present
-    m = re.search(esc + r"\s+1\s+UNLOCKED\s+OFF\s+STEADY_ON\s+ENABLED\s+(?:\S+\s+)?([A-Za-z0-9 ]+?)\s+\d{6,8}", text, re.I)
+    # some Pre-checks PDF versions insert an extra isSharedWithExternalMe column (true/false)
+    # between faultIndicator and operationalIndicator — (?:(?:true|false)\s+)? skips it if present
+    m = re.search(esc + r"\s+1\s+UNLOCKED\s+OFF\s+(?:(?:true|false)\s+)?STEADY_ON\s+ENABLED\s+(?:\S+\s+)?([A-Za-z0-9 ]+?)\s+\d{6,8}", text, re.I)
     if not m:
         return None
     # take the LAST token as the model number — handles "Baseband 6630", "RAN Processor 6651",
@@ -223,7 +225,7 @@ def extract_pre_xmu_count(text, node_name):
     if not text or not node_name:
         return 0
     esc = re.escape(node_name)
-    return len(re.findall(esc + r"\s+XMU\S*\s+UNLOCKED\s+OFF\s+STEADY_ON\s+ENABLED", text, re.I))
+    return len(re.findall(esc + r"\s+XMU\S*\s+UNLOCKED\s+OFF\s+(?:(?:true|false)\s+)?STEADY_ON\s+ENABLED", text, re.I))
 
 
 def pre_hw_string(text, node_name):
@@ -514,7 +516,12 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
         labels = dedupe_labels(cells)
         lines.append(f"Deleted Sector:\t{'/'.join(labels)}\t{node}")
 
+    retune_seen = set()
     for r in classification.get("retuned", []):
+        sig = (r["label"], r["from"], r["to"])
+        if sig in retune_seen:
+            continue
+        retune_seen.add(sig)
         lines.append(f"Retune on:\t{r['label']}\tFrom:\t{r['from']}\tTo:\t{r['to']}")
 
     # Group by the actual swap SIGNATURE (From -> To), not by physical co-location. Co-located
