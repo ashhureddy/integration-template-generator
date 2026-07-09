@@ -55,6 +55,7 @@ TPL_N2E_MMBB = TDIR_N2E / "MMBB_N2E_Integration_Procedure_with_LTE_or_5G_Node_as
 TPL_N2E_TRIMODE = TDIR_N2E / "N2E_TRIMODE_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
 
 TDIR_NSB = Path(__file__).parent / "templates" / "NSB"
+TDIR_STATIC = Path(__file__).parent / "templates" / "Static"
 TPL_NSB_MMBB = TDIR_NSB / "LTE+5G_MMBB_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V13.txt"
 TPL_NSB_TRIMODE = TDIR_NSB / "TRIMODE_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
 
@@ -1443,6 +1444,30 @@ def extract_dl_ul_loss_rows(precheck_text):
     return rows
 
 
+# ============================================================
+# UNIVERSAL STATIC OUTPUTS (all scopes — no filling, pure passthrough)
+# ============================================================
+
+STATIC_OUTPUT_FILES = [
+    "Integration_Checklist_v3.xlsx",
+    "Global_Local_Script_Execution_Order.xlsx",
+]
+
+
+def get_universal_static_outputs(log):
+    """Returns a list of (filename, bytes) for the static reference files that ship alongside
+    Final Connections / Pre Fibers for every scope, unmodified — no CIQ/EDP data goes into these."""
+    outputs = []
+    for fname in STATIC_OUTPUT_FILES:
+        fpath = TDIR_STATIC / fname
+        if fpath.exists():
+            outputs.append((fname, fpath.read_bytes()))
+            log(f"\u2713 Static output attached: {fname}")
+        else:
+            log(f"\u2717 Static output not found: templates/Static/{fname}")
+    return outputs
+
+
 def generate_pre_fibers(precheck_text):
     """One Excel file per CIQ: Cells + DUS/XMU (S.No) - RRU from Pre-checks' DL/UL Loss table,
     plus a blank 'Pre fibers' column for manual fill-in."""
@@ -2636,6 +2661,8 @@ elif st.session_state.qkx_page == "input":
                 tpl_path, inc_src, need_6673, out_name)
 
         log("Done.")
+
+        binary_outputs += get_universal_static_outputs(log)
 
         render_checks_panel(ph_checks, top_scope, scope_lines)
 
