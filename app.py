@@ -2238,6 +2238,7 @@ def fill_node_template_nsb(template_text, row, edp_index, user_id, date_str, sum
 def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str, log):
     summary_rows, siad_rows, outputs = [], [], []
     tpl_paths = {"MMBB": TPL_NSB_MMBB, "TRIMODE": TPL_NSB_TRIMODE}
+    sa_conversion_nodes = []
 
     for row in mm_objs:
         node_type = nsb_node_type(row)
@@ -2255,6 +2256,8 @@ def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
         tpl = fill_node_template_nsb(tpl_text, row, edp_index, user_id, date_str, summary_rows, log)
         outputs.append((f"{primary}_NSB_{node_type}_Integration_Filled.txt", tpl))
         push_siad_row(siad_rows, edp_index, primary)
+        if check_sa_conversion(ciq_wb, primary):
+            sa_conversion_nodes.append(primary)
 
     controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
     add_outputs, add_summary = generate_6610(controller_objs, user_id, date_str, log, controller_edp_found)
@@ -2313,6 +2316,8 @@ def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
 
     classification = {"added": added, "moved": [], "deleted_sectors": {}, "deleted_nodes": [], "retuned": []}
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found)
+    for node in sa_conversion_nodes:
+        scope_of_work_lines.append(f"SA conversion.\t{node}")
     scope_of_work_lines += idl_scope_lines
     scope_of_work_lines += ngs_scope_lines
 
@@ -2640,7 +2645,7 @@ SCOPE_CHECKLIST = {
     "MCA": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
     "CENM": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
     "N2E": ["Carrier ADD", "IDL Connections", "DSS checks", "6610 Present", "SA Conversion", "NGS Checks"],
-    "NSB": ["Carrier ADD", "IDL Connections", "DSS checks", "NGS Checks", "6610 Present"],
+    "NSB": ["Carrier ADD", "IDL Connections", "DSS checks", "NGS Checks", "6610 Present", "SA Conversion"],
 }
 
 # label -> function(line) -> True if that scope_lines entry counts as a "found/applicable" hit for this check
