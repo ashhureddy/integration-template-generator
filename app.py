@@ -1085,12 +1085,12 @@ N2E_IDL_TEMPLATE_REGISTRY = {
 # for that site — confirmed. Every combo here includes exactly one G3 node (the "F" node).
 # Filenames confirmed against actual GitHub uploads.
 MCA_CRAN_IDL_REGISTRY = {
-    ("G2", "G3"): [("G2 BBU+G3 BBU Dafi 6673 Connections Build Type (L-1) and (L-1-1).txt", "")],
+    ("G2", "G3"): [("G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-1) and (L-1-1).txt", "")],
     ("G2", "G2", "G3"): [
-        ("G2 BBU+G2 BBU+G3 BBU Dafi 6673 Connections Build Type (L-2) and (L-2-1).txt", "L-2"),
-        ("G2 BBU+G2 BBU+G3 BBU Dafi 6673 Connections Build Type (L-2B) and (L-2B-1).txt", "L-2B"),
+        ("G2 BBU+G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-2) and (L-2-1).txt", "L-2"),
+        ("G2 BBU+G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-2B) and (L-2B-1).txt", "L-2B"),
     ],
-    ("G2", "G2", "G2", "G3"): [("G2 BBU+G2 BBU+G2 BBU+G3 BBU Dafi 6673 Connections Build Type (L-3B) and (L-3B-1).txt", "")],
+    ("G2", "G2", "G2", "G3"): [("G2 BBU+G2 BBU+G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-3B) and (L-3B-1).txt", "")],
     ("G2", "G3", "G4"): [("G2 BBU+G4 BBU+ G3 BBU 6673 Connections Via Dafi Build Type (L-10) and (L-10-1)].txt", "")],
     ("G3", "G4", "G4"): [("G4 BBU+G4 BBU+G3 BBU 6673 Connections Via Dafi Build Type (L-11) and (L-11-1)].txt", "")],
     ("G2", "G3", "G4", "G4"): [("G2 BBU + G4 BBU + G4 BBU + G3 BBU 6673 Connections Via Dafi Build Type (L-12) and (L-12-1).txt", "")],
