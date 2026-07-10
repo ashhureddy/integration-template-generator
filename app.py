@@ -1083,8 +1083,7 @@ N2E_IDL_TEMPLATE_REGISTRY = {
 # MCA sites with a node ending in "F" (CRAN-styled node present, but NOT going through an actual
 # CRAN rehome) use this SEPARATE registry entirely, replacing the standard IDL_TEMPLATE_REGISTRY
 # for that site — confirmed. Every combo here includes exactly one G3 node (the "F" node).
-# Filenames below are best-guess from each template's own header text — confirm exact GitHub
-# filenames once uploaded, same as every other template registry.
+# Filenames confirmed against actual GitHub uploads.
 MCA_CRAN_IDL_REGISTRY = {
     ("G2", "G3"): [("G2 BBU+G3 BBU Dafi 6673 Connections Build Type (L-1) and (L-1-1).txt", "")],
     ("G2", "G2", "G3"): [
@@ -1288,6 +1287,290 @@ def _ngs_cell_band(cell_name):
     return label
 
 
+TDIR_NGS = Path(__file__).parent / "templates" / "NGS"
+TPL_NGS_LTE_LTE = TDIR_NGS / "LTE-LTE_NGS_Template.txt"
+TPL_NGS_LTE_5G = TDIR_NGS / "LTE-5G_NGS_Templates.txt"
+
+
+def _carrier_sort_key(carrier_str):
+    """'2C' -> 2, '5C BWE' -> 5, '3C' -> 3 — leading number only, ignoring BWE suffix."""
+    m = re.match(r'(\d+)', str(carrier_str or '').strip())
+    return int(m.group(1)) if m else 999
+
+
+def _xmu_trunk_for_port(port_num):
+    """Confirmed splitter groups: XMU trunk Port 1 powers 13-16, Port 2 powers 9-12, Port 3 powers 4-7."""
+    if 13 <= port_num <= 16:
+        return 1
+    if 9 <= port_num <= 12:
+        return 2
+    if 4 <= port_num <= 7:
+        return 3
+    return None
+
+
+def _lookup_xmu_bbu_port(ciq_wb, node, trunk_num, info_sheet_name):
+    """eNB Info / gNB Info's '1st XMU Port N' column tells us where that XMU trunk port
+    actually connects on the BBU — that's the real RiPort value."""
+    if info_sheet_name not in ciq_wb.sheetnames:
+        return None
+    name_col = "eNodeB Name" if info_sheet_name == "eNB Info" else "gNodeB Name"
+    for row in sheet_objs(ciq_wb[info_sheet_name]):
+        if str(row.get(name_col, "")).strip().upper() == str(node).strip().upper():
+            return row.get(f"1st XMU Port {trunk_num}")
+    return None
+
+
+def _resolve_riport(ciq_wb, node, raw_port_value, info_sheet_name):
+    """Confirmed rule: a numeric DUS/XMU Port means the radio is on an XMU — resolve via the
+    splitter group + eNB/gNB Info's XMU-trunk-to-BBU-port mapping. A non-numeric (letter) value
+    is a direct baseband connection — use it as the RiPort value directly."""
+    if not is_populated(raw_port_value):
+        return None
+    raw = str(raw_port_value).strip()
+    if raw.isdigit():
+        trunk = _xmu_trunk_for_port(int(raw))
+        if trunk is None:
+            return None
+        return _lookup_xmu_bbu_port(ciq_wb, node, trunk, info_sheet_name)
+    return raw
+
+
+def _lte_cluster_rru_riport(ciq_wb, cell_to_node, node, seed_cell):
+    """seed_cell: one cell already CONFIRMED to be co-located with the NGS partner (from the
+    detection pass), belonging to `node`. Finds every other same-node cell sharing that exact
+    physical radio (via seed_cell's own Co-Located Technology Cell list) and picks the lowest
+    carrier among that cluster — not a blind node+sector scan, since a site can have multiple
+    unrelated LTE carriers sharing the same sector letter that have nothing to do with this
+    specific shared radio (confirmed via SCL04291's standalone 1C carrier)."""
+    if "eUtran Parameters" not in ciq_wb.sheetnames:
+        return None, None
+    all_rows = {str(row.get("EutranCellFDDId")).strip(): row for row in sheet_objs(ciq_wb["eUtran Parameters"]) if is_populated(row.get("EutranCellFDDId"))}
+    seed_row = all_rows.get(str(seed_cell).strip())
+    if not seed_row:
+        return None, None
+    cluster = {str(seed_cell).strip()}
+    colo_raw = seed_row.get("Co-Located Technology Cell")
+    if is_populated(colo_raw) and str(colo_raw).strip().upper() not in ("NA", "N/A"):
+        for c in str(colo_raw).split(","):
+            c = c.strip()
+            if c in all_rows and cell_to_node.get(c) == node:
+                cluster.add(c)
+    candidates = [all_rows[c] for c in cluster]
+    candidates.sort(key=lambda r: _carrier_sort_key(r.get("Carrier")))
+    winner = candidates[0]
+    sector_id = str(winner.get("sectorId", "")).strip()
+    rru = sector_id.split("_")[0] if sector_id else None
+    riport = _resolve_riport(ciq_wb, node, winner.get("DUS / XMU Port"), "eNB Info")
+    return (rru or None), riport
+
+
+def _5g_cell_riport(ciq_wb, node, seed_cell):
+    """seed_cell: the exact 5G cell name already confirmed via the co-location reference —
+    no need to scan by sector at all, we know precisely which cell. Reads Port 1-4 (whichever
+    is populated) and resolves the same XMU-or-direct way as the LTE side."""
+    if "5G Info" not in ciq_wb.sheetnames:
+        return None
+    for row in sheet_objs(ciq_wb["5G Info"]):
+        if str(row.get("NRCellDU", "")).strip() != str(seed_cell).strip():
+            continue
+        for col in ("Port 1", "Port 2", "Port 3", "Port 4"):
+            val = row.get(col)
+            if is_populated(val):
+                return _resolve_riport(ciq_wb, node, val, "gNB Info")
+    return None
+
+
+def _node_priority(ciq_wb, cell_to_node, node, is_lte):
+    """Confirmed: Radio Port = DATA1 -> syncNodePriority 1, DATA2 -> priority 2. Read from any
+    of the node's own involved cells (LTE: eUtran Parameters; 5G: 5G Info)."""
+    sheet_name = "eUtran Parameters" if is_lte else "5G Info"
+    cell_col = "EutranCellFDDId" if is_lte else "NRCellDU"
+    if sheet_name not in ciq_wb.sheetnames:
+        return None
+    for row in sheet_objs(ciq_wb[sheet_name]):
+        cell = row.get(cell_col)
+        if not is_populated(cell) or cell_to_node.get(str(cell).strip()) != node:
+            continue
+        radio_port = str(row.get("Radio Port", "")).strip().upper()
+        if radio_port == "DATA1":
+            return "1"
+        if radio_port == "DATA2":
+            return "2"
+    return None
+
+
+def _dedupe_preserve_order(values):
+    """A,A,A -> [A]. A,B,B -> [A,B]. Confirmed: extras beyond the unique count stay unfilled."""
+    seen, out = set(), []
+    for v in values:
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
+NGS_VARIANT_RE = re.compile(
+    r'(?P<label>WHen Only Port ([12]) link is used:[ \t]*\r?\n)?'
+    r'(?P<stmt>cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_[12]##[^\n]*?'
+    r'NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;[^\n]*?syncRiPortCandidate=\[.*?\])',
+    re.DOTALL
+)
+
+
+def _strip_ngs_variant_blocks(tpl_text, site1_link_count, site2_link_count):
+    """Each site section has 3 alternative cmedit-create blocks (default = 3 links, Port-1-only,
+    Port-2-only). Keep only the one matching that site's actual unique RiPort count; remove the
+    other two (including their 'WHen Only Port N link is used:' label, if any)."""
+    matches = list(NGS_VARIANT_RE.finditer(tpl_text))
+    to_remove = []
+    for m in matches:
+        label = m.group("label") or ""
+        stmt = m.group("stmt")
+        site_num = 1 if "site1" in stmt else (2 if "site2" in stmt else None)
+        if site_num is None:
+            continue
+        target = site1_link_count if site_num == 1 else site2_link_count
+        variant = 1 if "Port 1" in label else (2 if "Port 2" in label else 3)
+        if variant != target:
+            to_remove.append((m.start(), m.end()))
+    for start, end in sorted(to_remove, reverse=True):
+        tpl_text = tpl_text[:start] + tpl_text[end:]
+    return tpl_text
+
+
+def _fill_ngs_site_block(tpl_text, slot, site_id, rru_list, riport_list, priority):
+    """slot: 1 or 2. Fills this site's Site_ID/RRU/Riport/Priority placeholders.
+    RiPort slots beyond the actual unique count are blanked (safe — their cmedit block was
+    already removed by variant-stripping, so they only remain in the header reference list).
+    RRU is NOT blanked when missing — it also appears in the always-present
+    isSharedWithExternalMe commands, so a genuinely missing sector should stay visibly
+    unresolved as a correct signal for manual attention, not silently blanked."""
+    tpl_text = tpl_text.replace(f"##Site_ID_{slot}##", str(site_id) if site_id else "")
+    rru_placeholder_nums = (1, 2, 3) if slot == 1 else (4, 5, 6)
+    for i, ph_num in enumerate(rru_placeholder_nums):
+        val = rru_list[i] if i < len(rru_list) else None
+        if val is not None:
+            tpl_text = tpl_text.replace(f"##RRU_{ph_num}##", str(val))
+    for i in range(1, 4):
+        val = riport_list[i - 1] if i - 1 < len(riport_list) else None
+        tpl_text = tpl_text.replace(f"##Riport{i}_site{slot}##", str(val) if val is not None else "")
+    tpl_text = tpl_text.replace(f"##Priority_Site_{slot}##", str(priority) if priority is not None else "")
+    return tpl_text
+
+
+def generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log):
+    """Returns (outputs, summary_rows). For every confirmed NGS pair, generates the fully filled
+    activation template (LTE-LTE or LTE-5G, whichever applies), keeping only the correct
+    3-link/Port-1-only/Port-2-only variant per site based on each site's actual unique RiPort
+    count. Universal — same pattern as the display-only generate_ngs_checks, shared by all scopes."""
+    outputs, summary_rows = [], []
+    if len(mm_objs) < 2 or "eUtran Parameters" not in ciq_wb.sheetnames:
+        return outputs, summary_rows
+
+    cell_to_node = _ngs_build_cell_node_map(ciq_wb, mm_objs)
+    node_names = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
+    has_lte = {r.get("Node to be built as"): is_populated(r.get("eNBId")) for r in mm_objs}
+
+    directional_refs = {}
+    for row in sheet_objs(ciq_wb["eUtran Parameters"]):
+        own_cell = row.get("EutranCellFDDId")
+        raw = row.get("Co-Located Technology Cell")
+        if not is_populated(own_cell) or not is_populated(raw) or str(raw).strip().upper() in ("NA", "N/A"):
+            continue
+        own_node = cell_to_node.get(str(own_cell).strip())
+        if not own_node:
+            continue
+        for ref_cell in str(raw).split(","):
+            ref_cell = ref_cell.strip()
+            ref_node = cell_to_node.get(ref_cell)
+            if ref_node and ref_node != own_node:
+                directional_refs.setdefault((own_node, ref_node), []).append((own_cell, ref_cell))
+
+    checked_pairs = set()
+    for i, node_a in enumerate(node_names):
+        for node_b in node_names[i + 1:]:
+            pair_key = frozenset((node_a, node_b))
+            if pair_key in checked_pairs:
+                continue
+            checked_pairs.add(pair_key)
+            a_to_b = directional_refs.get((node_a, node_b), [])
+            b_to_a = directional_refs.get((node_b, node_a), [])
+            both_lte = has_lte.get(node_a) and has_lte.get(node_b)
+            confirmed = (a_to_b and b_to_a) if both_lte else (a_to_b or b_to_a)
+            if not confirmed:
+                continue
+
+            # Collect each node's own confirmed cells (the "own_cell" from that node's perspective),
+            # deduped by sector — one seed cell per sector present.
+            own_a = [oc for oc, rc in a_to_b] + [rc for oc, rc in b_to_a]
+            own_b = [oc for oc, rc in b_to_a] + [rc for oc, rc in a_to_b]
+
+            def seed_by_sector(cells, is_lte_node):
+                out = {}
+                for c in cells:
+                    label, sector = (lte_band_label(c) if is_lte_node else nr_band_label(c))
+                    if sector and sector not in out:
+                        out[sector] = c
+                return out
+
+            a_is_lte, b_is_lte = has_lte.get(node_a), has_lte.get(node_b)
+            seeds_a = seed_by_sector(own_a, a_is_lte)
+            seeds_b = seed_by_sector(own_b, b_is_lte)
+            sectors_present = [s for s in SECTOR_ORDER if s in seeds_a or s in seeds_b]
+
+            def derive(node, other_node, seeds, is_lte_node, other_seeds, other_is_lte):
+                rru_list, riport_list = [], []
+                for sector in sectors_present:
+                    seed = seeds.get(sector)
+                    if is_lte_node and seed:
+                        rru, riport = _lte_cluster_rru_riport(ciq_wb, cell_to_node, node, seed)
+                    elif is_lte_node:
+                        rru, riport = None, None
+                    else:
+                        # 5G: RRU reused from the LTE partner's SAME sector; RiPort derived independently
+                        other_seed = other_seeds.get(sector)
+                        if other_is_lte and other_seed:
+                            rru, _ = _lte_cluster_rru_riport(ciq_wb, cell_to_node, other_node, other_seed)
+                        else:
+                            rru = None
+                        riport = _5g_cell_riport(ciq_wb, node, seed) if seed else None
+                    rru_list.append(rru)
+                    riport_list.append(riport)
+                return rru_list, riport_list
+
+            rru_a, riport_a = derive(node_a, node_b, seeds_a, a_is_lte, seeds_b, b_is_lte)
+            rru_b, riport_b = derive(node_b, node_a, seeds_b, b_is_lte, seeds_a, a_is_lte)
+            riport_a = _dedupe_preserve_order(riport_a)
+            riport_b = _dedupe_preserve_order(riport_b)
+            priority_a = _node_priority(ciq_wb, cell_to_node, node_a, a_is_lte)
+            priority_b = _node_priority(ciq_wb, cell_to_node, node_b, b_is_lte)
+
+            tpl_path = TPL_NGS_LTE_LTE if both_lte else TPL_NGS_LTE_5G
+            if not tpl_path.exists():
+                summary_rows.append({"Item": "NGS Template", "Source": f"template {tpl_path.name}", "Value": "NOT FOUND", "Note": f"expected file not in templates/NGS/: {tpl_path.name}"})
+                log(f"\u2717 NGS Template: file not found for {node_a} <-> {node_b}")
+                continue
+            tpl_text = tpl_path.read_text(encoding="utf-8")
+
+            link_count_a = len(riport_a) or 1
+            link_count_b = len(riport_b) or 1
+            tpl_text = _strip_ngs_variant_blocks(tpl_text, link_count_a, link_count_b)
+            tpl_text = _fill_ngs_site_block(tpl_text, 1, node_a, rru_a, riport_a, priority_a)
+            tpl_text = _fill_ngs_site_block(tpl_text, 2, node_b, rru_b, riport_b, priority_b)
+            tpl_text = tpl_text.replace("xxDatexx", str(date_str))
+
+            unresolved = highlight_unresolved(tpl_text)
+            summary_rows.append({
+                "Item": "NGS Template", "Source": f"{node_a} <-> {node_b}",
+                "Value": "generated", "Note": f"unresolved: {len(unresolved)}" if unresolved else "fully resolved",
+            })
+            log(f"\u2713 NGS Template generated: {node_a} <-> {node_b} ({'LTE-LTE' if both_lte else 'LTE-5G'})" + (f" — {len(unresolved)} unresolved" if unresolved else ""))
+            outputs.append((f"{node_a}_{node_b}_NGS_Activation.txt", tpl_text))
+
+    return outputs, summary_rows
+
+
 def generate_ngs_checks(ciq_wb, mm_objs, log):
     """Returns (summary_rows, scope_lines). No file outputs — pure detection."""
     summary_rows, scope_lines = [], []
@@ -1331,13 +1614,18 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
             both_lte = has_lte.get(node_a) and has_lte.get(node_b)
             confirmed = (a_to_b and b_to_a) if both_lte else (a_to_b or b_to_a)
             if confirmed:
-                bands = set()
-                for own_cell, ref_cell in a_to_b + b_to_a:
-                    for c in (own_cell, ref_cell):
-                        band = _ngs_cell_band(c)
-                        if band:
-                            bands.add(band)
-                band_list = ", ".join(sorted(bands)) if bands else "band not determined"
+                bands_a, bands_b = set(), set()
+                for own_cell, ref_cell in a_to_b:
+                    ba, bb = _ngs_cell_band(own_cell), _ngs_cell_band(ref_cell)
+                    if ba: bands_a.add(ba)
+                    if bb: bands_b.add(bb)
+                for own_cell, ref_cell in b_to_a:
+                    bb, ba = _ngs_cell_band(own_cell), _ngs_cell_band(ref_cell)
+                    if bb: bands_b.add(bb)
+                    if ba: bands_a.add(ba)
+                a_str = ", ".join(sorted(bands_a)) if bands_a else "band not determined"
+                b_str = ", ".join(sorted(bands_b)) if bands_b else "band not determined"
+                band_list = f"{a_str} & {b_str}"
                 summary_rows.append({
                     "Item": "NGS Checks", "Source": f"{node_a} <-> {node_b}",
                     "Value": "radio shared", "Note": f"bands: {band_list}",
@@ -1893,6 +2181,9 @@ def generate_n2e(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
     summary_rows += ngs_summary
     scope_of_work_lines += ngs_scope_lines
+    ngs_tpl_outputs, ngs_tpl_summary = generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log)
+    outputs += ngs_tpl_outputs
+    summary_rows += ngs_tpl_summary
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -1977,6 +2268,9 @@ def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     summary_rows += idl_summary
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
     summary_rows += ngs_summary
+    ngs_tpl_outputs, ngs_tpl_summary = generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log)
+    outputs += ngs_tpl_outputs
+    summary_rows += ngs_tpl_summary
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
 
@@ -2063,6 +2357,9 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     summary_rows += idl_summary
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
     summary_rows += ngs_summary
+    ngs_tpl_outputs, ngs_tpl_summary = generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log)
+    outputs += ngs_tpl_outputs
+    summary_rows += ngs_tpl_summary
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
@@ -2136,6 +2433,9 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     summary_rows += idl_summary
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
     summary_rows += ngs_summary
+    ngs_tpl_outputs, ngs_tpl_summary = generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log)
+    outputs += ngs_tpl_outputs
+    summary_rows += ngs_tpl_summary
 
     binary_outputs = [(f"Final_Connections_{mm_objs[0].get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))] if mm_objs else []
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
@@ -2318,6 +2618,9 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
     summary_rows += ngs_summary
     scope_of_work_lines += ngs_scope_lines
+    ngs_tpl_outputs, ngs_tpl_summary = generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log)
+    outputs += ngs_tpl_outputs
+    summary_rows += ngs_tpl_summary
     pc_outputs, pc_summary, pc_scope_lines = generate_port_conversion_checks(ciq_wb, mm_objs, edp_index, precheck_text, log)
     outputs += pc_outputs
     summary_rows += pc_summary
