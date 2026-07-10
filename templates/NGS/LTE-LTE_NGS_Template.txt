@@ -1,0 +1,229 @@
+############################# LTE-LTE_NGS_Templates #############################
+Replace completely with Site ID's
+##Site_ID_1##
+##RRU_1## 
+##RRU_2##
+##RRU_3##
+##Priority_Site_1##
+##Riport1_site1##
+##Riport2_site1##
+##Riport3_site1##
+
+
+##Site_ID_2## 
+##RRU_4## 
+##RRU_5##
+##RRU_6##
+##Priority_Site_2##
+##Riport1_site2##
+##Riport2_site2##
+##Riport3_site2##
+
+xxDatexx
+
+**********First node**************
+****** All the changes need to be done in respective ENM with CMCLI codes******
+
+cmedit get ##Site_ID_1## BrmBackup.* -t
+cmedit action ##Site_ID_1## BrmBackupManager=1 createBackup.(name="Pre_NGS_Activation_xxDatexx")  
+cmedit get ##Site_ID_1## BrmBackup.* -t
+
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1## ,Equipment=1,FieldReplaceableUnit=1
+
+cmedit get ##Site_ID_1##  EUtranCellFDD.(availabilityStatus,cellrange,administrativeState,cellBarred,operationalState,primaryPlmnReserved,tac,CellId,earfcndl,earfcnul,dlChannelBandwidth,physicalLayerCellIdGroup,physicalLayerSubCellId) -t
+
+cmedit set ##Site_ID_1##  EUtranCellFDD.EUtranCellFDDId==* administrativeState:SHUTTINGDOWN
+
+cmedit get ##Site_ID_1##  EUtranCellFDD.(availabilityStatus,cellrange,administrativeState,cellBarred,operationalState,primaryPlmnReserved,tac,CellId,earfcndl,earfcnul,dlChannelBandwidth,physicalLayerCellIdGroup,physicalLayerSubCellId) -t
+
+** features for mixed mode are activated
+
+cmedit get ##Site_ID_1##  FeatureState=CXC4011018 featureState
+cmedit set ##Site_ID_1##  FeatureState=CXC4011018 featureState=ACTIVATED
+cmedit get ##Site_ID_1##  FeatureState=CXC4011018 featureState
+
+
+cmedit get ##Site_ID_1##  FeatureState=CXC4012015 featureState
+cmedit set ##Site_ID_1##  FeatureState=CXC4012015 featureState=ACTIVATED
+cmedit get ##Site_ID_1##  FeatureState=CXC4012015 featureState
+
+
+** freqDeviationThreshold is aligned with GS for nodes with MSMM
+
+cmedit get ##Site_ID_1##  RadioEquipmentClock.freqDeviationThreshold
+cmedit set ##Site_ID_1##  RadioEquipmentClock freqDeviationThreshold=600
+cmedit get ##Site_ID_1##  RadioEquipmentClock.freqDeviationThreshold
+
+** Ensure that the parameter isSharedWithExternalMe is set to true for all MSMM radios
+
+cmedit get ##Site_ID_1##  fieldReplaceableUnit.isSharedWithExternalMe -t
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=RRU-##RRU_1## isSharedWithExternalMe=true
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=RRU-##RRU_2## isSharedWithExternalMe=true
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=RRU-##RRU_3## isSharedWithExternalMe=true
+cmedit get ##Site_ID_1##  fieldReplaceableUnit.isSharedWithExternalMe -t
+
+
+
+** Check if power matches the CIQ
+cmedit get ##Site_ID_1##  SectorCarrier.configuredMaxTxPower -t
+
+**Create the MO for NodeGroupSyncMember and its attributes in the Radio Node #1: ##Site_ID_1## 
+** (For Radios on XMU, use the RiPort which is corresponding to the Splitting group port on BB)
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_1##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site1##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1## ,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site1##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1## ,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport3_site1##"]
+
+
+WHen Only Port 1 link is used: 
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_1##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site1##"]
+
+WHen Only Port 2 link is used: 
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_1##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site1##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1## ,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site1##"]
+
+
+** Deblock the NGS MO after creating it on all the BBs
+
+cmedit get ##Site_ID_1##  NodeGroupSyncMember.(administrativeState) -t
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1## ,ManagedElement=##Site_ID_1## ,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 administrativeState=UNLOCKED
+cmedit get  ##Site_ID_1##  NodeGroupSyncMember.(administrativeState) -t
+
+cmedit get ##Site_ID_1##  RiLink.(riPortRef1,riPortRef2,operationalState,transportType,fronthaulDeviceLineRate,availabilityStatus,availabilityStatus,RiLinkId) -t
+
+cmedit get  ##Site_ID_1## TimeSyncIO.(operationalState) -t
+cmedit get  ##Site_ID_1## SyncPort.(operationalState) -t
+cmedit get  ##Site_ID_1## NodeGroupSyncMember.(administrativeState) -t
+
+cmedit get ##Site_ID_1## RadioEquipmentClock.(radioClockState,nodeGroupRole,freqDeviationThreshold)  -t
+cmedit get ##Site_ID_1## NodeGroupSyncMember.(administrativeState,syncNodePriority,selectionMode,syncRiPortCandidate,syncRiPortStatus)  -t
+
+cmedit get ##Site_ID_1## RadioEquipmentClock.(radioClockState)  -t
+
+cmedit get ##Site_ID_1## NodeGroupSyncMember.(administrativeState,syncNodePriority,selectionMode,syncRiPortCandidate,syncRiPortStatus)  -t
+
+
+** Create Post CV **
+
+cmedit get ##Site_ID_1##  BrmBackup.* -t
+cmedit action ##Site_ID_1##  BrmBackupManager=1 createBackup.(name="Post_NGS_Activation_xxDatexx")  
+cmedit get ##Site_ID_1##  BrmBackup.* -t
+
+** Unlock the site if everything is good and set the FDD status as per pre**
+
+cmedit get ##Site_ID_1##  EUtranCellFDD.(availabilityStatus,cellrange,administrativeState,cellBarred,operationalState,primaryPlmnReserved,tac,CellId,earfcndl,earfcnul,dlChannelBandwidth,physicalLayerCellIdGroup,physicalLayerSubCellId) -t
+
+cmedit set ##Site_ID_1##  EUtranCellFDD.* administrativeState=UNLOCKED
+
+cmedit get ##Site_ID_1##  EUtranCellFDD.(availabilityStatus,cellrange,administrativeState,cellBarred,operationalState,primaryPlmnReserved,tac,CellId,earfcndl,earfcnul,dlChannelBandwidth,physicalLayerCellIdGroup,physicalLayerSubCellId) -t
+
+
+
+
+**********Second node**************
+
+##Site_ID_2##
+
+****** All the changes need to be done in respective ENM with CMCLI codes******
+
+cmedit get ##Site_ID_2## BrmBackup.* -t
+cmedit action ##Site_ID_2## BrmBackupManager=1 createBackup.(name="Pre_NGS_Activation_xxDatexx")  
+cmedit get ##Site_ID_2## BrmBackup.* -t
+
+
+cmedit get SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1
+
+cmedit get ##Site_ID_2##  EUtranCellFDD.(availabilityStatus,cellrange,administrativeState,cellBarred,operationalState,primaryPlmnReserved,tac,CellId,earfcndl,earfcnul,dlChannelBandwidth,physicalLayerCellIdGroup,physicalLayerSubCellId) -t
+
+cmedit set ##Site_ID_2##  EUtranCellFDD.EUtranCellFDDId==* administrativeState:SHUTTINGDOWN
+
+cmedit get ##Site_ID_2##  EUtranCellFDD.(availabilityStatus,cellrange,administrativeState,cellBarred,operationalState,primaryPlmnReserved,tac,CellId,earfcndl,earfcnul,dlChannelBandwidth,physicalLayerCellIdGroup,physicalLayerSubCellId) -t
+
+** features for mixed mode are activated
+
+cmedit get ##Site_ID_2##  FeatureState=CXC4011018 featureState
+cmedit set ##Site_ID_2##  FeatureState=CXC4011018 featureState=ACTIVATED
+cmedit get ##Site_ID_2##  FeatureState=CXC4011018 featureState
+
+
+cmedit get ##Site_ID_2##  FeatureState=CXC4012015 featureState
+cmedit set ##Site_ID_2##  FeatureState=CXC4012015 featureState=ACTIVATED
+cmedit get ##Site_ID_2##  FeatureState=CXC4012015 featureState
+
+
+** freqDeviationThreshold is aligned with GS for nodes with MSMM
+
+cmedit get ##Site_ID_2##  RadioEquipmentClock.freqDeviationThreshold
+cmedit set ##Site_ID_2##  RadioEquipmentClock freqDeviationThreshold=600
+cmedit get ##Site_ID_2##  RadioEquipmentClock.freqDeviationThreshold
+
+** Ensure that the parameter isSharedWithExternalMe is set to true for all MSMM radios
+
+cmedit get ##Site_ID_2##  fieldReplaceableUnit.isSharedWithExternalMe -t
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=RRU-##RRU_4##  isSharedWithExternalMe=true
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=RRU-##RRU_5##  isSharedWithExternalMe=true
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=RRU-##RRU_6## isSharedWithExternalMe=true
+cmedit get ##Site_ID_2##  fieldReplaceableUnit.isSharedWithExternalMe -t
+
+
+** Check if power matches the CIQ
+cmedit get ##Site_ID_2##  SectorCarrier.configuredMaxTxPower -t
+
+**Create the MO for NodeGroupSyncMember and its attributes in the Radio Node #1: ##Site_ID_2# 
+** (For Radios on XMU, use the RiPort which is corresponding to the Splitting group port on BB)
+
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_2##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2## ,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site2##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site2##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport3_site2##"]
+
+
+WHen Only Port 1 link is used: 
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_2##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2## ,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site2##"]
+
+WHen Only Port 2 link is used: 
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_2##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2## ,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site2##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site2##"]
+
+
+
+** Deblock the NGS MO after creating it on all the BBs
+
+cmedit get ##Site_ID_2##  NodeGroupSyncMember.(administrativeState) -t
+cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 administrativeState=UNLOCKED
+cmedit get  ##Site_ID_2##  NodeGroupSyncMember.(administrativeState) -t
+
+** Create Post CV **
+
+cmedit get ##Site_ID_2##  BrmBackup.* -t
+cmedit action ##Site_ID_2##  BrmBackupManager=1 createBackup.(name="Post_NGS_Activation_xxDatexx")  
+cmedit get ##Site_ID_2##  BrmBackup.* -t
+
+
+** Site restart First node**
+
+cmedit action SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=1 restartUnit.(RestartRank=RESTART_COLD,RestartReason=PLANNED_RECONFIGURATION,restartInfo=ATTID) --force
+
+
+** Site restart Second Node**
+
+cmedit action SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1 restartUnit.(RestartRank=RESTART_COLD,RestartReason=PLANNED_RECONFIGURATION,restartInfo=ATTID) --force
+
+** Verify the below parameters are as per standard **
+
+cmedit get ##Site_ID_2##  RiLink.(riPortRef1,riPortRef2,operationalState,transportType,fronthaulDeviceLineRate,availabilityStatus,availabilityStatus,RiLinkId) -t
+
+cmedit get ##Site_ID_2## TimeSyncIO.(operationalState) -t
+cmedit get  ##Site_ID_2## SyncPort.(operationalState) -t
+cmedit get  ##Site_ID_2## NodeGroupSyncMember.(administrativeState) -t
+
+cmedit get ##Site_ID_2## RadioEquipmentClock.(radioClockState,nodeGroupRole,freqDeviationThreshold)  -t
+cmedit get ##Site_ID_2## NodeGroupSyncMember.(administrativeState,syncNodePriority,selectionMode,syncRiPortCandidate,syncRiPortStatus)  -t
+
+cmedit get ##Site_ID_2## RadioEquipmentClock.(radioClockState)  -t
+
+cmedit get ##Site_ID_2## NodeGroupSyncMember.(administrativeState,syncNodePriority,selectionMode,syncRiPortCandidate,syncRiPortStatus)  -t
+
+
+** Unlock the site if everything is good and set the FDD status as per pre**
+
+cmedit get ##Site_ID_2##  EUtranCellFDD.(availabilityStatus,cellrange,administrativeState,cellBarred,operationalState,primaryPlmnReserved,tac,CellId,earfcndl,earfcnul,dlChannelBandwidth,physicalLayerCellIdGroup,physicalLayerSubCellId) -t
+
+cmedit set ##Site_ID_2##  EUtranCellFDD.* administrativeState=UNLOCKED
+
+cmedit get ##Site_ID_2##  EUtranCellFDD.(availabilityStatus,cellrange,administrativeState,cellBarred,operationalState,primaryPlmnReserved,tac,CellId,earfcndl,earfcnul,dlChannelBandwidth,physicalLayerCellIdGroup,physicalLayerSubCellId) -t
+
