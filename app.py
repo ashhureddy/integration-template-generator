@@ -1674,6 +1674,70 @@ def extract_transport_fiber_opmode(precheck_text, node, port_labels):
     return None
 
 
+# ============================================================
+# DATA2 FIBER'S TESTING (MCA / CENM / CRAN — Pre-checks + CIQ)
+#
+# Confirmed logic:
+#  - "Pre-existing" = the cell is found in Pre-checks' Summary Status table at all.
+#  - Its Pre-checks state comes from the DL/UL Loss table's RRU description — ending in
+#    "Port D1" means it's currently on DATA1.
+#  - If the CIQ's own Radio Port column shows DATA2 (the target state) for that same
+#    pre-existing/DATA1 cell, DATA2 fiber testing is required.
+#  - Output: grouped by band, no node ID — "DATA2 Fiber's testing on: <band>." if all of
+#    Alpha/Beta/Gamma are flagged, otherwise "DATA2 Fiber's testing on: <band> <sectors>."
+# ============================================================
+
+def generate_data2_testing_checks(ciq_wb, mm_objs, precheck_text, log):
+    scope_lines = []
+    if not precheck_text:
+        return scope_lines
+
+    pre_pairs, _ = extract_precheck_sectors(precheck_text)
+    pre_existing_cells = {cell for _node, cell in pre_pairs}
+
+    cell_port_state = {}
+    for r in extract_dl_ul_loss_rows(precheck_text):
+        cell, desc = r["Cells"], r["DUS/XMU (S.No) - RRU"].strip()
+        if cell in cell_port_state:
+            continue
+        if desc.endswith("Port D1"):
+            cell_port_state[cell] = "D1"
+        elif desc.endswith("Port D2"):
+            cell_port_state[cell] = "D2"
+
+    band_sectors = {}
+
+    def check_cell(cell, radio_port, band_label_fn):
+        if not is_populated(cell) or cell not in pre_existing_cells:
+            return
+        if cell_port_state.get(cell) != "D1":
+            return
+        if str(radio_port or "").strip().upper() != "DATA2":
+            return
+        label, sector = band_label_fn(cell)
+        if label and sector:
+            band_sectors.setdefault(label, set()).add(sector)
+
+    if "eUtran Parameters" in ciq_wb.sheetnames:
+        for row in sheet_objs(ciq_wb["eUtran Parameters"]):
+            check_cell(row.get("EutranCellFDDId"), row.get("Radio Port"), lte_band_label)
+    if "5G Info" in ciq_wb.sheetnames:
+        for row in sheet_objs(ciq_wb["5G Info"]):
+            check_cell(row.get("NRCellDU"), row.get("Radio Port"), nr_band_label)
+
+    WHOLE_BAND_SET = {"Alpha", "Beta", "Gamma"}
+    for label in sorted(band_sectors):
+        sectors = band_sectors[label]
+        if WHOLE_BAND_SET <= sectors:
+            scope_lines.append(f"DATA2 Fiber's testing on: {label}.")
+        else:
+            names = sorted(sectors, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
+            scope_lines.append(f"DATA2 Fiber's testing on: {label} {', '.join(names)}.")
+        log(f"\u2713 DATA2 Fiber's testing flagged: {label} ({', '.join(sorted(sectors))})")
+
+    return scope_lines
+
+
 def generate_port_conversion_checks(ciq_wb, mm_objs, edp_index, precheck_text, log):
     """Returns (outputs, summary_rows, scope_lines). Shared by MCA / CENM / CRAN.
     Generation is read from Pre-checks' Hardware Status (the board that CURRENTLY exists),
@@ -2384,6 +2448,8 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     outputs += pc_outputs
     summary_rows += pc_summary
     scope_of_work_lines += pc_scope_lines
+    data2_scope_lines = generate_data2_testing_checks(ciq_wb, mm_objs, precheck_text, log)
+    scope_of_work_lines += data2_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -2460,6 +2526,8 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     outputs += pc_outputs
     summary_rows += pc_summary
     scope_of_work_lines += pc_scope_lines
+    data2_scope_lines = generate_data2_testing_checks(ciq_wb, mm_objs, precheck_text, log)
+    scope_of_work_lines += data2_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -2630,6 +2698,8 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     outputs += pc_outputs
     summary_rows += pc_summary
     scope_of_work_lines += pc_scope_lines
+    data2_scope_lines = generate_data2_testing_checks(ciq_wb, mm_objs, precheck_text, log)
+    scope_of_work_lines += data2_scope_lines
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
