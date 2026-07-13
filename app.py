@@ -2810,6 +2810,7 @@ if "qkx_scope" not in st.session_state:
     st.session_state.qkx_scope = None
 
 def _qkx_go(page, scope=None):
+    st.session_state.pop("qkx_results", None)
     st.session_state.qkx_page = page
     if scope is not None:
         st.session_state.qkx_scope = scope
