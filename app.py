@@ -2749,37 +2749,55 @@ def derive_check_status(top_scope, scope_lines):
     return results
 
 
-def render_checks_panel(container, top_scope, scope_lines):
-    """Reveals each check row in sequence, pauses, then fades out and is fully removed
-    so the results below can take its place (per the requested checks -> disappear -> reveal outputs flow).
-    `container` must be an st.empty() placeholder so it can be cleared afterward."""
+def _build_checks_html_rows(top_scope, scope_lines):
     statuses = derive_check_status(top_scope, scope_lines)
+    html_rows = []
+    for s in statuses:
+        if s["not_built"]:
+            icon_cls, icon_char, label_cls = "fail", "\u2717", "dim"
+        elif s["found"]:
+            icon_cls, icon_char, label_cls = "pass", "\u2713", ""
+        else:
+            icon_cls, icon_char, label_cls = "fail", "\u2717", "dim"
+        suffix = " (not built yet)" if s["not_built"] else ""
+        html_rows.append(
+            f'<div class="qkx-check-row"><div class="qkx-check-icon {icon_cls}">{icon_char}</div>'
+            f'<div class="qkx-check-label {label_cls}">{s["label"]}{suffix}</div></div>'
+        )
+    return html_rows
+
+
+def render_checks_panel_animated(container, top_scope, scope_lines):
+    """Plays the reveal-row-by-row-then-fade-out animation in place at the TOP slot (where
+    Pre/Post configuration will render once this finishes), then fully empties the container.
+    `container` must be an st.empty() placeholder so it can be cleared afterward."""
+    html_rows = _build_checks_html_rows(top_scope, scope_lines)
     with container.container():
         with st.container(border=True):
             st.subheader("Checks Performed")
             rows_ph = st.empty()
-            html_rows = []
-            for s in statuses:
-                if s["not_built"]:
-                    icon_cls, icon_char, label_cls = "fail", "\u2717", "dim"
-                elif s["found"]:
-                    icon_cls, icon_char, label_cls = "pass", "\u2713", ""
-                else:
-                    icon_cls, icon_char, label_cls = "fail", "\u2717", "dim"
-                suffix = " (not built yet)" if s["not_built"] else ""
-                html_rows.append(
-                    f'<div class="qkx-check-row"><div class="qkx-check-icon {icon_cls}">{icon_char}</div>'
-                    f'<div class="qkx-check-label {label_cls}">{s["label"]}{suffix}</div></div>'
-                )
-                rows_ph.markdown('<div class="qkx-checklist">' + "".join(html_rows) + "</div>", unsafe_allow_html=True)
+            shown = []
+            for row in html_rows:
+                shown.append(row)
+                rows_ph.markdown('<div class="qkx-checklist">' + "".join(shown) + "</div>", unsafe_allow_html=True)
                 time.sleep(0.18)
             time.sleep(0.6)  # let the completed checklist register before it fades away
             rows_ph.markdown(
-                '<div class="qkx-checklist qkx-checks-fadeout">' + "".join(html_rows) + "</div>",
+                '<div class="qkx-checklist qkx-checks-fadeout">' + "".join(shown) + "</div>",
                 unsafe_allow_html=True,
             )
         time.sleep(0.55)  # match the fade-out animation duration
-    container.empty()  # fully removed — the results below then animate in via the global 3D reveal
+    container.empty()  # fully removed — Pre/Post configuration then takes this spot
+
+
+def render_checks_panel_static(container, top_scope, scope_lines):
+    """The settled, final version — no animation — shown permanently at the bottom of the
+    left column (under the processing log) once the top-slot animation has finished."""
+    html_rows = _build_checks_html_rows(top_scope, scope_lines)
+    with container.container():
+        with st.container(border=True):
+            st.subheader("Checks Performed")
+            st.markdown('<div class="qkx-checklist">' + "".join(html_rows) + "</div>", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -2971,9 +2989,10 @@ elif st.session_state.qkx_page == "input":
             log_card = st.container(border=True)
             with log_card:
                 ph_log = st.empty()
-            ph_checks = st.empty()
+            ph_checks_bottom = st.empty()
 
         with col_right:
+            ph_checks_top = st.empty()
             ph_prepost = st.container(border=True)
             ph_sow = st.container(border=True)
             ph_siad = st.container(border=True)
@@ -3071,7 +3090,8 @@ elif st.session_state.qkx_page == "input":
                 "siad_rows": siad_rows, "summary_rows": summary_rows, "outputs": outputs, "binary_outputs": binary_outputs,
                 "log_lines": log_lines,
             }
-            render_checks_panel(ph_checks, top_scope, scope_lines)
+            render_checks_panel_animated(ph_checks_top, top_scope, scope_lines)
+            render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
         else:
             r = st.session_state.qkx_results
             top_scope, scope_lines = r["top_scope"], r["scope_lines"]
@@ -3079,7 +3099,8 @@ elif st.session_state.qkx_page == "input":
             siad_rows, summary_rows = r["siad_rows"], r["summary_rows"]
             outputs, binary_outputs = r["outputs"], r["binary_outputs"]
             ph_log.code("\n".join(r["log_lines"]), language=None)
-            ph_checks.empty()
+            ph_checks_top.empty()
+            render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
 
         with ph_prepost:
             if pre_line and post_line:
