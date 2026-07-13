@@ -2966,106 +2966,120 @@ elif st.session_state.qkx_page == "input":
                 date_str = st.text_input("Execution date (mmddyyyy)", value=date.today().strftime("%m%d%Y"))
             run = st.button("Generate templates →", type="primary", disabled=not (ciq_file and edp_file))
 
-    if run:
+    if run or "qkx_results" in st.session_state:
         with col_left:
             log_card = st.container(border=True)
             with log_card:
                 ph_log = st.empty()
+            ph_checks = st.empty()
 
         with col_right:
-            ph_checks = st.empty()
             ph_prepost = st.container(border=True)
             ph_sow = st.container(border=True)
             ph_siad = st.container(border=True)
             ph_summary = st.container(border=True)
             ph_outputs = st.container(border=True)
 
-        log_lines = []
+        if run:
+            log_lines = []
 
-        def log(msg):
-            log_lines.append(msg)
-            ph_log.code("\n".join(log_lines) or "Processing...", language=None)
+            def log(msg):
+                log_lines.append(msg)
+                ph_log.code("\n".join(log_lines) or "Processing...", language=None)
 
-        log("Starting...")
+            log("Starting...")
 
-        _all_templates = {
-            "MMBB": TPL_MMBB, "TMBB": TPL_TMBB, "cENM": TPL_CENM, "6610": TPL_6610,
-            "CRAN Trip-1": TPL_CRAN_TRIP1, "CRAN Trip-2": TPL_CRAN_TRIP2, "CRAN NSA": TPL_CRAN_NSA,
-            "DSS 4-sector": TPL_DSS_4SECTOR, "DSS 3-sector": TPL_DSS_3SECTOR,
-        }
-        _missing = [f"{label}  (expected: `{path.name}`)" for label, path in _all_templates.items() if not path.exists()]
-        if _missing:
-            st.error(
-                "Some template files aren't in `templates/MCA/` in the repo — check the exact filenames match "
-                "(GitHub sometimes changes spacing/characters on manual upload):\n\n"
-                + "\n".join(f"- {m}" for m in _missing)
-            )
-            st.stop()
-
-        log("Reading CIQ workbook...")
-        try:
-            ciq_wb = load_workbook_any(ciq_file.read(), ciq_file.name)
-        except Exception as e:
-            st.error(f"This CIQ couldn't be read as either .xlsx or legacy .xls. "
-                      f"It may be corrupted, or its content doesn't match its extension — try re-saving "
-                      f"it as .xlsx in Excel and re-uploading. Error detail: {e}")
-            st.stop()
-        if "Mixed Mode Info" not in ciq_wb.sheetnames:
-            st.error('Could not find a "Mixed Mode Info" tab in the CIQ.')
-            st.stop()
-        mm_objs = sheet_objs(ciq_wb["Mixed Mode Info"])
-        controller_objs = sheet_objs(ciq_wb["Controller Info"]) if "Controller Info" in ciq_wb.sheetnames else []
-
-        log("Reading EDP workbook...")
-        edp_bytes = edp_file.read()
-        try:
-            edp_wb = load_workbook_any(edp_bytes, edp_file.name)
-        except Exception as e:
-            st.error(f"This EDP couldn't be read (tried both .xlsx and legacy .xls handling). "
-                      f"Try re-saving it as .xlsx in Excel and re-uploading. Error detail: {e}")
-            st.stop()
-        edp_index = build_edp_index(edp_wb)
-        if not edp_index:
-            st.error('Could not locate the EDP header row (expected a column "EDP_SITE_ID" and "SITE_NAME").')
-            st.stop()
-
-        precheck_text = ""
-        if pre_file:
-            log("Extracting Pre-checks PDF text...")
-            precheck_text = extract_pdf_text(pre_file.read())
-
-        pre_line = post_line = None
-        uid = user_id or "xxUserIDxx"
-        dstr = date_str or "xxDatexx"
-
-        if top_scope == "MCA":
-            summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_mca(
-                ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log)
-        elif top_scope == "CENM":
-            summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_cenm(
-                ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log)
-        elif top_scope == "N2E":
-            summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_n2e(
-                ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
-        elif top_scope == "NSB":
-            summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_nsb(
-                ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
-        else:  # CRAN
-            cran_opts = {
-                "CRAN SA Rehome Trip 1": (TPL_CRAN_TRIP1, False, False, "CRAN_Trip1"),
-                "CRAN SA Rehome Trip 2": (TPL_CRAN_TRIP2, True, False, "CRAN_Trip2"),
-                "CRAN NSA Rehome": (TPL_CRAN_NSA, True, True, "CRAN_NSA"),
+            _all_templates = {
+                "MMBB": TPL_MMBB, "TMBB": TPL_TMBB, "cENM": TPL_CENM, "6610": TPL_6610,
+                "CRAN Trip-1": TPL_CRAN_TRIP1, "CRAN Trip-2": TPL_CRAN_TRIP2, "CRAN NSA": TPL_CRAN_NSA,
+                "DSS 4-sector": TPL_DSS_4SECTOR, "DSS 3-sector": TPL_DSS_3SECTOR,
             }
-            tpl_path, inc_src, need_6673, out_name = cran_opts[cran_sub]
-            summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_cran(
-                ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log,
-                tpl_path, inc_src, need_6673, out_name)
+            _missing = [f"{label}  (expected: `{path.name}`)" for label, path in _all_templates.items() if not path.exists()]
+            if _missing:
+                st.error(
+                    "Some template files aren't in `templates/MCA/` in the repo — check the exact filenames match "
+                    "(GitHub sometimes changes spacing/characters on manual upload):\n\n"
+                    + "\n".join(f"- {m}" for m in _missing)
+                )
+                st.stop()
 
-        log("Done.")
+            log("Reading CIQ workbook...")
+            try:
+                ciq_wb = load_workbook_any(ciq_file.read(), ciq_file.name)
+            except Exception as e:
+                st.error(f"This CIQ couldn't be read as either .xlsx or legacy .xls. "
+                          f"It may be corrupted, or its content doesn't match its extension — try re-saving "
+                          f"it as .xlsx in Excel and re-uploading. Error detail: {e}")
+                st.stop()
+            if "Mixed Mode Info" not in ciq_wb.sheetnames:
+                st.error('Could not find a "Mixed Mode Info" tab in the CIQ.')
+                st.stop()
+            mm_objs = sheet_objs(ciq_wb["Mixed Mode Info"])
+            controller_objs = sheet_objs(ciq_wb["Controller Info"]) if "Controller Info" in ciq_wb.sheetnames else []
 
-        binary_outputs += get_universal_static_outputs(log)
+            log("Reading EDP workbook...")
+            edp_bytes = edp_file.read()
+            try:
+                edp_wb = load_workbook_any(edp_bytes, edp_file.name)
+            except Exception as e:
+                st.error(f"This EDP couldn't be read (tried both .xlsx and legacy .xls handling). "
+                          f"Try re-saving it as .xlsx in Excel and re-uploading. Error detail: {e}")
+                st.stop()
+            edp_index = build_edp_index(edp_wb)
+            if not edp_index:
+                st.error('Could not locate the EDP header row (expected a column "EDP_SITE_ID" and "SITE_NAME").')
+                st.stop()
 
-        render_checks_panel(ph_checks, top_scope, scope_lines)
+            precheck_text = ""
+            if pre_file:
+                log("Extracting Pre-checks PDF text...")
+                precheck_text = extract_pdf_text(pre_file.read())
+
+            pre_line = post_line = None
+            uid = user_id or "xxUserIDxx"
+            dstr = date_str or "xxDatexx"
+
+            if top_scope == "MCA":
+                summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_mca(
+                    ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log)
+            elif top_scope == "CENM":
+                summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_cenm(
+                    ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log)
+            elif top_scope == "N2E":
+                summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_n2e(
+                    ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
+            elif top_scope == "NSB":
+                summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_nsb(
+                    ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, log)
+            else:  # CRAN
+                cran_opts = {
+                    "CRAN SA Rehome Trip 1": (TPL_CRAN_TRIP1, False, False, "CRAN_Trip1"),
+                    "CRAN SA Rehome Trip 2": (TPL_CRAN_TRIP2, True, False, "CRAN_Trip2"),
+                    "CRAN NSA Rehome": (TPL_CRAN_NSA, True, True, "CRAN_NSA"),
+                }
+                tpl_path, inc_src, need_6673, out_name = cran_opts[cran_sub]
+                summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_lines = generate_cran(
+                    ciq_wb, edp_index, controller_objs, mm_objs, uid, dstr, precheck_text, log,
+                    tpl_path, inc_src, need_6673, out_name)
+
+            log("Done.")
+
+            binary_outputs += get_universal_static_outputs(log)
+
+            st.session_state.qkx_results = {
+                "top_scope": top_scope, "scope_lines": scope_lines, "pre_line": pre_line, "post_line": post_line,
+                "siad_rows": siad_rows, "summary_rows": summary_rows, "outputs": outputs, "binary_outputs": binary_outputs,
+                "log_lines": log_lines,
+            }
+            render_checks_panel(ph_checks, top_scope, scope_lines)
+        else:
+            r = st.session_state.qkx_results
+            top_scope, scope_lines = r["top_scope"], r["scope_lines"]
+            pre_line, post_line = r["pre_line"], r["post_line"]
+            siad_rows, summary_rows = r["siad_rows"], r["summary_rows"]
+            outputs, binary_outputs = r["outputs"], r["binary_outputs"]
+            ph_log.code("\n".join(r["log_lines"]), language=None)
+            ph_checks.empty()
 
         with ph_prepost:
             if pre_line and post_line:
