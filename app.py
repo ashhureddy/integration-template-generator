@@ -1054,19 +1054,19 @@ DU_TYPE_TO_GEN = {"6630": "G2", "5216": "G2", "6648": "G3", "6651": "G3", "6672"
 
 # combo (sorted tuple of generations) -> list of (filename, variant label)
 IDL_TEMPLATE_REGISTRY = {
-    ("G2", "G2"): [("G2+G2_RPM 777 417.txt", "")],
-    ("G2", "G3"): [("G2+ G3_RPM 777 544.txt", "Preferred"), ("G2+ G3_RPM 777 098.txt", "Alternate")],
-    ("G2", "G4"): [("G4+G2_RPM 777 543.txt", "IDLe")],
-    ("G3", "G3"): [("G3+G3_RPM 777 052.txt", "Preferred"), ("G3+G3_RPM 777 053.txt", "Alternate")],
-    ("G3", "G4"): [("G4+G3_RPM 777 052.txt", "IDLe")],
-    ("G4", "G4"): [("G4+G4_RPM 777 052.txt", "Preferred")],
-    ("G2", "G2", "G2"): [("G2+ G2+G2_RPM 77 417.txt", "")],
-    ("G2", "G2", "G3"): [("G2+ G2+G3_RPM 77 417_098.txt", "")],
-    ("G2", "G3", "G3"): [("G2+G3+G3_RPM 777 053_544.txt", "")],
-    ("G3", "G3", "G3"): [("G3+ G3+ G3_RPM 777 052.txt", "Preferred"), ("G3+ G3+ G3_RPM 777 053.txt", "Alternate")],
-    ("G2", "G4", "G4"): [("G2+G4+G4_RPM_777_053_543.txt", "")],
-    ("G4", "G4", "G4"): [("G4+G4+G4_RPM 777 052.txt", "")],
-    ("G3", "G4", "G4"): [("G3 + G4 + G4_RPM_777_052.txt", "")],
+    ("G2", "G2"): [("G2+G2_Buildtype_A.txt", "")],
+    ("G2", "G3"): [("G2+ G3_Buildtype_BB.txt", "Preferred"), ("G2+ G3_Buildtype_B.txt", "Alternate")],
+    ("G2", "G4"): [("G4+G2_Buildtype_S.txt", "IDLe")],
+    ("G3", "G3"): [("G3+G3_Buildtype_C.txt", "Preferred"), ("G3+G3_Buildtype_CC.txt", "Alternate")],
+    ("G3", "G4"): [("G4+G3_Buildtype_T.txt", "IDLe")],
+    ("G4", "G4"): [("G4+G4_Buildtype_R.txt", "Preferred")],
+    ("G2", "G2", "G2"): [("G2+G2+G2_Buildtype_D.txt", "")],
+    ("G2", "G2", "G3"): [("G2+ G2+G3_Buildtype_E.txt", "")],
+    ("G2", "G3", "G3"): [("G2+G3+G3_Buildtype_F.txt", "")],
+    ("G3", "G3", "G3"): [("G3+ G3+ G3_Buildtype_GG.txt", "Preferred"), ("G3+ G3+ G3_Buildtype_G.txt", "Alternate")],
+    ("G2", "G4", "G4"): [("G2+G4+G4_Buildtype_U.txt", "")],
+    ("G4", "G4", "G4"): [("G4+G4+G4_Buildtype_RR.txt", "")],
+    ("G3", "G4", "G4"): [("G3 + G4 + G4_Buildtype_TT.txt", "")],
     # ("G2","G2","G4"), ("G2","G3","G4"), ("G3","G3","G4") -> no template exists;
     # falls through to the "IDL Template not found" branch below.
 }
@@ -1074,8 +1074,8 @@ IDL_TEMPLATE_REGISTRY = {
 # N2E confirmed to support only these 2 combinations (not the full 15) — reuses the same
 # file content/naming as the shared set, just from its own templates/N2E/IDL/ folder.
 N2E_IDL_TEMPLATE_REGISTRY = {
-    ("G3", "G3"): [("G3+G3_RPM 777 052.txt", "Preferred"), ("G3+G3_RPM 777 053.txt", "Alternate")],
-    ("G4", "G4"): [("G4+G4_RPM 777 052.txt", "Preferred")],
+    ("G3", "G3"): [("G3+G3_Buildtype_C.txt", "Preferred"), ("G3+G3_Buildtype_CC.txt", "Alternate")],
+    ("G4", "G4"): [("G4+G4_Buildtype_R.txt", "Preferred")],
     # every other combination -> "IDL Template not found" for N2E specifically, even though
     # MCA/CENM/NSB support it via the full registry above.
 }
