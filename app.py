@@ -1528,7 +1528,20 @@ def generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log):
                         out[sector] = c
                 return out
 
-            a_is_lte, b_is_lte = has_lte.get(node_a), has_lte.get(node_b)
+            def _node_role_is_lte(cells):
+                """This node's ROLE in THIS SPECIFIC pair — from the actual cells involved,
+                not node-level eNBId/gNBId presence. A dual-tech TMBB node can be referenced
+                via its 5G side specifically, even though it separately has its own unrelated
+                LTE identity (confirmed bug: SXON082013 has its own eNBId, but the shared radio
+                here is via its 5G cells — using has_lte.get(node) wrongly treated it as LTE,
+                causing lte_band_label() to fail against 5G-style cell names and leaving every
+                RRU placeholder unresolved)."""
+                for c in cells:
+                    if nr_band_label(c)[0] is not None:
+                        return False
+                return True
+
+            a_is_lte, b_is_lte = _node_role_is_lte(own_a), _node_role_is_lte(own_b)
             seeds_a = seed_by_sector(own_a, a_is_lte)
             seeds_b = seed_by_sector(own_b, b_is_lte)
             sectors_present = [s for s in SECTOR_ORDER if s in seeds_a or s in seeds_b]
