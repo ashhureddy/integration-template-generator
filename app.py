@@ -1798,7 +1798,7 @@ def generate_port_conversion_checks(ciq_wb, mm_objs, edp_index, precheck_text, l
 
 DL_UL_LOSS_ROW_RE = re.compile(
     r'(\S+)\s+(?:Up|Down)\s+\d+\s+(?:(?!\S+\s+(?:Up|Down)\s+\d+).)*?'
-    r'((?:Baseband|XMU|:\s*RRU)\S*(?:(?!\S+\s+(?:Up|Down)\s+\d+).)*Port\s+D\d)', re.DOTALL
+    r'((?:Baseband|XMU|RAN Processor|:\s*RRU)\S*(?:(?!\S+\s+(?:Up|Down)\s+\d+).)*Port\s+D\d)', re.DOTALL
 )
 
 def extract_dl_ul_loss_rows(precheck_text):
