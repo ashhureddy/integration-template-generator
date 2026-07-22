@@ -1,4 +1,5 @@
 import streamlit as st
+import sys
 import pandas as pd
 import re
 import io
@@ -1287,20 +1288,6 @@ def _ngs_cell_band(cell_name):
     return label
 
 
-def _ngs_pair_is_pure_lte(a_to_b, b_to_a):
-    """own_cell is always an LTE cell by construction (only eUtran Parameters is scanned for
-    Co-Located Technology Cell references) — so whether a pair is genuinely LTE-LTE (needing
-    bidirectional confirmation) vs. mixed LTE-5G (one-directional suffices) depends on whether
-    any ref_cell matches the 5G naming pattern — NOT on whether the target node separately has
-    its own eNBId. A dual-tech TMBB node (its own LTE side unrelated to this specific shared
-    radio) would otherwise be wrongly classified as a pure-LTE pair, requiring an impossible
-    bidirectional confirmation and causing a false negative on a real shared-radio site."""
-    for _own_cell, ref_cell in a_to_b + b_to_a:
-        if nr_band_label(ref_cell)[0] is not None:
-            return False
-    return True
-
-
 TDIR_NGS = Path(__file__).parent / "templates" / "NGS"
 TPL_NGS_LTE_LTE = TDIR_NGS / "LTE-LTE_NGS_Template.txt"
 TPL_NGS_LTE_5G = TDIR_NGS / "LTE-5G_NGS_Templates.txt"
@@ -1510,7 +1497,7 @@ def generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log):
             checked_pairs.add(pair_key)
             a_to_b = directional_refs.get((node_a, node_b), [])
             b_to_a = directional_refs.get((node_b, node_a), [])
-            both_lte = _ngs_pair_is_pure_lte(a_to_b, b_to_a)
+            both_lte = has_lte.get(node_a) and has_lte.get(node_b)
             confirmed = (a_to_b and b_to_a) if both_lte else (a_to_b or b_to_a)
             if not confirmed:
                 continue
@@ -1528,20 +1515,7 @@ def generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log):
                         out[sector] = c
                 return out
 
-            def _node_role_is_lte(cells):
-                """This node's ROLE in THIS SPECIFIC pair — from the actual cells involved,
-                not node-level eNBId/gNBId presence. A dual-tech TMBB node can be referenced
-                via its 5G side specifically, even though it separately has its own unrelated
-                LTE identity (confirmed bug: SXON082013 has its own eNBId, but the shared radio
-                here is via its 5G cells — using has_lte.get(node) wrongly treated it as LTE,
-                causing lte_band_label() to fail against 5G-style cell names and leaving every
-                RRU placeholder unresolved)."""
-                for c in cells:
-                    if nr_band_label(c)[0] is not None:
-                        return False
-                return True
-
-            a_is_lte, b_is_lte = _node_role_is_lte(own_a), _node_role_is_lte(own_b)
+            a_is_lte, b_is_lte = has_lte.get(node_a), has_lte.get(node_b)
             seeds_a = seed_by_sector(own_a, a_is_lte)
             seeds_b = seed_by_sector(own_b, b_is_lte)
             sectors_present = [s for s in SECTOR_ORDER if s in seeds_a or s in seeds_b]
@@ -1630,7 +1604,6 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
                 directional_refs.setdefault((own_node, ref_node), []).append((own_cell, ref_cell))
 
     checked_pairs = set()
-    confirmed_nodes = set()
     for i, node_a in enumerate(node_names):
         for node_b in node_names[i + 1:]:
             pair_key = frozenset((node_a, node_b))
@@ -1639,7 +1612,7 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
             checked_pairs.add(pair_key)
             a_to_b = directional_refs.get((node_a, node_b), [])
             b_to_a = directional_refs.get((node_b, node_a), [])
-            both_lte = _ngs_pair_is_pure_lte(a_to_b, b_to_a)
+            both_lte = has_lte.get(node_a) and has_lte.get(node_b)
             confirmed = (a_to_b and b_to_a) if both_lte else (a_to_b or b_to_a)
             if confirmed:
                 bands_a, bands_b = set(), set()
@@ -1660,30 +1633,6 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
                 })
                 log(f"\u2713 NGS Checks: {node_a} <-> {node_b} share a radio (bands: {band_list})")
                 scope_lines.append(f"NGS Activation on :\t{band_list}\t{node_a} <-> {node_b}")
-                confirmed_nodes.add(node_a)
-                confirmed_nodes.add(node_b)
-
-    # Safety-net: some CIQs carry an explicit "NodeGroupSync" = "Y" column (in eUtran Parameters
-    # and/or 5G Info) marking cells that have NGS. This never drives detection on its own — it
-    # only flags a cell whose node wasn't already covered by a confirmed co-location pair above,
-    # so a genuine miss (e.g. a blank/NA Co-Located Technology Cell that should have been
-    # populated) doesn't silently go unnoticed.
-    for sheet_name, cell_col in (("eUtran Parameters", "EutranCellFDDId"), ("5G Info", "NRCellDU")):
-        if sheet_name not in ciq_wb.sheetnames:
-            continue
-        for row in sheet_objs(ciq_wb[sheet_name]):
-            if str(row.get("NodeGroupSync", "")).strip().upper() != "Y":
-                continue
-            cell = row.get(cell_col)
-            if not is_populated(cell):
-                continue
-            node = cell_to_node.get(str(cell).strip())
-            if node and node not in confirmed_nodes:
-                log(f"\u26a0 NodeGroupSync=Y flagged for {cell} ({node}) but no confirmed NGS pair was detected \u2014 check this cell manually.")
-                summary_rows.append({
-                    "Item": "NGS Checks", "Source": cell,
-                    "Value": "NodeGroupSync=Y, not confirmed", "Note": f"node {node} not part of any detected NGS pair \u2014 check manually",
-                })
 
     return summary_rows, scope_lines
 
@@ -1874,6 +1823,92 @@ STATIC_OUTPUT_FILES = [
     "Integration_Checklist_v3.xlsx",
     "Global Local Script Execution Order.xlsx",
 ]
+
+
+# ============================================================
+# MCA INTEGRATION REPORT (Report_MCA-style output) — auto-fill what QUICKIX already knows,
+# manual entry for everything else, matching the Legacy_MCA_Macro_Template checklist.
+# ============================================================
+
+def derive_idl_build_type_label(ciq_wb, mm_objs):
+    """Re-derives which IDL template combo/filename would be used (same lookup + the same
+    get_node_generation() the real IDL Connections generator uses), purely to extract the
+    'Buildtype_X' suffix already embedded in the real template filenames (confirmed: e.g.
+    'G3+G3_Buildtype_C.txt' -> 'Type C'). Returns None if no IDL combo applies (e.g. single-BBU
+    site) or the combo isn't in the registry."""
+    if len(mm_objs) < 2:
+        return None
+    gens = [get_node_generation(ciq_wb, row) for row in mm_objs]
+    if not all(gens):
+        return None
+    combo = tuple(sorted(gens))
+    entries = IDL_TEMPLATE_REGISTRY.get(combo)
+    if not entries:
+        return None
+    fname = entries[0][0]
+    m = re.search(r'Buildtype_([A-Z]+)', fname)
+    return f"Type {m.group(1)}" if m else None
+
+
+def build_mca_integration_report(pre_line, post_line, controller_objs, mm_objs, manual):
+    """manual: dict of engineer-provided values from the UI —
+    {mic, market, site_name, sow, iwm_details, current_config, wll_node, software_version,
+     gs_version, completed_extra, pending, pre_existing_issues, notes, idl_cable_details,
+     switch_details, slot_port_details}.
+    Status (ATP/STF) is derived: ATP only if 'pending' is empty, STF otherwise — confirmed rule.
+    Returns the final Report_MCA-style plain-text block."""
+    site_ids = "/".join(r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as"))
+    status = "ATP" if not (manual.get("pending") or "").strip() else "STF"
+    mic = manual.get("mic") or "MIC"
+
+    lines = []
+    lines.append("Subject")
+    lines.append(f"{mic} | {manual.get('market','')} | {status} | {manual.get('site_name','')} | "
+                  f"{manual.get('fa_code','')} | {site_ids} | {manual.get('sow','')}")
+    lines.append("")
+    lines.append("IWM Details")
+    lines.append(manual.get("iwm_details", ""))
+    lines.append("")
+    lines.append("Configuration")
+    lines.append(f"Pre Configuration : {pre_line}")
+    if (manual.get("current_config") or "").strip():
+        lines.append(f"Current Configuration : {manual['current_config']}")
+    lines.append(f"Post Configuration : {post_line}")
+    if (manual.get("wll_node") or "").strip():
+        lines.append(f"WLL  node : {manual['wll_node']}")
+    controller_id = controller_objs[0].get("Controller") if controller_objs else ""
+    lines.append(f"6610 Controller : {controller_id}")
+    lines.append(f"Software version: {manual.get('software_version','')}")
+    lines.append(f"GS Version: {manual.get('gs_version','')}")
+    lines.append("")
+    lines.append("IDL Connections")
+    build_type = manual.get("idl_build_type")
+    if build_type:
+        lines.append(f"Build Type : {build_type}")
+    if (manual.get("idl_cable_details") or "").strip():
+        lines.append(manual["idl_cable_details"])
+    if (manual.get("switch_details") or "").strip():
+        lines.append("Switch")
+        lines.append(manual["switch_details"])
+    if (manual.get("slot_port_details") or "").strip():
+        lines.append("Slot/Port")
+        lines.append(manual["slot_port_details"])
+    lines.append("")
+    lines.append("Completed:")
+    for auto_line in manual.get("completed_auto_lines", []):
+        lines.append(auto_line)
+    if (manual.get("completed_extra") or "").strip():
+        lines.append(manual["completed_extra"])
+    lines.append("")
+    lines.append("Pending:")
+    lines.append(manual.get("pending", ""))
+    lines.append("")
+    lines.append("Pre-Existing Issues:")
+    lines.append(manual.get("pre_existing_issues", ""))
+    lines.append("")
+    lines.append("Notes:")
+    lines.append(manual.get("notes", ""))
+    return "\n".join(lines)
 
 
 def get_universal_static_outputs(log):
@@ -3141,7 +3176,8 @@ elif st.session_state.qkx_page == "input":
             st.session_state.qkx_results = {
                 "top_scope": top_scope, "scope_lines": scope_lines, "pre_line": pre_line, "post_line": post_line,
                 "siad_rows": siad_rows, "summary_rows": summary_rows, "outputs": outputs, "binary_outputs": binary_outputs,
-                "log_lines": log_lines,
+                "log_lines": log_lines, "mm_objs": mm_objs, "controller_objs": controller_objs, "ciq_wb": ciq_wb,
+                "precheck_text": precheck_text,
             }
             render_checks_panel_animated(ph_checks_top, top_scope, scope_lines)
             render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
@@ -3151,6 +3187,8 @@ elif st.session_state.qkx_page == "input":
             pre_line, post_line = r["pre_line"], r["post_line"]
             siad_rows, summary_rows = r["siad_rows"], r["summary_rows"]
             outputs, binary_outputs = r["outputs"], r["binary_outputs"]
+            mm_objs, controller_objs, ciq_wb = r["mm_objs"], r["controller_objs"], r["ciq_wb"]
+            precheck_text = r["precheck_text"]
             ph_log.code("\n".join(r["log_lines"]), language=None)
             ph_checks_top.empty()
             render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
@@ -3200,3 +3238,7 @@ elif st.session_state.qkx_page == "input":
                         for name, data in binary_outputs:
                             zf.writestr(name, data)
                     st.download_button("Download all as .zip", zip_buf.getvalue(), file_name="generated_templates.zip")
+
+        if top_scope == "MCA":
+            import mca_report_ui
+            mca_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines)
