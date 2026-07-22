@@ -1287,6 +1287,20 @@ def _ngs_cell_band(cell_name):
     return label
 
 
+def _ngs_pair_is_pure_lte(a_to_b, b_to_a):
+    """own_cell is always an LTE cell by construction (only eUtran Parameters is scanned for
+    Co-Located Technology Cell references) — so whether a pair is genuinely LTE-LTE (needing
+    bidirectional confirmation) vs. mixed LTE-5G (one-directional suffices) depends on whether
+    any ref_cell matches the 5G naming pattern — NOT on whether the target node separately has
+    its own eNBId. A dual-tech TMBB node (its own LTE side unrelated to this specific shared
+    radio) would otherwise be wrongly classified as a pure-LTE pair, requiring an impossible
+    bidirectional confirmation and causing a false negative on a real shared-radio site."""
+    for _own_cell, ref_cell in a_to_b + b_to_a:
+        if nr_band_label(ref_cell)[0] is not None:
+            return False
+    return True
+
+
 TDIR_NGS = Path(__file__).parent / "templates" / "NGS"
 TPL_NGS_LTE_LTE = TDIR_NGS / "LTE-LTE_NGS_Template.txt"
 TPL_NGS_LTE_5G = TDIR_NGS / "LTE-5G_NGS_Templates.txt"
@@ -1496,7 +1510,7 @@ def generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log):
             checked_pairs.add(pair_key)
             a_to_b = directional_refs.get((node_a, node_b), [])
             b_to_a = directional_refs.get((node_b, node_a), [])
-            both_lte = has_lte.get(node_a) and has_lte.get(node_b)
+            both_lte = _ngs_pair_is_pure_lte(a_to_b, b_to_a)
             confirmed = (a_to_b and b_to_a) if both_lte else (a_to_b or b_to_a)
             if not confirmed:
                 continue
@@ -1603,6 +1617,7 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
                 directional_refs.setdefault((own_node, ref_node), []).append((own_cell, ref_cell))
 
     checked_pairs = set()
+    confirmed_nodes = set()
     for i, node_a in enumerate(node_names):
         for node_b in node_names[i + 1:]:
             pair_key = frozenset((node_a, node_b))
@@ -1611,7 +1626,7 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
             checked_pairs.add(pair_key)
             a_to_b = directional_refs.get((node_a, node_b), [])
             b_to_a = directional_refs.get((node_b, node_a), [])
-            both_lte = has_lte.get(node_a) and has_lte.get(node_b)
+            both_lte = _ngs_pair_is_pure_lte(a_to_b, b_to_a)
             confirmed = (a_to_b and b_to_a) if both_lte else (a_to_b or b_to_a)
             if confirmed:
                 bands_a, bands_b = set(), set()
@@ -1632,6 +1647,30 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
                 })
                 log(f"\u2713 NGS Checks: {node_a} <-> {node_b} share a radio (bands: {band_list})")
                 scope_lines.append(f"NGS Activation on :\t{band_list}\t{node_a} <-> {node_b}")
+                confirmed_nodes.add(node_a)
+                confirmed_nodes.add(node_b)
+
+    # Safety-net: some CIQs carry an explicit "NodeGroupSync" = "Y" column (in eUtran Parameters
+    # and/or 5G Info) marking cells that have NGS. This never drives detection on its own — it
+    # only flags a cell whose node wasn't already covered by a confirmed co-location pair above,
+    # so a genuine miss (e.g. a blank/NA Co-Located Technology Cell that should have been
+    # populated) doesn't silently go unnoticed.
+    for sheet_name, cell_col in (("eUtran Parameters", "EutranCellFDDId"), ("5G Info", "NRCellDU")):
+        if sheet_name not in ciq_wb.sheetnames:
+            continue
+        for row in sheet_objs(ciq_wb[sheet_name]):
+            if str(row.get("NodeGroupSync", "")).strip().upper() != "Y":
+                continue
+            cell = row.get(cell_col)
+            if not is_populated(cell):
+                continue
+            node = cell_to_node.get(str(cell).strip())
+            if node and node not in confirmed_nodes:
+                log(f"\u26a0 NodeGroupSync=Y flagged for {cell} ({node}) but no confirmed NGS pair was detected \u2014 check this cell manually.")
+                summary_rows.append({
+                    "Item": "NGS Checks", "Source": cell,
+                    "Value": "NodeGroupSync=Y, not confirmed", "Note": f"node {node} not part of any detected NGS pair \u2014 check manually",
+                })
 
     return summary_rows, scope_lines
 
