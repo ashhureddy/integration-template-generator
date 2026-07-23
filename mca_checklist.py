@@ -126,6 +126,23 @@ CHECKLIST = [
     {"key": "ret_configuration", "label": "RET configuration", "section": "completed", "manual": True},
     {"key": "script_6673", "label": "6673 Script load", "section": "completed", "manual": True},
     {"key": "installation_generic", "label": "Installation", "section": "completed", "manual": True},
+
+    # ---------------- Pending-only items (no Completed counterpart, fixed stakeholder tags) ----------------
+    {"key": "post_configuration_pending", "label": "Post Configuration", "section": "pending", "stakeholder": "MIC PM", "manual": True},
+    {"key": "siad_provisioning", "label": "SIAD provisioning", "section": "pending", "stakeholder": "AT&T", "manual": True},
+    {"key": "edp_publish", "label": "EDP Publish", "section": "pending", "stakeholder": "AT&T", "manual": True},
+    {"key": "rilinks_scripting", "label": "Rilinks Scripting", "section": "pending", "stakeholder": "MIC PM", "manual": True},
+    {"key": "script_6673_config", "label": "6673 Configuration", "section": "pending", "stakeholder": "AT&T", "manual": True},
+    {"key": "port_config_enm", "label": "6673 Port Configuration in ENM", "section": "pending", "stakeholder": "AT&T", "manual": True},
+    {"key": "link_failure", "label": "Link failure", "section": "pending", "stakeholder": "Tower Crew", "manual": True},
+    {"key": "sfp_not_present", "label": "SFP Not Present", "section": "pending", "stakeholder": "Tower Crew", "manual": True},
+    {"key": "mo_inconsistent_alarm", "label": "Mo Inconsistent configuration alarm", "section": "pending", "stakeholder": "Tower Crew", "manual": True},
+    {"key": "fiberloss", "label": "Fiberloss (Data Link_1/2)", "section": "pending", "stakeholder": "Tower Crew", "manual": True},
+    {"key": "high_rssi", "label": "High RSSI", "section": "pending", "stakeholder": "Tower Crew", "manual": True},
+    {"key": "low_rssi", "label": "Low RSSI", "section": "pending", "stakeholder": "Tower Crew", "manual": True},
+    {"key": "high_vswr", "label": "High VSWR", "section": "pending", "stakeholder": "Tower Crew", "manual": True},
+    {"key": "low_vswr", "label": "Low VSWR", "section": "pending", "stakeholder": "Tower Crew", "manual": True},
+    {"key": "vswr_overthreshold", "label": "VSWR overthreshold", "section": "pending", "stakeholder": "Tower Crew", "manual": True},
 ]
 
 
