@@ -36,6 +36,21 @@ VALUE_COLUMNS = {
     "script_6673": [3],
     "installation_generic": [],
     "area_test": [3],                       # C = Node ID | 6610 Controller ID (Pending-only row 146)
+    "post_configuration_pending": [],
+    "siad_provisioning": [],
+    "edp_publish": [],
+    "rilinks_scripting": [],
+    "script_6673_config": [],
+    "port_config_enm": [],
+    "link_failure": [],
+    "sfp_not_present": [],
+    "mo_inconsistent_alarm": [],
+    "fiberloss": [],
+    "high_rssi": [],
+    "low_rssi": [],
+    "high_vswr": [],
+    "low_vswr": [],
+    "vswr_overthreshold": [],
 }
 
 
