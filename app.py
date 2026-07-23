@@ -3076,13 +3076,18 @@ elif st.session_state.qkx_page == "input":
                 user_id = st.text_input("User ID", placeholder="e.g. pr970b")
             with c2:
                 date_str = st.text_input("Execution date (mmddyyyy)", value=date.today().strftime("%m%d%Y"))
-            run = st.button("Generate templates →", type="primary", disabled=not (ciq_file and edp_file))
+            run = st.button("Generate Report \u2192" if st.session_state.get("qkx_report_only") else "Generate templates \u2192",
+                             type="primary", disabled=not (ciq_file and edp_file))
 
     if run or "qkx_results" in st.session_state:
+        report_only = st.session_state.get("qkx_report_only")
         with col_left:
-            log_card = st.container(border=True)
-            with log_card:
+            if report_only:
                 ph_log = st.empty()
+            else:
+                log_card = st.container(border=True)
+                with log_card:
+                    ph_log = st.empty()
             ph_checks_bottom = st.empty()
 
         with col_right:
@@ -3188,6 +3193,8 @@ elif st.session_state.qkx_page == "input":
             if not st.session_state.get("qkx_report_only"):
                 render_checks_panel_animated(ph_checks_top, top_scope, scope_lines)
                 render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
+            else:
+                ph_log.empty()
         else:
             r = st.session_state.qkx_results
             top_scope, scope_lines = r["top_scope"], r["scope_lines"]
@@ -3196,7 +3203,7 @@ elif st.session_state.qkx_page == "input":
             outputs, binary_outputs = r["outputs"], r["binary_outputs"]
             mm_objs, controller_objs, ciq_wb = r["mm_objs"], r["controller_objs"], r["ciq_wb"]
             precheck_text = r["precheck_text"]
-            ph_log.code("\n".join(r["log_lines"]), language=None)
+            ph_log.code("\n".join(r["log_lines"]), language=None) if not report_only else ph_log.empty()
             ph_checks_top.empty()
             if not st.session_state.get("qkx_report_only"):
                 render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
