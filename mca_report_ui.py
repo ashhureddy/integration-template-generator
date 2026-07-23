@@ -78,7 +78,12 @@ def _item_card(item):
         if checked:
             if item.get("toggle"):
                 section = st.radio("Section", ["completed", "pending"], key=f"sec_{key}", horizontal=True)
-            cols = st.columns([3, 1]) if section == "pending" else [st]
+
+            class _NullCtx:
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+
+            cols = st.columns([3, 1]) if section == "pending" else [_NullCtx(), _NullCtx()]
             with cols[0]:
                 manual_val = st.text_input("Manual entry / override (leave blank to use detected value)", key=f"manual_{key}", label_visibility="collapsed", placeholder="Manual entry / override")
                 if manual_val:
