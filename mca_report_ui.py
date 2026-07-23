@@ -1,7 +1,5 @@
 """
-MCA Integration Report — interactive 'Generate Report' UI section.
-Import this module's render() function and call it inside app.py, gated to top_scope=='MCA',
-passing ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line.
+MCA Integration Report — interactive 'Generate Report' UI section (compact layout).
 """
 import streamlit as st
 import io
@@ -28,33 +26,38 @@ def _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type,
     }
 
 
+def _compact_item_row(item):
+    """One item per line: checkbox + label, with manual-field inputs only appearing inline
+    when the item is actually checked (keeps unchecked items to a single compact line)."""
+    key = item["key"]
+    checked = st.checkbox(item["label"], value=item["checked_by_default"], key=f"chk_{key}")
+    section, stakeholder, manual_extra = item["section"], None, []
+
+    if checked:
+        if item.get("toggle"):
+            cols = st.columns([1, 1])
+            with cols[0]:
+                section = st.radio("Completed or Pending?", ["completed", "pending"], key=f"sec_{key}", horizontal=True, label_visibility="collapsed")
+            if section == "pending":
+                with cols[1]:
+                    stakeholder = st.selectbox("Stakeholder", ["AT&T", "MIC"], key=f"stake_{key}", label_visibility="collapsed")
+        if item.get("manual_fields"):
+            cols = st.columns(len(item["manual_fields"]))
+            for c, field_name in zip(cols, item["manual_fields"]):
+                with c:
+                    manual_extra.append(st.text_input(field_name, key=f"manual_{key}_{field_name}"))
+    return {"checked": checked, "section": section, "manual_extra": manual_extra}, stakeholder
+
+
 def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines):
     st.subheader("Generate Report")
-    st.caption("Interactive Integration Report — auto-fetched fields are pre-filled and pre-checked; "
-               "everything else needs manual entry. Uncheck anything that doesn't apply.")
 
     idl_build_type = app.derive_idl_build_type_label(ciq_wb, mm_objs)
     controller_id = controller_objs[0].get("Controller") if controller_objs else ""
-    controller_in_edp = bool(controller_id)  # refined once EDP-check wiring is confirmed
+    controller_in_edp = bool(controller_id)
 
     ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp)
     results = mca_checklist.evaluate_checklist(ctx)
-
-    st.markdown("#### Header fields")
-    c1, c2 = st.columns(2)
-    with c1:
-        market = st.text_input("Market", key="rpt_market")
-        status = st.text_input("Status (ATP/STF \u2014 auto-suggested, override if needed)",
-                                value="STF" if any(r["section"] == "pending" and r["checked_by_default"] for r in results) else "ATP",
-                                key="rpt_status")
-        site_name = st.text_input("Site Name", key="rpt_site_name")
-        sow = st.text_input("SOW", key="rpt_sow")
-        iwm_details = st.text_input("IWM Details", key="rpt_iwm")
-    with c2:
-        current_config = st.text_input("Current Configuration (if applicable)", key="rpt_current_config")
-        wll_node = st.text_input("WLL node (if applicable)", key="rpt_wll")
-        software_version = st.text_input("Software version", key="rpt_sw")
-        gs_version = st.text_input("GS Version", key="rpt_gs")
 
     site_ids = "/".join(r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as"))
     fa_code = ""
@@ -63,63 +66,107 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             if app.is_populated(row.get("FA Code")):
                 fa_code = row.get("FA Code")
                 break
-    st.caption(f"Auto-fetched: Site IDs = **{site_ids}**, FA Code = **{fa_code or '(not found)'}**, "
-               f"6610 Controller = **{controller_id or '(none)'}**, IDL Build Type = **{idl_build_type or '(n/a)'}**")
+    default_status = "STF" if any(r["section"] == "pending" and r["checked_by_default"] for r in results) else "ATP"
 
-    idle = st.text_area("IDLe cable details (manual)", key="rpt_idle", height=60)
-    idly = st.text_area("IDLy cable details (manual)", key="rpt_idly", height=60)
-    switch = st.text_area("Switch details (manual)", key="rpt_switch", height=60)
-    slot_port = st.text_area("Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
+    st.caption("Subject")
+    c = st.columns(7)
+    with c[0]: st.text_input("MIC", value="MIC", key="rpt_mic", disabled=True)
+    with c[1]: market = st.text_input("Market", key="rpt_market", placeholder="MNS/TILLMAN/AT&T")
+    with c[2]: status = st.text_input("Status", value=default_status, key="rpt_status")
+    with c[3]: site_name = st.text_input("Site Name", key="rpt_site_name")
+    with c[4]: st.text_input("FA CODE", value=fa_code, key="rpt_fa", disabled=True)
+    with c[5]: st.text_input("Site ID's", value=site_ids, key="rpt_siteids", disabled=True)
+    with c[6]: sow = st.text_input("SOW", key="rpt_sow")
 
-    st.markdown("#### Completed / Pending checklist")
-    choices = {}
-    for item in results:
-        if item["key"] in ("radio_swap",):
-            continue  # rendered in the Pending-only pass below
-        key = item["key"]
-        cols = st.columns([3, 2, 2])
-        with cols[0]:
-            checked = st.checkbox(item["label"], value=item["checked_by_default"], key=f"chk_{key}")
-        section = item["section"]
-        stakeholder = None
-        if item.get("toggle"):
-            with cols[1]:
-                section = st.radio("Completed or Pending?", ["completed", "pending"], key=f"sec_{key}", horizontal=True)
-            if section == "pending":
-                with cols[2]:
-                    stakeholder = st.selectbox("Stakeholder", ["AT&T", "MIC"], key=f"stake_{key}")
-        manual_extra = []
-        if item.get("manual_fields"):
-            for field_name in item["manual_fields"]:
-                manual_extra.append(st.text_input(f"{item['label']} \u2014 {field_name}", key=f"manual_{key}_{field_name}"))
-        choices[key] = {"checked": checked, "section": section, "manual_extra": manual_extra}
-        if stakeholder:
-            choices.setdefault("_stakeholders", {})[key] = stakeholder
+    st.caption("IWM Details")
+    iwm_details = st.text_input("IWM Details", key="rpt_iwm", label_visibility="collapsed")
 
-    st.markdown("#### Pending-only items")
-    radio_swap_item = next(i for i in results if i["key"] == "radio_swap")
-    checked = st.checkbox(radio_swap_item["label"], value=radio_swap_item["checked_by_default"], key="chk_radio_swap")
-    choices["radio_swap"] = {"checked": checked, "section": "pending"}
+    st.caption("Configuration")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        current_config = st.text_input("Current Configuration (if applicable)", key="rpt_current_config")
+        wll_node = st.text_input("WLL node (if applicable)", key="rpt_wll")
+    with c2:
+        software_version = st.text_input("Software version", key="rpt_sw")
+        gs_version = st.text_input("GS Version", key="rpt_gs")
+    with c3:
+        st.text_input("Pre Configuration", value=pre_line, disabled=True, key="rpt_pre_disp")
+        st.text_input("Post Configuration", value=post_line, disabled=True, key="rpt_post_disp")
+        st.text_input("6610 Controller", value=controller_id, disabled=True, key="rpt_ctrl_disp")
 
-    additional_completed = st.text_area("Enter any additional completed information that needs to be added in report", key="rpt_add_completed", height=80)
-    additional_pending = st.text_area("Enter any additional pending information that needs to be report to Market", key="rpt_add_pending", height=80)
+    idle = idly = switch = slot_port = ""
+    if len(mm_objs) > 1:
+        st.caption(f"IDL Connections \u2014 Build Type: {idl_build_type or '(not detected)'}")
+        c1, c2 = st.columns(2)
+        with c1:
+            idle = st.text_area("IDLe cable details (manual)", key="rpt_idle", height=60)
+            switch = st.text_area("Switch details (manual)", key="rpt_switch", height=60)
+        with c2:
+            idly = st.text_area("IDLy cable details (manual)", key="rpt_idly", height=60)
+            slot_port = st.text_area("Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
+
+    st.markdown("---")
+    st.markdown("**Completed / Pending checklist** \u2014 auto-detected items are pre-checked and pre-filled; uncheck anything that doesn't apply, check anything extra that does.")
+
+    choices, stakeholders = {}, {}
+    completed_items = [i for i in results if i["section"] == "completed"]
+    pending_items = [i for i in results if i["section"] == "pending"]
+
+    st.markdown("*Completed*")
+    cols = st.columns(2)
+    for i, item in enumerate(completed_items):
+        with cols[i % 2]:
+            choice, stakeholder = _compact_item_row(item)
+            choices[item["key"]] = choice
+            if stakeholder:
+                stakeholders[item["key"]] = stakeholder
+    additional_completed = st.text_area("Enter any additional completed information that needs to be added in report", key="rpt_add_completed", height=70)
     choices["additional_completed"] = {"text": additional_completed}
+
+    st.markdown("*Pending*")
+    cols = st.columns(2)
+    for i, item in enumerate(pending_items):
+        with cols[i % 2]:
+            choice, _ = _compact_item_row(item)
+            choices[item["key"]] = choice
+    additional_pending = st.text_area("Enter any additional pending information that needs to be reported to Market", key="rpt_add_pending", height=70)
     choices["additional_pending"] = {"text": additional_pending}
 
-    st.markdown("#### Pre-Existing Issues / Notes")
-    pre_existing_text = st.text_area("Enter any Pre-Existing Issues that needs to be reported to Market", key="rpt_preexisting", height=80)
+    st.markdown("*Pre-Existing Issues*")
+    pre_existing_text = st.text_area("Enter any Pre-Existing Issues that needs to be reported to Market", key="rpt_preexisting", height=70)
     choices["pre_existing_issues_text"] = pre_existing_text
 
-    n1 = st.checkbox("Final Port Configuration attached.", key="rpt_note1")
-    n2 = st.checkbox("NR configuration has been verified.", key="rpt_note2")
-    n3 = st.checkbox("Pre-Existing MME configuration left as it is on node xxNode_Idxx", key="rpt_note3")
-    note3_node = st.text_input("Node ID for the MME note above (if checked)", key="rpt_note3_node") if n3 else ""
-    choices["notes_final_port_config"] = {"checked": n1, "text": "Final Port Configuration attached."}
-    choices["notes_nr_verified"] = {"checked": n2, "text": "NR configuration has been verified."}
-    choices["notes_mme_config"] = {"checked": n3, "text": f"Pre-Existing MME configuration left as it is on node {note3_node}"}
-    notes_generic = st.text_area("Enter Notes that need to be reported or addressed to Market", key="rpt_notes_generic", height=80)
+    st.markdown("*Notes*")
+    note_defs = [
+        ("notes_final_port_config", "Final Port Configuration attached."),
+        ("notes_nr_verified", "NR configuration has been verified."),
+        ("notes_cpri_sfp", "Area prechecks verification for CPRI/SFP check is completed."),
+        ("notes_no_external_alarms", "No scope of external alarms."),
+    ]
+    cols = st.columns(2)
+    for i, (note_key, text) in enumerate(note_defs):
+        with cols[i % 2]:
+            checked = st.checkbox(text, key=f"chk_{note_key}")
+            choices[note_key] = {"checked": checked, "text": text}
+
+    c1, c2 = st.columns(2)
+    with c1:
+        n_mme = st.checkbox("Pre-Existing MME configuration left as it is on node", key="chk_notes_mme_config")
+        mme_node = st.text_input("Node ID", key="rpt_mme_node", label_visibility="collapsed") if n_mme else ""
+        choices["notes_mme_config"] = {"checked": n_mme, "text": f"Pre-Existing MME configuration left as it is on node {mme_node}"}
+    with c2:
+        n_mon = st.checkbox("Node is in monitored state", key="chk_notes_monitored")
+        mon_node = st.text_input("Node ID (monitored)", key="rpt_mon_node", label_visibility="collapsed") if n_mon else ""
+        choices["notes_monitored"] = {"checked": n_mon, "text": f"{mon_node} is in monitored state."}
+
+    n_not_mon = st.checkbox("Node is in not monitored state", key="chk_notes_not_monitored")
+    not_mon_node = st.text_input("Node ID (not monitored)", key="rpt_not_mon_node", label_visibility="collapsed") if n_not_mon else ""
+    choices["notes_not_monitored"] = {"checked": n_not_mon, "text": f"{not_mon_node} is in not monitored state."}
+
+    notes_generic = st.text_area("Enter Notes that need to be reported or addressed to Market", key="rpt_notes_generic", height=70)
     choices["notes_generic_text"] = notes_generic
 
+    st.markdown("---")
     if st.button("Generate Integration Report \u2192", type="primary", key="rpt_generate_mca"):
         header_fields = {
             "mic": "MIC", "market": market, "status": status, "site_name": site_name,
@@ -129,8 +176,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             "software_version": software_version, "gs_version": gs_version,
             "idl_build_type": idl_build_type, "idle": idle, "idly": idly, "switch": switch, "slot_port": slot_port,
         }
-        report_text = mca_report_text.build_mca_report_text(mm_objs, results, choices, header_fields,
-                                                              stakeholder_by_key=choices.get("_stakeholders"))
+        report_text = mca_report_text.build_mca_report_text(mm_objs, results, choices, header_fields, stakeholder_by_key=stakeholders)
         st.success("Report generated.")
         st.text_area("Report preview", report_text, height=400, key="rpt_preview")
 
