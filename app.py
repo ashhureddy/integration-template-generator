@@ -2896,9 +2896,10 @@ if "qkx_page" not in st.session_state:
 if "qkx_scope" not in st.session_state:
     st.session_state.qkx_scope = None
 
-def _qkx_go(page, scope=None):
+def _qkx_go(page, scope=None, report_only=False):
     st.session_state.pop("qkx_results", None)
     st.session_state.qkx_page = page
+    st.session_state.qkx_report_only = report_only
     if scope is not None:
         st.session_state.qkx_scope = scope
     st.rerun()
@@ -3036,6 +3037,11 @@ elif st.session_state.qkx_page == "family":
     with f3:
         if st.button("CRAN", use_container_width=True, key="qkx_fam_cran"):
             _qkx_go("input", "CRAN")
+
+    st.markdown("")
+    if st.button("📋  Generate Report →", use_container_width=True, key="qkx_fam_report", type="primary"):
+        _qkx_go("input", "MCA", report_only=True)
+    st.caption("Same CIQ / Pre-checks / EDP inputs — skips the full SOW analysis and templates, shows only the Integration Report. Currently available for MCA.")
 
 # ---- INPUT PAGE (all scopes land here — same form + results as before) ----
 elif st.session_state.qkx_page == "input":
@@ -3179,8 +3185,9 @@ elif st.session_state.qkx_page == "input":
                 "log_lines": log_lines, "mm_objs": mm_objs, "controller_objs": controller_objs, "ciq_wb": ciq_wb,
                 "precheck_text": precheck_text,
             }
-            render_checks_panel_animated(ph_checks_top, top_scope, scope_lines)
-            render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
+            if not st.session_state.get("qkx_report_only"):
+                render_checks_panel_animated(ph_checks_top, top_scope, scope_lines)
+                render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
         else:
             r = st.session_state.qkx_results
             top_scope, scope_lines = r["top_scope"], r["scope_lines"]
@@ -3191,53 +3198,55 @@ elif st.session_state.qkx_page == "input":
             precheck_text = r["precheck_text"]
             ph_log.code("\n".join(r["log_lines"]), language=None)
             ph_checks_top.empty()
-            render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
+            if not st.session_state.get("qkx_report_only"):
+                render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
 
-        with ph_prepost:
-            if pre_line and post_line:
-                st.subheader("Pre / Post configuration")
-                st.code(f"Pre Configuration:  {pre_line}\nPost Configuration: {post_line}", language=None)
+        if not st.session_state.get("qkx_report_only"):
+            with ph_prepost:
+                if pre_line and post_line:
+                    st.subheader("Pre / Post configuration")
+                    st.code(f"Pre Configuration:  {pre_line}\nPost Configuration: {post_line}", language=None)
 
-        with ph_sow:
-            if scope_lines:
-                st.subheader("Scope of work summary")
-                st.code("\n".join(scope_lines_to_readable_text(scope_lines)), language=None)
-                with st.expander("Copy tab-separated version for Excel/Notepad"):
-                    st.text_area("Tab-separated (select all, copy, paste into Excel — lands in columns)",
-                                  "\n".join(scope_lines), height=150, key="sow_raw")
+            with ph_sow:
+                if scope_lines:
+                    st.subheader("Scope of work summary")
+                    st.code("\n".join(scope_lines_to_readable_text(scope_lines)), language=None)
+                    with st.expander("Copy tab-separated version for Excel/Notepad"):
+                        st.text_area("Tab-separated (select all, copy, paste into Excel — lands in columns)",
+                                      "\n".join(scope_lines), height=150, key="sow_raw")
 
-        with ph_siad:
-            if siad_rows:
-                st.subheader("SIAD port assignment")
-                st.dataframe(pd.DataFrame(siad_rows), use_container_width=True, hide_index=True)
+            with ph_siad:
+                if siad_rows:
+                    st.subheader("SIAD port assignment")
+                    st.dataframe(pd.DataFrame(siad_rows), use_container_width=True, hide_index=True)
 
-        with ph_summary:
-            st.subheader("Extraction summary")
-            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+            with ph_summary:
+                st.subheader("Extraction summary")
+                st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
 
-        with ph_outputs:
-            if outputs:
-                st.subheader("Generated output")
-                for name, text in outputs:
-                    unresolved = highlight_unresolved(text)
-                    with st.expander(f"{name}  ({str(len(unresolved)) + ' unresolved' if unresolved else 'fully resolved'})"):
-                        st.text_area("Preview", text, height=300, key=name)
-                        st.download_button("Download .txt", text, file_name=name, key=f"dl_{name}")
+            with ph_outputs:
+                if outputs:
+                    st.subheader("Generated output")
+                    for name, text in outputs:
+                        unresolved = highlight_unresolved(text)
+                        with st.expander(f"{name}  ({str(len(unresolved)) + ' unresolved' if unresolved else 'fully resolved'})"):
+                            st.text_area("Preview", text, height=300, key=name)
+                            st.download_button("Download .txt", text, file_name=name, key=f"dl_{name}")
 
-            if binary_outputs:
-                st.subheader("Excel outputs")
-                for name, data in binary_outputs:
-                    st.download_button(f"Download {name}", data, file_name=name, key=f"dl_bin_{name}")
+                if binary_outputs:
+                    st.subheader("Excel outputs")
+                    for name, data in binary_outputs:
+                        st.download_button(f"Download {name}", data, file_name=name, key=f"dl_bin_{name}")
 
-            if outputs or binary_outputs:
-                if len(outputs) + len(binary_outputs) > 1:
-                    zip_buf = io.BytesIO()
-                    with zipfile.ZipFile(zip_buf, "w") as zf:
-                        for name, text in outputs:
-                            zf.writestr(name, text)
-                        for name, data in binary_outputs:
-                            zf.writestr(name, data)
-                    st.download_button("Download all as .zip", zip_buf.getvalue(), file_name="generated_templates.zip")
+                if outputs or binary_outputs:
+                    if len(outputs) + len(binary_outputs) > 1:
+                        zip_buf = io.BytesIO()
+                        with zipfile.ZipFile(zip_buf, "w") as zf:
+                            for name, text in outputs:
+                                zf.writestr(name, text)
+                            for name, data in binary_outputs:
+                                zf.writestr(name, data)
+                        st.download_button("Download all as .zip", zip_buf.getvalue(), file_name="generated_templates.zip")
 
         if top_scope == "MCA":
             import mca_report_ui
