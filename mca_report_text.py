@@ -1,16 +1,19 @@
 def _line_from_result(item, choice_manual_extra=None):
-    """Builds the prose Completed/Pending line for one checked item, reusing whatever
-    detect() already found (lines/fill/fdd) — same values that feed the xlsm output."""
+    """Builds the prose Completed/Pending line(s) for one checked item, reusing whatever
+    detect() already found. Multi-instance items (Radio Swap, Moved Sectors, Retune, etc.)
+    render EVERY detected instance, not just the first — confirmed bug: a site with 5 separate
+    Radio Swap events was only showing 1."""
     result = item.get("result") or {}
     label = item["label"]
     if result.get("lines"):
-        # reuse the scope line's own wording, reformatted to end in a period
-        parts = [p.strip() for p in result["lines"][0].split("\t") if p.strip()]
-        rest = " ".join(p if p.endswith(":") else p for p in parts[1:])
-        return f"{parts[0]} {rest}.".replace("  ", " ")
+        out_lines = []
+        for raw_line in result["lines"]:
+            parts = [p.strip() for p in raw_line.split("\t") if p.strip()]
+            rest = " ".join(parts[1:])
+            out_lines.append(f"{parts[0]} {rest}.".replace("  ", " "))
+        return "\n".join(out_lines)
     if result.get("fdd"):
-        node, old_name, new_name = result["fdd"][0]
-        return f"FDD Renaming on: {node} From: {old_name} To: {new_name}."
+        return "\n".join(f"FDD Renaming on: {node} From: {old_name} To: {new_name}." for node, old_name, new_name in result["fdd"])
     fill = result.get("fill", {})
     bits = []
     if fill.get("nodes"):
@@ -20,7 +23,7 @@ def _line_from_result(item, choice_manual_extra=None):
     if fill.get("bands"):
         bits.append(fill["bands"])
     if choice_manual_extra:
-        bits.extend(choice_manual_extra)
+        bits.extend([b for b in choice_manual_extra if b])
     return f"{label} {' | '.join(bits)}.".strip()
 
 
@@ -74,7 +77,11 @@ def build_mca_report_text(mm_objs, checklist_results, choices, header_fields, st
         text = _line_from_result(item, choice.get("manual_extra"))
         if section == "pending":
             stakeholder = (stakeholder_by_key or {}).get(key, item.get("stakeholder", ""))
-            pending_lines.append(f"{text} ({stakeholder})" if stakeholder else text)
+            if stakeholder:
+                tagged = "\n".join(f"{ln} ({stakeholder})" for ln in text.split("\n"))
+                pending_lines.append(tagged)
+            else:
+                pending_lines.append(text)
         else:
             completed_lines.append(text)
 
