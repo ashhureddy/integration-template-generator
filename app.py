@@ -3096,11 +3096,14 @@ elif st.session_state.qkx_page == "input":
 
         with col_right:
             ph_checks_top = st.empty()
-            ph_prepost = st.container(border=True)
-            ph_sow = st.container(border=True)
-            ph_siad = st.container(border=True)
-            ph_summary = st.container(border=True)
-            ph_outputs = st.container(border=True)
+            if not report_only:
+                ph_prepost = st.container(border=True)
+                ph_sow = st.container(border=True)
+                ph_siad = st.container(border=True)
+                ph_summary = st.container(border=True)
+                ph_outputs = st.container(border=True)
+            else:
+                ph_prepost = ph_sow = ph_siad = ph_summary = ph_outputs = st.empty()
 
         if run:
             log_lines = []
