@@ -3199,6 +3199,7 @@ elif st.session_state.qkx_page == "input":
                 render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
             else:
                 ph_log.empty()
+                st.rerun()
         else:
             r = st.session_state.qkx_results
             top_scope, scope_lines = r["top_scope"], r["scope_lines"]
@@ -3207,7 +3208,10 @@ elif st.session_state.qkx_page == "input":
             outputs, binary_outputs = r["outputs"], r["binary_outputs"]
             mm_objs, controller_objs, ciq_wb = r["mm_objs"], r["controller_objs"], r["ciq_wb"]
             precheck_text = r["precheck_text"]
-            ph_log.code("\n".join(r["log_lines"]), language=None) if not report_only else ph_log.empty()
+            if not report_only:
+                ph_log.code("\n".join(r["log_lines"]), language=None)
+            else:
+                ph_log.empty()
             ph_checks_top.empty()
             if not st.session_state.get("qkx_report_only"):
                 render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
