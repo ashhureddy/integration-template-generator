@@ -3060,24 +3060,28 @@ elif st.session_state.qkx_page == "input":
         if st.button("← Back"):
             _qkx_go(back_target)
 
-        st.subheader(f"Inputs — {top_scope}")
-        with st.container(border=True):
-            cran_sub = None
-            if top_scope == "CRAN":
-                cran_sub = st.selectbox("CRAN scope", ["CRAN SA Rehome Trip 1", "CRAN SA Rehome Trip 2", "CRAN NSA Rehome"])
+        hide_inputs = st.session_state.get("qkx_report_only") and "qkx_results" in st.session_state
+        if not hide_inputs:
+            st.subheader(f"Inputs — {top_scope}")
+            with st.container(border=True):
+                cran_sub = None
+                if top_scope == "CRAN":
+                    cran_sub = st.selectbox("CRAN scope", ["CRAN SA Rehome Trip 1", "CRAN SA Rehome Trip 2", "CRAN NSA Rehome"])
 
-            ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"])
-            edp_file = st.file_uploader("EDP (.xlsx / .xls)", type=["xlsx", "xls"])
-            pre_file = None
-            if top_scope not in ("N2E", "NSB"):
-                pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
-            c1, c2 = st.columns(2)
-            with c1:
-                user_id = st.text_input("User ID", placeholder="e.g. pr970b")
-            with c2:
-                date_str = st.text_input("Execution date (mmddyyyy)", value=date.today().strftime("%m%d%Y"))
-            run = st.button("Generate Report \u2192" if st.session_state.get("qkx_report_only") else "Generate templates \u2192",
-                             type="primary", disabled=not (ciq_file and edp_file))
+                ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"])
+                edp_file = st.file_uploader("EDP (.xlsx / .xls)", type=["xlsx", "xls"])
+                pre_file = None
+                if top_scope not in ("N2E", "NSB"):
+                    pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
+                c1, c2 = st.columns(2)
+                with c1:
+                    user_id = st.text_input("User ID", placeholder="e.g. pr970b")
+                with c2:
+                    date_str = st.text_input("Execution date (mmddyyyy)", value=date.today().strftime("%m%d%Y"))
+                run = st.button("Generate Report \u2192" if st.session_state.get("qkx_report_only") else "Generate templates \u2192",
+                                 type="primary", disabled=not (ciq_file and edp_file))
+        else:
+            run = False
 
     if run or "qkx_results" in st.session_state:
         report_only = st.session_state.get("qkx_report_only")
