@@ -111,8 +111,36 @@ def build_xlsm_row_writes(checklist_results, choices, row_map):
         if not target_rows:
             continue
 
-        values = _result_to_column_values(key, item.get("result"), manual_extra)
+        per_node_values = choice.get("per_node_manual")
         cols = VALUE_COLUMNS[key]
+        if per_node_values:
+            nodes = list(per_node_values.keys())
+            if len(target_rows) > 1:
+                # Transport SFP: 3 real slots, one node per row. Its remaining value columns
+                # are fewer than the per-node manual fields (Node ID + ONE combined SFP-models
+                # column, but 2 manual fields: BBU End + SIAD End) — join extra values into the
+                # last available column rather than silently dropping them.
+                for i, row_num in enumerate(target_rows):
+                    if i < len(nodes):
+                        node = nodes[i]
+                        vals = [v for v in per_node_values[node] if v]
+                        rest_cols = cols[1:]
+                        if len(vals) > len(rest_cols) and rest_cols:
+                            vals = vals[:len(rest_cols) - 1] + [" & ".join(vals[len(rest_cols) - 1:])]
+                        row_writes.append((row_num, checked, [(cols[0], node)] + list(zip(rest_cols, vals))))
+                    else:
+                        row_writes.append((row_num, False, []))
+            else:
+                # GPS Installation: only 1 real row in the template — fill the first node's
+                # values, note any additional nodes since there's nowhere else to put them
+                # (confirmed acceptable: the plain-text report shows all of them individually).
+                first_node = nodes[0]
+                first_vals = [v for v in per_node_values[first_node] if v]
+                node_display = first_node if len(nodes) == 1 else f"{first_node} (+{len(nodes)-1} more \u2014 see report)"
+                row_writes.append((target_rows[0], checked, [(cols[0], node_display)] + list(zip(cols[1:], first_vals))))
+            continue
+
+        values = _result_to_column_values(key, item.get("result"), manual_extra)
         col_value_pairs = list(zip(cols, values))
 
         # multi-slot items: only the FIRST row slot gets checked+filled per single detected
