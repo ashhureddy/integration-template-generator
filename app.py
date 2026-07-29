@@ -3266,6 +3266,8 @@ elif st.session_state.qkx_page == "input":
                                 zf.writestr(name, data)
                         st.download_button("Download all as .zip", zip_buf.getvalue(), file_name="generated_templates.zip")
 
-        if top_scope == "MCA":
+        if top_scope == "MCA" and st.session_state.get("qkx_report_only"):
+            import importlib
             import mca_report_ui
+            importlib.reload(mca_report_ui)
             mca_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines)
