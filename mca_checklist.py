@@ -54,16 +54,16 @@ CHECKLIST = [
     {"key": "deleted_sector", "label": "Deleted Sector :", "section": "completed",
      "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Deleted Sector")} if _scope_lines_matching(ctx, "Deleted Sector") else None},
 
-    {"key": "retune", "label": "Retune on:", "section": "completed",
+    {"key": "retune", "label": "Retune on:", "section": "completed", "toggle": True, "stakeholder": "MIC",
      "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Retune on:")} if _scope_lines_matching(ctx, "Retune on:") else None},
 
-    {"key": "fdd_renaming", "label": "FDD Renaming on:", "section": "completed",
+    {"key": "fdd_renaming", "label": "FDD Renaming on:", "section": "completed", "toggle": True, "stakeholder": "MIC",
      "detect": lambda ctx: {"fdd": ctx["fdd_renames"]} if ctx["fdd_renames"] else None},
 
     {"key": "ngs_activation", "label": "NGS activation:", "section": "completed",
      "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "NGS Activation on")} if _scope_lines_matching(ctx, "NGS Activation on") else None},
 
-    {"key": "idl_connections", "label": "IDL connections", "section": "completed",
+    {"key": "idl_connections", "label": "IDL connections", "section": "completed", "toggle": True, "stakeholder": "MIC PM",
      "detect": lambda ctx: {"build_type": ctx.get("idl_build_type")} if ctx.get("idl_build_type") else None},
 
     # ---------------- Completed: universal toggle (Completed/Pending + stakeholder) ----------------
@@ -71,25 +71,28 @@ CHECKLIST = [
      "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "DSS Activation")} if _scope_lines_matching(ctx, "DSS Activation") else None},
 
     # ---------------- Completed: conditional trigger + auto-fill + manual completion ----------------
-    {"key": "gps_installation", "label": "GPS Installation:", "section": "completed",
+    {"key": "gps_installation", "label": "GPS Installation:", "section": "completed", "toggle": True, "stakeholder": "MIC PM",
      "detect": lambda ctx: {"fill": {"nodes": ctx["new_nodes"]}} if ctx["new_nodes"] else None,
-     "manual_fields": ["GPS Version"]},
+     "per_node_manual": ["GPS Version"]},
 
-    {"key": "lkf_installation", "label": "LKF Installation:", "section": "completed",
+    {"key": "lkf_installation", "label": "LKF Installation:", "section": "completed", "toggle": True, "stakeholder": "MIC",
+     # New node, board swap, and 6610 present are 3 INDEPENDENT triggers (confirmed) — not an
+     # AND requiring controller alongside new-node/board-swap. A prior version wrongly required
+     # the controller, which meant a genuinely new node with no controller never triggered LKF.
      "detect": lambda ctx: {"fill": {"nodes": (ctx["new_nodes"] + [n for n, _, _ in ctx["board_swaps"]]), "controller": ctx.get("controller_id")}}
-                if (ctx["new_nodes"] or ctx["board_swaps"]) and ctx.get("controller_id") else None},
+                if (ctx["new_nodes"] or ctx["board_swaps"] or ctx.get("controller_id")) else None},
 
-    {"key": "transport_sfp", "label": "Transport SFP Installation on", "section": "completed",
+    {"key": "transport_sfp", "label": "Transport SFP Installation on", "pending_label": "Compatible Transport SFP Installation on", "section": "completed", "toggle": True, "stakeholder": "MIC PM",
      "detect": lambda ctx: {"fill": {"nodes": ctx["new_nodes"]}} if ctx["new_nodes"] else None,
-     "manual_fields": ["SFP Model (BBU End)", "SFP Model (SIAD End)"]},
+     "per_node_manual": ["SFP Model (BBU End)", "SFP Model (SIAD End)"]},
 
-    {"key": "sau_connections", "label": "SAU Connections:", "section": "completed",
+    {"key": "sau_connections", "label": "SAU Connections:", "section": "completed", "toggle": True, "stakeholder": "MIC PM",
      "detect": lambda ctx: {"fill": {"controller": ctx.get("controller_id")}} if ctx.get("controller_id") else {}},
 
-    {"key": "alarm_scripting", "label": "External alarm Scripting on", "section": "completed",
+    {"key": "alarm_scripting", "label": "External alarm Scripting on", "section": "completed", "toggle": True, "stakeholder": "MIC",
      "detect": lambda ctx: {"fill": {"controller": ctx.get("controller_id")}} if (ctx.get("controller_id") and ctx.get("controller_in_edp")) else None},
 
-    {"key": "alarm_testing", "label": "External alarm testing:", "section": "completed",
+    {"key": "alarm_testing", "label": "External alarm testing:", "section": "completed", "toggle": True, "stakeholder": "MIC PM",
      "detect": lambda ctx: {"fill": {"controller": ctx.get("controller_id")}} if (ctx.get("controller_id") and ctx.get("controller_in_edp")) else None},
 
     # ---------------- Completed: field-test sub-section (automatic pair) ----------------
@@ -120,11 +123,11 @@ CHECKLIST = [
      "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Radio Swap on")} if _scope_lines_matching(ctx, "Radio Swap on") else None},
 
     # ---------------- Fully manual (no auto-detection at all) ----------------
-    {"key": "sup_connections", "label": "SUP Connections:", "section": "completed", "manual": True},
-    {"key": "xmu_installation", "label": "XMU Installation:", "section": "completed", "manual": True},
-    {"key": "sfp_installation", "label": "SFP Installation on", "section": "completed", "manual": True},
-    {"key": "ret_configuration", "label": "RET configuration", "section": "completed", "manual": True},
-    {"key": "script_6673", "label": "6673 Script load", "section": "completed", "manual": True},
+    {"key": "sup_connections", "label": "SUP Connections:", "section": "completed", "toggle": True, "stakeholder": "MIC PM", "manual": True},
+    {"key": "xmu_installation", "label": "XMU Installation:", "section": "completed", "toggle": True, "stakeholder": "MIC PM", "manual": True},
+    {"key": "sfp_installation", "label": "SFP Installation on", "section": "completed", "toggle": True, "stakeholder": "MIC PM", "manual": True},
+    {"key": "ret_configuration", "label": "RET configuration", "section": "completed", "toggle": True, "stakeholder": "Tower Crew", "manual": True},
+    {"key": "script_6673", "label": "6673 Script load", "section": "completed", "toggle": True, "stakeholder": "MIC PM", "manual": True},
     {"key": "installation_generic", "label": "Installation", "section": "completed", "manual": True},
 
     # ---------------- Pending-only items (no Completed counterpart, fixed stakeholder tags) ----------------
