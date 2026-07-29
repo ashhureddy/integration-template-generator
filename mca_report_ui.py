@@ -15,7 +15,9 @@ import mca_report_text
 from mca_row_map import ROW_MAP
 from mca_xlsm_fill import fill_legacy_mca
 
-TEMPLATE_PATH = "templates/Static/Legacy_MCA_Macro_Template_v6_1.xlsm"
+from pathlib import Path
+
+TEMPLATE_PATH = Path(__file__).parent / "templates" / "Static" / "Legacy_MCA_Macro_Template_v6_1.xlsm"
 STAKEHOLDER_OPTIONS = ["MIC", "MIC PM", "AT&T", "Tower Crew"]
 
 
@@ -74,6 +76,7 @@ def _item_card(item):
         section = item["section"]
         stakeholder = item.get("stakeholder", "").split("|")[0] if item.get("stakeholder") else "MIC PM"
         manual_extra = []
+        per_node_values = {}
 
         if checked:
             if item.get("toggle"):
@@ -98,13 +101,25 @@ def _item_card(item):
                     stakeholder = st.selectbox("Stakeholder", STAKEHOLDER_OPTIONS,
                                                 index=STAKEHOLDER_OPTIONS.index(stakeholder) if stakeholder in STAKEHOLDER_OPTIONS else 1,
                                                 key=f"stake_{key}", label_visibility="collapsed")
-            if item.get("manual_fields"):
+
+            if item.get("per_node_manual"):
+                nodes = (item.get("result") or {}).get("fill", {}).get("nodes", [])
+                field_names = item["per_node_manual"]
+                for node in nodes:
+                    st.caption(f"**{node}**")
+                    fcols = st.columns(len(field_names))
+                    vals = []
+                    for c, field_name in zip(fcols, field_names):
+                        with c:
+                            vals.append(st.text_input(field_name, key=f"manualfield_{key}_{node}_{field_name}", label_visibility="collapsed", placeholder=field_name))
+                    per_node_values[node] = vals
+            elif item.get("manual_fields"):
                 fcols = st.columns(len(item["manual_fields"]))
                 for c, field_name in zip(fcols, item["manual_fields"]):
                     with c:
                         manual_extra.append(st.text_input(field_name, key=f"manualfield_{key}_{field_name}"))
 
-    return {"checked": checked, "section": section, "manual_extra": manual_extra}, stakeholder
+    return {"checked": checked, "section": section, "manual_extra": manual_extra, "per_node_manual": per_node_values}, stakeholder
 
 
 def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines):
