@@ -1,10 +1,24 @@
-def _line_from_result(item, choice_manual_extra=None):
+def _line_from_result(item, choice=None):
     """Builds the prose Completed/Pending line(s) for one checked item, reusing whatever
     detect() already found. Multi-instance items (Radio Swap, Moved Sectors, Retune, etc.)
     render EVERY detected instance, not just the first — confirmed bug: a site with 5 separate
-    Radio Swap events was only showing 1."""
+    Radio Swap events was only showing 1. Items with per_node_manual (GPS Installation,
+    Transport SFP) render ONE LINE PER NODE, since different nodes can have different GPS/SFP
+    models — confirmed real gap: these were previously combined into a single shared line."""
+    choice = choice or {}
+    choice_manual_extra = choice.get("manual_extra")
     result = item.get("result") or {}
     label = item["label"]
+
+    per_node_values = choice.get("per_node_manual")
+    if per_node_values:
+        out_lines = []
+        for node, vals in per_node_values.items():
+            filled_vals = [v for v in vals if v]
+            suffix = f" | {' | '.join(filled_vals)}" if filled_vals else ""
+            out_lines.append(f"{label} {node}{suffix}.")
+        return "\n".join(out_lines) if out_lines else f"{label}."
+
     if result.get("lines"):
         out_lines = []
         for raw_line in result["lines"]:
@@ -74,7 +88,10 @@ def build_mca_report_text(mm_objs, checklist_results, choices, header_fields, st
         if not checked:
             continue
         section = choice.get("section", item["section"])
-        text = _line_from_result(item, choice.get("manual_extra"))
+        effective_item = item
+        if section == "pending" and item.get("pending_label"):
+            effective_item = {**item, "label": item["pending_label"]}
+        text = _line_from_result(effective_item, choice)
         if section == "pending":
             stakeholder = (stakeholder_by_key or {}).get(key, item.get("stakeholder", ""))
             if stakeholder:
