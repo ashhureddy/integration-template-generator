@@ -280,5 +280,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 st.download_button("Download filled checklist (.xlsm)", f.read(),
                                     file_name=f"{node_tag}_Legacy_MCA_Filled.xlsm", key="rpt_dl_xlsm")
         except FileNotFoundError:
-            st.warning(f"Template not found at {TEMPLATE_PATH} \u2014 upload Legacy_MCA_Macro_Template_v6_1.xlsm "
-                      "to templates/Static/ in the repo to enable the .xlsm output.")
+            static_dir = TEMPLATE_PATH.parent
+            if static_dir.exists():
+                actual_files = sorted(p.name for p in static_dir.iterdir())
+                st.warning(f"Template not found at {TEMPLATE_PATH}. Files actually present in {static_dir}: {actual_files}")
+            else:
+                st.warning(f"Template not found at {TEMPLATE_PATH} \u2014 and the folder {static_dir} doesn't exist at all.")
