@@ -273,16 +273,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if idl_build_type:
             row_writes.append((19, True, [(3, idl_build_type)]))
 
-        try:
-            output_path = "/mnt/user-data/outputs/Legacy_MCA_Filled.xlsm"
-            fill_legacy_mca(TEMPLATE_PATH, output_path, {"row_writes": row_writes})
-            with open(output_path, "rb") as f:
-                st.download_button("Download filled checklist (.xlsm)", f.read(),
-                                    file_name=f"{node_tag}_Legacy_MCA_Filled.xlsm", key="rpt_dl_xlsm")
-        except FileNotFoundError:
+        if not TEMPLATE_PATH.exists():
             static_dir = TEMPLATE_PATH.parent
             if static_dir.exists():
                 actual_files = sorted(p.name for p in static_dir.iterdir())
                 st.warning(f"Template not found at {TEMPLATE_PATH}. Files actually present in {static_dir}: {actual_files}")
             else:
                 st.warning(f"Template not found at {TEMPLATE_PATH} \u2014 and the folder {static_dir} doesn't exist at all.")
+        else:
+            xlsm_bytes = fill_legacy_mca(TEMPLATE_PATH, {"row_writes": row_writes})
+            st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
+                                file_name=f"{node_tag}_Legacy_MCA_Filled.xlsm", key="rpt_dl_xlsm")
