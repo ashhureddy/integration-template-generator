@@ -168,6 +168,46 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     testing_section, testing_note = mcl.external_alarm_testing_placement(controller_checks_data) \
         if controller_checks_data else (None, None)
 
+    # ---- GPS: Installation (new nodes, grouped by Post-checks type), Upgrade (existing
+    # nodes, type changed), and the two site-health checks — all fully automatic now that
+    # GPS Version comes from Post-checks, no manual entry needed. Computed here (not later)
+    # since none of it needs interactive widgets, and Status needs to see it. ----
+    gps_extra_completed, gps_extra_pending = [], []
+    if postcheck_text:
+        post_gps = mcl.extract_gps_status(postcheck_text)
+        pre_gps = mcl.extract_gps_status(precheck_text) if precheck_text else {}
+        existing_nodes = [row.get("Node to be built as") for row in mm_objs
+                           if row.get("Node to be built as") not in new_nodes]
+        gps_dedicated, gps_overflow = mcl.gps_installation_lines(new_nodes, post_gps)
+        if gps_dedicated:
+            gps_extra_completed.append(gps_dedicated)
+        gps_extra_completed += gps_overflow
+        gps_extra_completed += mcl.gps_upgrade_lines(existing_nodes, pre_gps, post_gps)
+
+        gps_unconfirmed = mcl.gps_unconfirmed_type_check(mm_objs, post_gps)
+        if gps_unconfirmed:
+            gps_extra_pending.append(gps_unconfirmed)
+        post_sync = mcl.extract_sync_status_2(postcheck_text)
+        gps_sync_line = mcl.gps_sync_disabled_check(mm_objs, post_sync)
+        if gps_sync_line:
+            gps_extra_pending.append(gps_sync_line)
+
+    # ---- EDP Publish fallback: 6610 present in CIQ but NOT published in EDP -> this
+    # replaces the old generic message entirely; 6610 Controller Integration does NOT
+    # appear in Completed at all in this case. ----
+    edp_publish_text = ""
+    if controller_id and not controller_in_edp:
+        edp_publish_text = mcl.edp_publish_line(
+            mm_objs[0].get("Node to be built as") if mm_objs else "", controller_id, "")
+
+    # ---- Current Configuration: only populated when Post-checks actually differs from
+    # the CIQ target (equipment still missing) — confirmed rule, built this pass. ----
+    current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs, postcheck_text) if postcheck_text else ""
+
+    # ---- FDD Renaming, corrected: band-label grouping instead of raw ungrouped cell
+    # tuples — confirmed gap, built this pass. ----
+    fdd_lines_fixed = mcl.fdd_renaming_lines(ciq_wb)
+
     ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp)
     results = mca_checklist.evaluate_checklist(ctx)
 
@@ -189,6 +229,20 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             if item["key"] == "alarm_testing":
                 item["section"] = "completed" if testing_section == "Completed" else "pending"
                 item["checked_by_default"] = True
+    if edp_publish_text:
+        # Suppress the checklist's own 6610 Controller Integration item entirely when the
+        # EDP Publish fallback applies — confirmed: it goes to Pending via EDP Publish
+        # instead, not shown in Completed at all.
+        for item in results:
+            if item["key"] == "controller_integration":
+                item["checked_by_default"] = False
+    if fdd_lines_fixed:
+        # Suppress the checklist's own FDD Renaming item — it uses report_detect's
+        # ungrouped per-cell tuples; the corrected, band-label-grouped version is
+        # injected separately via extra_completed_text instead.
+        for item in results:
+            if item["key"] == "fdd_renaming":
+                item["checked_by_default"] = False
 
     # ---- Warnings tab collection: every verification function feeds here. Confirmed
     # design: warning-only for most items (never touches report placement), except
@@ -203,6 +257,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if edp_index:
             warnings += mcl.verify_port_conversion_against_postcheck(
                 ciq_wb, mm_objs, precheck_text, postcheck_text, edp_index)
+        if gps_unconfirmed:
+            warnings.append({"type": "gps_unconfirmed_type", "text": gps_unconfirmed})
 
     site_ids = "/".join(r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as"))
     fa_code = ""
@@ -211,7 +267,20 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             if app.is_populated(row.get("FA Code")):
                 fa_code = row.get("FA Code")
                 break
-    default_status = "STF" if any(r["section"] == "pending" and r["checked_by_default"] for r in results) else "ATP"
+
+    # ---- Status: ATP only if there are truly no Pending items ANYWHERE — confirmed bug,
+    # this used to only look at the base checklist `results`, missing every new Pending
+    # source added this session (GPS, Radio Swap, EDP Publish, the locked-alarm-ports Notes
+    # case). LKF/Transport SFP choices are made via widgets further down and can't be known
+    # yet at this point in the render — same limitation Streamlit's rerun model imposes on
+    # any interactive choice made after this line; those will be reflected once the engineer
+    # interacts with those widgets and the script reruns. ----
+    has_pending = (
+        any(r["section"] == "pending" and r["checked_by_default"] for r in results)
+        or bool(gps_extra_pending) or bool(radio_swap_pending_lines)
+        or bool(edp_publish_text) or bool(testing_note)
+    )
+    default_status = "STF" if has_pending else "ATP"
 
     with st.container(border=True):
         st.markdown("**Subject**")
@@ -235,7 +304,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         st.markdown(f"6610 Controller : **{controller_id or '(none detected)'}**")
         c1, c2 = st.columns(2)
         with c1:
-            current_config = st.text_input("Current Configuration (if applicable)", key="rpt_current_config")
+            current_config = st.text_input(
+                "Current Configuration (auto — only shown when Post-checks differs from CIQ target)",
+                value=current_config_auto, key="rpt_current_config")
             wll_node = st.text_input("WLL node (if applicable)", key="rpt_wll")
         with c2:
             software_version = st.text_input("Software version", key="rpt_sw")
@@ -248,9 +319,24 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             c1, c2 = st.columns(2)
             with c1:
                 idle = st.text_area("IDLe cable details (manual)", key="rpt_idle", height=60)
-                switch = st.text_area("Switch details (manual)", key="rpt_switch", height=60)
             with c2:
                 idly = st.text_area("IDLy cable details (manual)", key="rpt_idly", height=60)
+
+            sidehaul_rows = mcl.sidehaul_display_rows(ciq_wb)
+            if sidehaul_rows:
+                st.caption("Switch / Slot-Port — auto-filled from Sidehaul Info, Cable part number is manual:")
+                cable_pns = {}
+                for i, srow in enumerate(sidehaul_rows):
+                    sc1, sc2, sc3, sc4, sc5 = st.columns([1, 1, 1, 1, 1])
+                    with sc1: st.caption(f"**{srow['switch_type']}**")
+                    with sc2: st.caption(srow["switch_id"])
+                    with sc3: st.caption(srow["slot_port"])
+                    with sc4: cable_pns[i] = st.text_input("Cable P/N", key=f"cable_pn_{i}", label_visibility="collapsed", placeholder="Cable part number")
+                    with sc5: st.caption(srow["node_id"])
+                switch = "\n".join(mcl.format_sidehaul_lines(sidehaul_rows, cable_pns))
+                slot_port = ""  # folded into the switch lines above — same source, one combined display
+            else:
+                switch = st.text_area("Switch details (manual)", key="rpt_switch", height=60)
                 slot_port = st.text_area("Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
 
     # ---- LKF Installation: user input per node, Completed or Pending (confirmed
@@ -273,30 +359,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # marked Completed into Pending instead, no warning, per confirmed decision.
         lkf_lines_by_section["Pending"] = (lkf_lines_by_section.get("Pending", "") + "\n"
                                             + lkf_lines_by_section.pop("Completed")).strip()
-
-    # ---- GPS: Installation (new nodes, grouped by Post-checks type), Upgrade (existing
-    # nodes, type changed), and the two site-health checks — all fully automatic now that
-    # GPS Version comes from Post-checks, no manual entry needed. ----
-    gps_extra_completed, gps_extra_pending = [], []
-    if postcheck_text:
-        post_gps = mcl.extract_gps_status(postcheck_text)
-        pre_gps = mcl.extract_gps_status(precheck_text) if precheck_text else {}
-        existing_nodes = [row.get("Node to be built as") for row in mm_objs
-                           if row.get("Node to be built as") not in new_nodes]
-        gps_dedicated, gps_overflow = mcl.gps_installation_lines(new_nodes, post_gps)
-        if gps_dedicated:
-            gps_extra_completed.append(gps_dedicated)
-        gps_extra_completed += gps_overflow
-        gps_extra_completed += mcl.gps_upgrade_lines(existing_nodes, pre_gps, post_gps)
-
-        gps_unconfirmed = mcl.gps_unconfirmed_type_check(mm_objs, post_gps)
-        if gps_unconfirmed:
-            gps_extra_pending.append(gps_unconfirmed)
-            warnings.append({"type": "gps_unconfirmed_type", "text": gps_unconfirmed})
-        post_sync = mcl.extract_sync_status_2(postcheck_text)
-        gps_sync_line = mcl.gps_sync_disabled_check(mm_objs, post_sync)
-        if gps_sync_line:
-            gps_extra_pending.append(gps_sync_line)
 
     # ---- Transport SFP: trigger nodes = new nodes OR Port-Conversion-triggered nodes.
     # BBU/SIAD End models are MANUAL (confirmed), grouped by shared entered model. ----
@@ -340,11 +402,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     extra_completed_text = "\n".join(
         gps_extra_completed + transport_sfp_lines + radio_swap_completed_lines
-        + [r["text"] for r in port_conv_swap_completed]
+        + [r["text"] for r in port_conv_swap_completed] + fdd_lines_fixed
         + ([lkf_lines_by_section["Completed"]] if lkf_lines_by_section.get("Completed") else [])
     )
     extra_pending_text = "\n".join(
         gps_extra_pending + sfp_pending_extra + radio_swap_pending_lines
+        + ([edp_publish_text] if edp_publish_text else [])
         + ([lkf_lines_by_section["Pending"]] if lkf_lines_by_section.get("Pending") else [])
     )
     if testing_note:
@@ -371,9 +434,62 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                                            value=extra_pending_text, key="rpt_add_pending", height=100)
         choices["additional_pending"] = {"text": additional_pending}
 
+    locked_ports_exist = bool(controller_checks_data) and any(
+        p["admin"] == "LOCKED" and p["slogan"] for p in controller_checks_data.get("alarm_ports", []))
+
+    bucket_pre_existing, bucket_pending = [], []
+    if locked_ports_exist:
+        with st.container(border=True):
+            st.markdown("**Locked alarm ports** \u2014 classify each locked port (per the confirmed "
+                        "6610 Alarm Cutover reporting standard). Leave blank whichever don't apply.")
+            b1 = st.text_input("1. Pre-existing locked \u2014 port numbers", key="lp_b1", placeholder="e.g. 1, 5, 25")
+            b2 = st.text_input("2. Pre-existing active alarm \u2014 port numbers", key="lp_b2", placeholder="e.g. 3, 6, 20")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                b3 = st.text_input("3. Pre-existing loops/bridge clips/no equipment connections \u2014 port numbers", key="lp_b3")
+            with c2:
+                b3_note = st.text_input("Note (optional)", key="lp_b3_note", label_visibility="collapsed", placeholder="Note (optional)")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                b4 = st.text_input("4. Post-cutover, FE couldn't clear \u2014 port numbers", key="lp_b4")
+            with c2:
+                b4_owner = st.selectbox("Owner", ["Tower Crew", "AT&T"], key="lp_b4_owner", label_visibility="collapsed")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                b5 = st.text_input("5. Other (free entry)", key="lp_b5")
+            with c2:
+                b5_dest = st.selectbox("Goes to", ["Pre-Existing Issues", "Pending"], key="lp_b5_dest", label_visibility="collapsed")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                b6 = st.text_input("6. Other (free entry)", key="lp_b6")
+            with c2:
+                b6_dest = st.selectbox("Goes to", ["Pre-Existing Issues", "Pending"], key="lp_b6_dest", label_visibility="collapsed")
+
+            t1 = mcl.locked_port_bucket_1(b1)
+            t2 = mcl.locked_port_bucket_2(b2)
+            t3 = mcl.locked_port_bucket_3(b3, b3_note)
+            t4 = mcl.locked_port_bucket_4(b4, b4_owner)
+            for t in (t1, t2, t3):
+                if t:
+                    bucket_pre_existing.append(t)
+            if t4:
+                bucket_pending.append(t4)
+            if b5:
+                (bucket_pre_existing if b5_dest == "Pre-Existing Issues" else bucket_pending).append(b5)
+            if b6:
+                (bucket_pre_existing if b6_dest == "Pre-Existing Issues" else bucket_pending).append(b6)
+
+    if bucket_pending:
+        # Pending's text_area already rendered above this point in the page — can't inject
+        # into its initial value, so append onto the already-collected choices dict instead
+        # (dicts are mutable; build_mca_report_text reads this at button-click time, later).
+        choices["additional_pending"]["text"] = (
+            (choices["additional_pending"]["text"] or "") + "\n" + "\n".join(bucket_pending)).strip()
+
     with st.expander("Pre-Existing Issues"):
+        pre_existing_default = "\n".join(sfp_pre_existing_extra + bucket_pre_existing)
         pre_existing_text = st.text_area("Enter any Pre-Existing Issues that needs to be reported to Market",
-                                          value="\n".join(sfp_pre_existing_extra), key="rpt_preexisting", height=70)
+                                          value=pre_existing_default, key="rpt_preexisting", height=70)
         choices["pre_existing_issues_text"] = pre_existing_text
 
     with st.expander("Notes"):
