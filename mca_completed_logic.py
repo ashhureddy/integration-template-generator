@@ -687,14 +687,19 @@ def controller_integration_cascade(six610_present_and_edp_published, controller_
 # session), per-node Completed/Pending choice, merged by chosen status.
 # ============================================================
 
-def lkf_trigger_nodes(new_nodes, board_swap_nodes, controller_id, precheck_text, mm_objs):
-    """4th trigger (new this session): existing single-tech node (Pre-checks shows only
-    LTE or only 5G) whose CIQ target now shows BOTH eNBId and gNBId (MMBB/TMBB) -
-    works either direction."""
+# ============================================================
+# SECTION 10 - LKF INSTALLATION: 4 independent OR'd triggers (3 pre-existing + 1 new this
+# session). Confirmed: the Node and the Controller are genuinely independent installation
+# points in real site work (one can be Completed while the other is still Pending) — so
+# they get tracked and chosen separately, then combined intelligently per section.
+# ============================================================
+
+def lkf_node_triggers(new_nodes, board_swap_nodes, precheck_text, mm_objs):
+    """3 of the 4 original triggers (new node / board swap / single-tech node gaining a
+    second tech) — the node-level ones. The 6610-controller-present trigger is now tracked
+    SEPARATELY via lkf_controller_triggered(), not folded into every node at the site."""
     triggered = set(new_nodes) | {n for n, _p, _q in board_swap_nodes} if board_swap_nodes and \
         isinstance(board_swap_nodes[0], tuple) else set(new_nodes)
-    if controller_id:
-        triggered |= {row.get("Node to be built as") for row in mm_objs}
 
     pre_pairs, _ = qx.extract_precheck_sectors(precheck_text)
     pre_cells_by_node = {}
@@ -718,19 +723,54 @@ def lkf_trigger_nodes(new_nodes, board_swap_nodes, controller_id, precheck_text,
     return sorted(n for n in triggered if n)
 
 
-def lkf_lines_by_choice(node_status_choices, controller_id):
-    """node_status_choices: {node: 'Completed'|'Pending'} - the engineer's per-node dropdown
-    picks. Merges nodes sharing the same choice into one line each. Pending gets the
-    confirmed (MIC) stakeholder tag, matching the original template row (125) — Completed
-    has no tag, matching row 62."""
+def lkf_controller_triggered(controller_id):
+    """4th trigger, now tracked independently from any specific node — a 6610 controller
+    being present at the site needs its own LKF installation, whether or not any node also
+    needs one."""
+    return bool(controller_id)
+
+
+def lkf_trigger_nodes(new_nodes, board_swap_nodes, controller_id, precheck_text, mm_objs):
+    """Kept for backward compatibility with anything still calling the old combined
+    signature — now just the union of the node triggers and (if a controller is present)
+    every node, matching the old behavior exactly. Prefer lkf_node_triggers +
+    lkf_controller_triggered for new code, which track them independently."""
+    nodes = set(lkf_node_triggers(new_nodes, board_swap_nodes, precheck_text, mm_objs))
+    if controller_id:
+        nodes |= {row.get("Node to be built as") for row in mm_objs}
+    return sorted(n for n in nodes if n)
+
+
+def lkf_lines_by_choice(node_choices, controller_choice, controller_id):
+    """node_choices: {node: 'Completed'|'Pending'}. controller_choice: 'Completed'|
+    'Pending'|None (None = controller not triggered or not yet chosen).
+    Confirmed: Node and Controller are independent — combined onto one line only when they
+    land in the SAME section; otherwise each gets its own line in its own section. Pending
+    gets the confirmed (MIC) tag either way."""
     by_choice = {"Completed": [], "Pending": []}
-    for node, choice in node_status_choices.items():
+    for node, choice in node_choices.items():
         by_choice[choice].append(node)
+
     out = {}
     for choice, nodes in by_choice.items():
-        if nodes:
-            line = f"LKF Installation: {'|'.join(nodes)} | {controller_id or ''}"
-            out[choice] = f"{line} (MIC)" if choice == "Pending" else line
+        node_part = "|".join(nodes)
+        controller_here = controller_id if controller_choice == choice else ""
+        if not node_part and not controller_here:
+            continue
+        if node_part and controller_here:
+            line = f"LKF Installation: {node_part} | {controller_here}"
+        elif node_part:
+            line = f"LKF Installation: {node_part}"
+        else:
+            line = f"LKF Installation: {controller_here}"
+        out[choice] = f"{line} (MIC)" if choice == "Pending" else line
+
+    # Controller landed in a section with no nodes sharing that choice, and no line was
+    # built for it above (e.g. controller=Pending but zero nodes chose Pending at all) —
+    # cover that case explicitly.
+    if controller_choice and controller_choice not in out:
+        line = f"LKF Installation: {controller_id}"
+        out[controller_choice] = f"{line} (MIC)" if controller_choice == "Pending" else line
     return out
 
 
