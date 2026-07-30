@@ -63,64 +63,19 @@ def _detected_preview(item):
     return ", ".join(bits) if bits else None
 
 
-def _item_card(item):
-    """One item, rendered as a compact bordered card: checkbox + live detected preview always
-    visible, a manual-entry box available whenever checked (whether auto-detected or not), and
-    a stakeholder selector whenever the item sits in Pending."""
+def _simple_item_row(item):
+    """Simplified per your instruction: just a checkbox (checked if QUICKIX detected it,
+    unchecked otherwise) with the live detected preview underneath. No dropdowns, no
+    stakeholder pickers, no per-item manual fields — manual entry is one shared box under
+    Completed/Pending instead. Section placement uses whatever the item's own detect()
+    already computed; unchecking simply excludes the item from the report entirely."""
     key = item["key"]
-    with st.container(border=True):
-        checked = st.checkbox(item["label"], value=item["checked_by_default"], key=f"chk_{key}")
-        preview = _detected_preview(item)
-        if preview:
-            st.caption(f"\u2713 Detected: {preview}")
-
-        section = item["section"]
-        stakeholder = item.get("stakeholder", "").split("|")[0] if item.get("stakeholder") else "MIC PM"
-        manual_extra = []
-        per_node_values = {}
-
-        if checked:
-            if item.get("toggle"):
-                section = st.radio("Section", ["completed", "pending"], key=f"sec_{key}", horizontal=True)
-
-            has_detected_value = bool(item.get("result"))
-
-            class _NullCtx:
-                def __enter__(self): return self
-                def __exit__(self, *a): return False
-
-            if not has_detected_value:
-                cols = st.columns([3, 1]) if section == "pending" else [_NullCtx(), _NullCtx()]
-                with cols[0]:
-                    manual_val = st.text_input("Manual entry / override (leave blank to use detected value)", key=f"manual_{key}", label_visibility="collapsed", placeholder="Manual entry \u2014 no auto-detected value")
-                    if manual_val:
-                        manual_extra.append(manual_val)
-            else:
-                cols = st.columns([3, 1]) if section == "pending" else [_NullCtx(), _NullCtx()]
-            if section == "pending":
-                with cols[1]:
-                    stakeholder = st.selectbox("Stakeholder", STAKEHOLDER_OPTIONS,
-                                                index=STAKEHOLDER_OPTIONS.index(stakeholder) if stakeholder in STAKEHOLDER_OPTIONS else 1,
-                                                key=f"stake_{key}", label_visibility="collapsed")
-
-            if item.get("per_node_manual"):
-                nodes = (item.get("result") or {}).get("fill", {}).get("nodes", [])
-                field_names = item["per_node_manual"]
-                for node in nodes:
-                    st.caption(f"**{node}**")
-                    fcols = st.columns(len(field_names))
-                    vals = []
-                    for c, field_name in zip(fcols, field_names):
-                        with c:
-                            vals.append(st.text_input(field_name, key=f"manualfield_{key}_{node}_{field_name}", label_visibility="collapsed", placeholder=field_name))
-                    per_node_values[node] = vals
-            elif item.get("manual_fields"):
-                fcols = st.columns(len(item["manual_fields"]))
-                for c, field_name in zip(fcols, item["manual_fields"]):
-                    with c:
-                        manual_extra.append(st.text_input(field_name, key=f"manualfield_{key}_{field_name}"))
-
-    return {"checked": checked, "section": section, "manual_extra": manual_extra, "per_node_manual": per_node_values}, stakeholder
+    checked = st.checkbox(item["label"], value=item["checked_by_default"], key=f"chk_{key}")
+    preview = _detected_preview(item)
+    if preview:
+        st.caption(f"Detected: {preview}")
+    stakeholder = item.get("stakeholder", "").split("|")[0] if item.get("stakeholder") else "MIC PM"
+    return {"checked": checked, "section": item["section"], "manual_extra": [], "per_node_manual": {}}, stakeholder
 
 
 def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines,
@@ -243,8 +198,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 idly = st.text_area("IDLy cable details (manual)", key="rpt_idly", height=60)
                 slot_port = st.text_area("Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
 
-    st.markdown("### Completed / Pending checklist")
-    st.caption("Auto-detected items are pre-checked, with the detected value shown right below. Uncheck anything that doesn't apply; check anything extra that does, and use the manual-entry box to override or supply a value.")
+    st.markdown("### Report preview")
+    report_placeholder = st.empty()
+
+    st.markdown("### Which of these apply?")
+    st.caption("Checked = included in the report above. Uncheck anything that doesn't apply to this site; nothing else to fill in per item — use the manual boxes below for anything not auto-detected.")
 
     choices, stakeholders = {}, {}
     completed_items = [i for i in results if i["section"] == "completed"]
@@ -254,10 +212,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         cols = st.columns(2)
         for i, item in enumerate(completed_items):
             with cols[i % 2]:
-                choice, stakeholder = _item_card(item)
+                choice, stakeholder = _simple_item_row(item)
                 choices[item["key"]] = choice
-                if choice["section"] == "pending":
-                    stakeholders[item["key"]] = stakeholder
         additional_completed = st.text_area("Enter any additional completed information that needs to be added in report", key="rpt_add_completed", height=70)
         choices["additional_completed"] = {"text": additional_completed}
 
@@ -265,7 +221,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         cols = st.columns(2)
         for i, item in enumerate(pending_items):
             with cols[i % 2]:
-                choice, stakeholder = _item_card(item)
+                choice, stakeholder = _simple_item_row(item)
                 choices[item["key"]] = choice
                 stakeholders[item["key"]] = stakeholder
         additional_pending = st.text_area("Enter any additional pending information that needs to be reported to Market", key="rpt_add_pending", height=70)
@@ -314,23 +270,23 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         notes_generic = st.text_area("Enter Notes that need to be reported or addressed to Market", key="rpt_notes_generic", height=70)
         choices["notes_generic_text"] = notes_generic
 
+    header_fields = {
+        "mic": "MIC", "market": market, "status": status, "site_name": site_name,
+        "fa_code": fa_code, "site_ids": site_ids, "sow": sow, "iwm_details": iwm_details,
+        "pre_configuration": pre_line, "current_configuration": current_config,
+        "post_configuration": post_line, "wll_node": wll_node, "controller_id": controller_id,
+        "software_version": software_version, "gs_version": gs_version,
+        "idl_build_type": idl_build_type, "idle": idle, "idly": idly, "switch": switch, "slot_port": slot_port,
+    }
+    report_text = mca_report_text.build_mca_report_text(mm_objs, results, choices, header_fields, stakeholder_by_key=stakeholders)
+    report_placeholder.text_area("Report preview (live — updates as you check/uncheck items below)",
+                                  report_text, height=400, key="rpt_preview_live")
+
     st.markdown("---")
-    if st.button("Generate Integration Report \u2192", type="primary", key="rpt_generate_mca"):
-        header_fields = {
-            "mic": "MIC", "market": market, "status": status, "site_name": site_name,
-            "fa_code": fa_code, "site_ids": site_ids, "sow": sow, "iwm_details": iwm_details,
-            "pre_configuration": pre_line, "current_configuration": current_config,
-            "post_configuration": post_line, "wll_node": wll_node, "controller_id": controller_id,
-            "software_version": software_version, "gs_version": gs_version,
-            "idl_build_type": idl_build_type, "idle": idle, "idly": idly, "switch": switch, "slot_port": slot_port,
-        }
-        report_text = mca_report_text.build_mca_report_text(mm_objs, results, choices, header_fields, stakeholder_by_key=stakeholders)
-        st.success("Report generated.")
-        st.text_area("Report preview", report_text, height=400, key="rpt_preview")
+    node_tag = mm_objs[0].get("Node to be built as", "site") if mm_objs else "site"
+    st.download_button("Download report (.txt)", report_text, file_name=f"{node_tag}_Integration_Report.txt", key="rpt_dl_txt")
 
-        node_tag = mm_objs[0].get("Node to be built as", "site") if mm_objs else "site"
-        st.download_button("Download report (.txt)", report_text, file_name=f"{node_tag}_Integration_Report.txt", key="rpt_dl_txt")
-
+    if st.button("Generate filled checklist (.xlsm) \u2192", key="rpt_generate_mca"):
         row_writes = mca_glue.build_xlsm_row_writes(results, choices, ROW_MAP)
         row_writes.append((3, True, [(2, "MIC"), (3, market), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, sow)]))
         row_writes.append((6, True, [(3, iwm_details)]))
