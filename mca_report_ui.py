@@ -259,7 +259,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     warnings = []
     if postcheck_text:
         warnings += mcl.verify_integration_against_postcheck(classification, postcheck_text)
-        warnings += mcl.verify_moved_sectors_against_postcheck(classification, postcheck_text)
+        warnings += mcl.verify_moved_sectors_against_postcheck(classification, postcheck_text, ciq_wb)
         warnings += mcl.verify_deleted_sectors_against_postcheck(classification, postcheck_text)
         warnings += mcl.verify_retune_against_checks(ciq_wb, retune_events, postcheck_text)
         if edp_index:
