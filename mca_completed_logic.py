@@ -1283,3 +1283,36 @@ def build_new_xlsm_row_writes(
     _fill_single_column_buffer(row_map["pre_existing_issues"], buffer_pre_existing_extra)
 
     return rw
+
+
+# ============================================================
+# SECTION 21 - FLORIDA-ONLY: newly added CBAND/DOD/DOD_BWE individual cell names
+# (confirmed this session — row block 92-104, previously untouched all session)
+# ============================================================
+
+def florida_newly_added_cells(market, classification):
+    """Every individual newly-added CBAND/DOD/DOD_BWE cell (NRCellDU), only when market is
+    Florida (same Calltest_sheet.xlsx lookup already used for Call Test). Confirmed: one
+    cell per row up to the template's 12 available slots (93-104); anything beyond that
+    gets appended onto the LAST row, '|'-joined, rather than dropped."""
+    if market != "Florida":
+        return []
+    cells = []
+    for node, node_cells in classification.get("added", {}).items():
+        for cell in node_cells:
+            label, _sector = qx.band_label(cell)
+            if label in ("CBAND", "DOD", "DOD_BWE"):
+                cells.append(cell)
+    return cells
+
+
+def florida_cells_to_rows(cells, capacity=12):
+    """Splits into up to `capacity` row values — cell 1..capacity-1 get their own row,
+    anything from capacity onward is joined with '|' onto the final row."""
+    if not cells:
+        return []
+    if len(cells) <= capacity:
+        return list(cells)
+    rows = cells[:capacity - 1]
+    rows.append("|".join(cells[capacity - 1:]))
+    return rows
