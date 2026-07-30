@@ -3364,6 +3364,18 @@ elif st.session_state.qkx_page == "input":
 
         if top_scope == "MCA" and st.session_state.get("qkx_report_only"):
             import importlib
+            # Confirmed bug class (already documented in this project's own handoff notes):
+            # a plain "import X" reuses whatever's cached in sys.modules from an earlier
+            # session even after the file on disk changed — reloading only mca_report_ui
+            # itself doesn't refresh ITS dependencies. Every module mca_report_ui imports
+            # needs its own explicit reload, in dependency order (leaves first).
+            import report_detect, mca_checklist, mca_glue, mca_report_text, mca_completed_logic, mca_xlsm_fill
+            importlib.reload(report_detect)
+            importlib.reload(mca_checklist)
+            importlib.reload(mca_glue)
+            importlib.reload(mca_report_text)
+            importlib.reload(mca_completed_logic)
+            importlib.reload(mca_xlsm_fill)
             import mca_report_ui
             importlib.reload(mca_report_ui)
             mca_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines,
