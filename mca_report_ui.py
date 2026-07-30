@@ -7,6 +7,7 @@ ALL detected lines, manual-entry space + stakeholder selector for every item, hi
 display of auto-fetched read-only values, and a more organized bordered-card layout.
 """
 import streamlit as st
+import re
 
 import report_detect
 import mca_checklist
@@ -81,6 +82,23 @@ def _simple_item_row(item):
 def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines,
            postcheck_text="", controller_checks_text="", edp_index=None):
     st.subheader("Generate Report")
+
+    # Confirmed feedback: manual-entry fields were too visually plain to notice. Targets
+    # Streamlit's stable data-testid attributes (not internal CSS class names, which change
+    # between versions) — every text_input/text_area in this page is a manual-entry field,
+    # so this is a comprehensive fix, not per-field patching.
+    st.markdown("""
+        <style>
+        div[data-testid="stTextInput"] input, div[data-testid="stTextArea"] textarea {
+            border: 2px solid #ff9800 !important;
+            background-color: #fff8e1 !important;
+        }
+        div[data-testid="stTextInput"] input:focus, div[data-testid="stTextArea"] textarea:focus {
+            border: 2px solid #e65100 !important;
+            background-color: #ffffff !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
     mcl.set_app_module(app)  # bind the already-loaded app module — see mca_completed_logic
                               # docstring for why this can never be a fresh "import app"
@@ -294,12 +312,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         st.markdown("**Subject**")
         c = st.columns(7)
         with c[0]: st.markdown(f"MIC\n\n**MIC**")
-        with c[1]: market = st.text_input("Market", key="rpt_market", placeholder="MNS/TILLMAN/AT&T")
-        with c[2]: status = st.text_input("Status", value=default_status, key="rpt_status")
-        with c[3]: site_name = st.text_input("Site Name", key="rpt_site_name")
+        with c[1]: market = st.text_input("\U0001F4DD Market", key="rpt_market", placeholder="MNS/TILLMAN/AT&T")
+        with c[2]: status = st.text_input("\U0001F4DD Status", value=default_status, key="rpt_status")
+        with c[3]: site_name = st.text_input("\U0001F4DD Site Name", key="rpt_site_name")
         with c[4]: st.markdown(f"FA CODE\n\n**{fa_code or '(not found)'}**")
         with c[5]: st.markdown(f"Site ID's\n\n**{site_ids}**")
-        with c[6]: sow = st.text_input("SOW", key="rpt_sow")
+        with c[6]: sow = st.text_input("\U0001F4DD SOW", key="rpt_sow")
 
     with st.container(border=True):
         st.markdown("**IWM Details**")
@@ -310,15 +328,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         st.markdown(f"Pre Configuration : **{pre_line}**")
         st.markdown(f"Post Configuration : **{post_line}**")
         st.markdown(f"6610 Controller : **{controller_id or '(none detected)'}**")
+        if current_config_auto:
+            current_config = st.text_input(
+                "\U0001F4DD Current Configuration \u2014 Post-checks differs from CIQ target, review/edit:",
+                value=current_config_auto, key="rpt_current_config")
+        else:
+            current_config = ""
         c1, c2 = st.columns(2)
         with c1:
-            current_config = st.text_input(
-                "Current Configuration (auto — only shown when Post-checks differs from CIQ target)",
-                value=current_config_auto, key="rpt_current_config")
-            wll_node = st.text_input("WLL node (if applicable)", key="rpt_wll")
+            wll_node = st.text_input("\U0001F4DD WLL node (if applicable)", key="rpt_wll")
         with c2:
-            software_version = st.text_input("Software version", key="rpt_sw")
-            gs_version = st.text_input("GS Version", key="rpt_gs")
+            software_version = st.text_input("\U0001F4DD Software version", key="rpt_sw")
+            gs_version = st.text_input("\U0001F4DD GS Version", key="rpt_gs")
 
     idle = idly = switch = slot_port = ""
     if len(mm_objs) > 1:
@@ -326,9 +347,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type or '(not detected)'}**")
             c1, c2 = st.columns(2)
             with c1:
-                idle = st.text_area("IDLe cable details (manual)", key="rpt_idle", height=60)
+                idle = st.text_area("\U0001F4DD IDLe cable details (manual)", key="rpt_idle", height=60)
             with c2:
-                idly = st.text_area("IDLy cable details (manual)", key="rpt_idly", height=60)
+                idly = st.text_area("\U0001F4DD IDLy cable details (manual)", key="rpt_idly", height=60)
 
             sidehaul_rows = mcl.sidehaul_display_rows(ciq_wb)
             if sidehaul_rows:
@@ -344,8 +365,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 switch = "\n".join(mcl.format_sidehaul_lines(sidehaul_rows, cable_pns))
                 slot_port = ""  # folded into the switch lines above — same source, one combined display
             else:
-                switch = st.text_area("Switch details (manual)", key="rpt_switch", height=60)
-                slot_port = st.text_area("Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
+                switch = st.text_area("\U0001F4DD Switch details (manual)", key="rpt_switch", height=60)
+                slot_port = st.text_area("\U0001F4DD Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
 
     # ---- LKF Installation: Node(s) and Controller are independent installation points
     # (confirmed — one can be Completed while the other is Pending), so each gets its own
@@ -397,12 +418,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         st.caption(f"\u26a0\ufe0f {still_needed} LKF item(s) still need a Completed/Pending pick "
                    f"\u2014 they won't appear in the report until selected.")
 
-    # ---- Transport SFP: trigger nodes = new nodes OR Port-Conversion-triggered nodes.
-    # BBU/SIAD End models are MANUAL (confirmed), grouped by shared entered model. ----
+    # ---- Transport SFP: 3 independent triggers now — new node OR Port Conversion OR any
+    # board swap (confirmed, added this pass — a physical board replacement often needs a
+    # new SFP transceiver regardless of whether port speed itself changed). Uses the same
+    # broad hw-string comparison (report_detect.detect_node_board_changes) LKF's board-swap
+    # trigger already uses — confirmed this catches same-generation model changes (e.g.
+    # 5216->6630, both G2) that the narrower generation-based Port Conversion check misses. ----
     port_conv_nodes = sorted({l.split("MPST: ")[-1].rstrip(".") for l in scope_lines
                                if l.startswith("Port speed 1G to 10G conversion with MPST:")}
                               | {r["node"] for r in port_conv_swap_completed})
-    sfp_trigger_nodes = sorted(set(new_nodes) | set(port_conv_nodes))
+    board_swap_node_set = {n for n, _p, _q in board_swaps} if board_swaps and \
+        isinstance(board_swaps[0], tuple) else set()
+    sfp_trigger_nodes = sorted(set(new_nodes) | set(port_conv_nodes) | board_swap_node_set)
     sfp_models_by_node = {}
     if sfp_trigger_nodes:
         with st.container(border=True):
@@ -456,7 +483,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             with cols[i % 2]:
                 choice, stakeholder = _simple_item_row(item)
                 choices[item["key"]] = choice
-        additional_completed = st.text_area("Enter any additional completed information that needs to be added in report",
+        additional_completed = st.text_area("\U0001F4DD Enter any additional completed information that needs to be added in report",
                                              value=extra_completed_text, key="rpt_add_completed", height=100)
         choices["additional_completed"] = {"text": additional_completed}
 
@@ -467,7 +494,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 choice, stakeholder = _simple_item_row(item)
                 choices[item["key"]] = choice
                 stakeholders[item["key"]] = stakeholder
-        additional_pending = st.text_area("Enter any additional pending information that needs to be reported to Market",
+        additional_pending = st.text_area("\U0001F4DD Enter any additional pending information that needs to be reported to Market",
                                            value=extra_pending_text, key="rpt_add_pending", height=100)
         choices["additional_pending"] = {"text": additional_pending}
 
@@ -479,26 +506,26 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         with st.container(border=True):
             st.markdown("**Locked alarm ports** \u2014 classify each locked port (per the confirmed "
                         "6610 Alarm Cutover reporting standard). Leave blank whichever don't apply.")
-            b1 = st.text_input("1. Pre-existing locked \u2014 port numbers", key="lp_b1", placeholder="e.g. 1, 5, 25")
-            b2 = st.text_input("2. Pre-existing active alarm \u2014 port numbers", key="lp_b2", placeholder="e.g. 3, 6, 20")
+            b1 = st.text_input("\U0001F4DD 1. Pre-existing locked \u2014 port numbers", key="lp_b1", placeholder="e.g. 1, 5, 25")
+            b2 = st.text_input("\U0001F4DD 2. Pre-existing active alarm \u2014 port numbers", key="lp_b2", placeholder="e.g. 3, 6, 20")
             c1, c2 = st.columns([2, 1])
             with c1:
-                b3 = st.text_input("3. Pre-existing loops/bridge clips/no equipment connections \u2014 port numbers", key="lp_b3")
+                b3 = st.text_input("\U0001F4DD 3. Pre-existing loops/bridge clips/no equipment connections \u2014 port numbers", key="lp_b3")
             with c2:
                 b3_note = st.text_input("Note (optional)", key="lp_b3_note", label_visibility="collapsed", placeholder="Note (optional)")
             c1, c2 = st.columns([2, 1])
             with c1:
-                b4 = st.text_input("4. Post-cutover, FE couldn't clear \u2014 port numbers", key="lp_b4")
+                b4 = st.text_input("\U0001F4DD 4. Post-cutover, FE couldn't clear \u2014 port numbers", key="lp_b4")
             with c2:
                 b4_owner = st.selectbox("Owner", ["Tower Crew", "AT&T"], key="lp_b4_owner", label_visibility="collapsed")
             c1, c2 = st.columns([2, 1])
             with c1:
-                b5 = st.text_input("5. Other (free entry)", key="lp_b5")
+                b5 = st.text_input("\U0001F4DD 5. Other (free entry)", key="lp_b5")
             with c2:
                 b5_dest = st.selectbox("Goes to", ["Pre-Existing Issues", "Pending"], key="lp_b5_dest", label_visibility="collapsed")
             c1, c2 = st.columns([2, 1])
             with c1:
-                b6 = st.text_input("6. Other (free entry)", key="lp_b6")
+                b6 = st.text_input("\U0001F4DD 6. Other (free entry)", key="lp_b6")
             with c2:
                 b6_dest = st.selectbox("Goes to", ["Pre-Existing Issues", "Pending"], key="lp_b6_dest", label_visibility="collapsed")
 
@@ -525,7 +552,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     with st.expander("Pre-Existing Issues"):
         pre_existing_default = "\n".join(sfp_pre_existing_extra + bucket_pre_existing)
-        pre_existing_text = st.text_area("Enter any Pre-Existing Issues that needs to be reported to Market",
+        pre_existing_text = st.text_area("\U0001F4DD Enter any Pre-Existing Issues that needs to be reported to Market",
                                           value=pre_existing_default, key="rpt_preexisting", height=70)
         choices["pre_existing_issues_text"] = pre_existing_text
 
@@ -558,7 +585,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
         emergency_unlock_default = "\n".join(
             f"Emergency unlock activated on the node {n}." for n in emergency_unlock_notes)
-        notes_generic = st.text_area("Enter Notes that need to be reported or addressed to Market",
+        notes_generic = st.text_area("\U0001F4DD Enter Notes that need to be reported or addressed to Market",
                                       value=emergency_unlock_default, key="rpt_notes_generic", height=70)
         choices["notes_generic_text"] = notes_generic
 
@@ -603,6 +630,81 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         row_writes.append((16, True, [(3, gs_version)]))
         if idl_build_type:
             row_writes.append((19, True, [(3, idl_build_type)]))
+
+        # ---- Everything built this session that build_xlsm_row_writes never knew about —
+        # parsed back out of the already-tested formatted strings rather than re-deriving
+        # structured data, since the exact format is controlled and safe to parse. ----
+        gps_completed_groups = []
+        for line in gps_extra_completed[:1]:  # only the first (dedicated-row) group belongs here
+            if "Version:" in line:
+                nodes_part, ver_part = line.split("Version:", 1)
+                nodes = nodes_part.replace("GPS Installation:", "").strip().split("|")
+                gps_completed_groups.append((nodes, ver_part.strip()))
+        sfp_completed_groups = []
+        for line in transport_sfp_lines:
+            m = re.match(r"Transport SFP Installation on:\s*(.+?)\s+SFP Model \(BBU End\):\s*(.*?)\s+SFP Model \(SIAD End\):\s*(.*)", line)
+            if m:
+                nodes = m.group(1).split("|")
+                sfp_completed_groups.append((nodes, m.group(2).strip(), m.group(3).strip()))
+        radio_swap_completed_parsed = []
+        for line in radio_swap_completed_lines:
+            parts = line.split("\t")
+            if len(parts) >= 6:
+                label_sectors = parts[1]
+                radio_swap_completed_parsed.append((label_sectors, "", parts[3], parts[5]))
+        radio_swap_pending_parsed = []
+        for line in radio_swap_pending_lines:
+            parts = line.split("\t")
+            if len(parts) >= 6:
+                label_sectors = parts[1]
+                radio_swap_pending_parsed.append((label_sectors, "", parts[3], parts[5]))
+        fdd_parsed = []
+        for line in fdd_lines_fixed:
+            m = re.match(r"FDD Renaming on:\s*(.+?)\s+From:\s*(.+?)\s+To:\s*(.+?)\.", line)
+            if m:
+                fdd_parsed.append((m.group(1), m.group(2), m.group(3)))
+        lkf_completed_val = (lkf_lines_by_section.get("Completed", "") or "").replace("LKF Installation:", "").strip() or None
+        lkf_pending_val = (lkf_lines_by_section.get("Pending", "") or "").replace("LKF Installation:", "").replace("(MIC)", "").strip() or None
+        port_conv_swap_node_names = [r["node"] for r in port_conv_swap_completed]
+
+        def _split_buffer_lines(lines):
+            """Buffer entries as (label, detail) — first ':' splits label from detail;
+            falls back to (item text, "") if no colon found."""
+            out = []
+            for l in lines:
+                if ":" in l:
+                    label, detail = l.split(":", 1)
+                    out.append((label.strip(), detail.strip()))
+                else:
+                    out.append((l, ""))
+            return out
+
+        # Completed buffer = whatever's left after GPS's dedicated row + Transport SFP's
+        # dedicated rows + FDD's dedicated rows + LKF's dedicated row are accounted for.
+        buffer_completed_lines = (gps_extra_completed[1:] + transport_sfp_lines[3:]
+                                    + [r["text"] for r in port_conv_swap_completed if r["node"] not in port_conv_swap_node_names[:0]])
+        buffer_pending_lines = gps_extra_pending + sfp_pending_extra
+        buffer_pre_existing_lines = sfp_pre_existing_extra + bucket_pre_existing
+
+        new_rw = mcl.build_new_xlsm_row_writes(
+            ROW_MAP,
+            current_config_text="",  # already written above at row 11 — avoid double-write
+            gps_completed_groups=gps_completed_groups,
+            gps_pending_lines=gps_extra_pending[:1],
+            sfp_completed_groups=sfp_completed_groups[:3],
+            sfp_pending_lines=sfp_pending_extra[:4],
+            radio_swap_completed=radio_swap_completed_parsed[:3],
+            radio_swap_pending=radio_swap_pending_parsed[:3],
+            lkf_completed_line=lkf_completed_val,
+            lkf_pending_line=lkf_pending_val,
+            fdd_lines=fdd_parsed[:2],
+            edp_publish=edp_publish_text,
+            port_conv_swap_nodes=port_conv_swap_node_names,
+            buffer_completed_extra=_split_buffer_lines(buffer_completed_lines)[:10],
+            buffer_pending_extra=_split_buffer_lines(buffer_pending_lines)[:9],
+            buffer_pre_existing_extra=buffer_pre_existing_lines[:10],
+        )
+        row_writes += new_rw
 
         if not TEMPLATE_PATH.exists():
             static_dir = TEMPLATE_PATH.parent
