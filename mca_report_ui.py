@@ -243,6 +243,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         for item in results:
             if item["key"] == "fdd_renaming":
                 item["checked_by_default"] = False
+    # Suppress the checklist's own LKF Installation item unconditionally — confirmed bug:
+    # it was showing alongside the new per-node Completed/Pending dropdown section as a
+    # confusing duplicate. The custom section (built this pass) fully replaces it, since it
+    # covers the same 3 original triggers plus the 4th (single-tech node gaining a second
+    # tech) the old item never had.
+    for item in results:
+        if item["key"] == "lkf_installation":
+            item["checked_by_default"] = False
 
     # ---- Warnings tab collection: every verification function feeds here. Confirmed
     # design: warning-only for most items (never touches report placement), except
