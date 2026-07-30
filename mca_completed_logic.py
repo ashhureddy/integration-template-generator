@@ -720,14 +720,17 @@ def lkf_trigger_nodes(new_nodes, board_swap_nodes, controller_id, precheck_text,
 
 def lkf_lines_by_choice(node_status_choices, controller_id):
     """node_status_choices: {node: 'Completed'|'Pending'} - the engineer's per-node dropdown
-    picks. Merges nodes sharing the same choice into one line each."""
+    picks. Merges nodes sharing the same choice into one line each. Pending gets the
+    confirmed (MIC) stakeholder tag, matching the original template row (125) — Completed
+    has no tag, matching row 62."""
     by_choice = {"Completed": [], "Pending": []}
     for node, choice in node_status_choices.items():
         by_choice[choice].append(node)
     out = {}
     for choice, nodes in by_choice.items():
         if nodes:
-            out[choice] = f"LKF Installation: {'|'.join(nodes)} | {controller_id or ''}"
+            line = f"LKF Installation: {'|'.join(nodes)} | {controller_id or ''}"
+            out[choice] = f"{line} (MIC)" if choice == "Pending" else line
     return out
 
 
