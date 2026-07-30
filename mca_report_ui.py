@@ -347,15 +347,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 switch = st.text_area("Switch details (manual)", key="rpt_switch", height=60)
                 slot_port = st.text_area("Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
 
-    # ---- LKF Installation: user input per node, Completed or Pending (confirmed
-    # explicitly). No default — the engineer must actively pick; leaving it untouched
-    # excludes that node's LKF line entirely rather than silently assuming Completed. ----
-    lkf_nodes = mcl.lkf_trigger_nodes(new_nodes, board_swaps, controller_id, precheck_text, mm_objs)
+    # ---- LKF Installation: Node(s) and Controller are independent installation points
+    # (confirmed — one can be Completed while the other is Pending), so each gets its own
+    # dropdown. No default on either — leaving one untouched excludes just that entity. ----
+    lkf_nodes = mcl.lkf_node_triggers(new_nodes, board_swaps, precheck_text, mm_objs)
+    lkf_controller_needed = mcl.lkf_controller_triggered(controller_id)
     lkf_choices = {}
-    if lkf_nodes:
+    lkf_controller_choice = None
+    if lkf_nodes or lkf_controller_needed:
         with st.container(border=True):
-            st.markdown(f"**LKF Installation** \u2014 {len(lkf_nodes)} node(s) need this. "
-                        f"Pick Completed or Pending for each (required — left blank = excluded from the report):")
+            st.markdown(f"**LKF Installation** \u2014 pick Completed or Pending for each "
+                        f"(required — left blank = excluded from the report). Node and Controller "
+                        f"are tracked independently — one can be done while the other isn't:")
             for node in lkf_nodes:
                 c1, c2 = st.columns([2, 1])
                 with c1:
@@ -365,15 +368,28 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                                           key=f"lkf_{node}", label_visibility="collapsed")
                     if pick != "\u2014 Select \u2014":
                         lkf_choices[node] = pick
-    lkf_lines_by_section = mcl.lkf_lines_by_choice(lkf_choices, controller_id) if lkf_choices else {}
-    if lkf_nodes and len(lkf_choices) < len(lkf_nodes):
-        st.caption(f"\u26a0\ufe0f {len(lkf_nodes) - len(lkf_choices)} LKF node(s) still need a Completed/Pending pick "
+            if lkf_controller_needed:
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    st.caption(f"{controller_id} (controller)")
+                with c2:
+                    cpick = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                           key="lkf_controller", label_visibility="collapsed")
+                    if cpick != "\u2014 Select \u2014":
+                        lkf_controller_choice = cpick
+
+    if cascade_fires:
+        # Cascade forces LKF's 6610/CONTROLLER portion specifically to Pending — confirmed:
+        # this is about the controller entity, not whichever nodes the engineer marked
+        # Completed. Node choices are untouched.
+        lkf_controller_choice = "Pending"
+
+    lkf_lines_by_section = mcl.lkf_lines_by_choice(lkf_choices, lkf_controller_choice, controller_id) \
+        if (lkf_choices or lkf_controller_choice) else {}
+    still_needed = len(lkf_nodes) - len(lkf_choices) + (1 if lkf_controller_needed and not lkf_controller_choice else 0)
+    if still_needed > 0:
+        st.caption(f"\u26a0\ufe0f {still_needed} LKF item(s) still need a Completed/Pending pick "
                    f"\u2014 they won't appear in the report until selected.")
-    if cascade_fires and lkf_lines_by_section.get("Completed"):
-        # Cascade forces LKF's 6610 portion to Pending too — move whatever the engineer
-        # marked Completed into Pending instead, no warning, per confirmed decision.
-        lkf_lines_by_section["Pending"] = (lkf_lines_by_section.get("Pending", "") + "\n"
-                                            + lkf_lines_by_section.pop("Completed")).strip()
 
     # ---- Transport SFP: trigger nodes = new nodes OR Port-Conversion-triggered nodes.
     # BBU/SIAD End models are MANUAL (confirmed), grouped by shared entered model. ----
