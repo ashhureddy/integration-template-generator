@@ -15,7 +15,20 @@ transcript — see the inline comments for the "why", not just the "what".
 import re
 from pathlib import Path
 
-import app as qx  # the existing, tested QUICKIX module (report-feature branch)
+# IMPORTANT: do NOT "import app as qx" at module level. app.py has Streamlit UI code
+# directly at module scope (not wrapped in `if __name__ == "__main__"`), so importing it
+# fresh here re-executes the ENTIRE Streamlit script a second time within the same run —
+# recreating every widget (e.g. the "← Back" button) and crashing with
+# StreamlitDuplicateElementId. This is exactly why the existing codebase passes `app` as
+# a parameter into render(app, ...) instead of importing it — same pattern followed here.
+qx = None
+
+
+def set_app_module(app_module):
+    """Called once by mca_report_ui.render() with the already-loaded `app` module it
+    received as its own parameter — never a fresh import."""
+    global qx
+    qx = app_module
 
 
 def _normalize(text):
