@@ -52,6 +52,12 @@ x5G_Vlan_IDx						## Vlan ID from EDP Column Header - bearer_enodeb_sb_vlan_id
 ############################################################################################################
 ## Warning : All the Scripts generated as part of Integration should be shared in the RSF at this point   ##
 ############################################################################################################
+
+#####################
+Prechecks (Putty Commands) -  Please make sure all putty logs are getting saved in putty logs folder in local machine before executing the prechecks commands in putty session
+Prechecks (CLI Commands) -    Please make sure ENM session is recorded before executing the CLI commands as part of prechecks in ENM CLI.
+#####################
+
 ##########################
 ## Start of the Process ##
 ##########################
@@ -529,7 +535,7 @@ cmedit get xSite_IDx BrmBackup.* -t
 
 ####### For Any NR Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
 For "Instance Validation Error : MO created earlier by import file", Check the Bulk Import Created Job List & make sure No other Job is Validated/Running for the same Node.
-Thereby, Delete the previously validated file, then Reimport the script file, Re-Validate & Re-Execute.
+Thereby, Delete the previously validated file, Resync the Node in ENM CLI; then Reimport the script file, Re-Validate & Re-Execute.
 For Errors received due to Nodes being "Unsynchronized" during Job execution, Resync the Node & ensure that the Node is Sync'd in ENM. Then Re-Validate & Re-Execute the Job. #######
 
 xSite_IDx_01_1_network_relations_xDatex_dynamic_script
@@ -817,7 +823,7 @@ st UlCompGroup
 cmedit action xSite_IDx BrmBackupManager=1 createBackup.(name="Pre_Baselines_1")
 cmedit get xSite_IDx BrmBackup.* -t
 
-####### For BL Error, if Any BL Script Fails as a whole in Validation state or stuck in Parsed state, Need to Re-Import, Re-Validate & Execute. If Error persists, open a ticket & raise to BL Team.
+####### For BL Error, if Any BL Script Fails as a whole in Validation state, stuck in Parsed state or encounter any Error; first resync the Node in ENM CLI, then Reimport the script file, Re-Validate & Execute. If Error persists, open a ticket & raise to BL Team.
 For Any BL Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
 Ensure that the BL File SW version is as per latest release. If found to be of Older SW version, reach out to the Leads/escalate to Scripting Team.
 Don't perform any parallel execution on the same Node even from Bulk Configuration or ENM CLI. Wait for the last running Job to complete before proceeding for next file validation.
@@ -858,7 +864,7 @@ cmedit get xSite_IDx BrmBackup.* -t
 
 ####### For Any NR Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
 For "Instance Validation Error : MO created earlier by import file", Check the Bulk Import Created Job List & make sure No other Job is Validated/Running for the same Node.
-Thereby, Delete the previously validated file, then Reimport the script file, Re-Validate & Re-Execute.
+Thereby, Delete the previously validated file, Resync the Node in ENM CLI; then Reimport the script file, Re-Validate & Re-Execute.
 For Errors received due to Nodes being "Unsynchronized" during Job execution, Resync the Node & ensure that the Node is Sync'd in ENM. Then Re-Validate & Re-Execute the Job. #######
 
 xSite_IDx_02_1_network_relations_xDatex_dynamic_script
@@ -897,7 +903,7 @@ lpr GUtranFreqRelation
 cmedit action xSite_IDx BrmBackupManager=1 createBackup.(name="Pre_Baselines_4")
 cmedit get xSite_IDx BrmBackup.* -t
 
-####### For BL Error, if Any BL Script Fails as a whole in Validation state or stuck in Parsed state, Need to Re-Import, Re-Validate & Execute. If Error persists, open a ticket & raise to BL Team.
+####### For BL Error, if Any BL Script Fails as a whole in Validation state, stuck in Parsed state or encounter any Error; first resync the Node in ENM CLI, then Reimport the script file, Re-Validate & Execute. If Error persists, open a ticket & raise to BL Team.
 For Any BL Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
 Ensure that the BL File SW version is as per latest release. If found to be of Older SW version, reach out to the Leads/escalate to Scripting Team.
 Don't perform any parallel execution on the same Node even from Bulk Configuration or ENM CLI. Wait for the last running Job to complete before proceeding for next file validation.
@@ -1047,7 +1053,7 @@ cmedit get xSite_IDx BrmBackup.* -t
 
 ####### For Any NR Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
 For "Instance Validation Error : MO created earlier by import file", Check the Bulk Import Created Job List & make sure No other Job is Validated/Running for the same Node.
-Thereby, Delete the previously validated file, then Reimport the script file, Re-Validate & Re-Execute.
+Thereby, Delete the previously validated file, Resync the Node in ENM CLI; then Reimport the script file, Re-Validate & Re-Execute.
 For Errors received due to Nodes being "Unsynchronized" during Job execution, Resync the Node & ensure that the Node is Sync'd in ENM. Then Re-Validate & Re-Execute the Job. #######
 
 ####### Radio Script if fails, NR3/NR4 cant be executed because ExternalGnodebfunction/ExternalGNBCUCPFunction for intraUSID gets created in Radio script #######
@@ -1056,8 +1062,9 @@ Run Network relation 4 and 6 script in Bulk Configuration
 
 xSite_IDx_04_network_relations_NR_RELATION_xDatex_dynamic_script
 
-####### NR4 if fails, NR5/6 cannot be executed.#######
 ####### For NR4 script issue related to NRCellCU->threshservinglowQ and NRFreqRelation->threshXHighQ, threshXLowQ, Re-validate and Re-execute NR4 script. #######
+####### If received error "NRCellCU->nRFrequencyRef must not have NRcellRelation->ulCompCellCandidate set to ALLOWED(1)", here again Need to Re-validate and Re-execute NR4 script as NR4 script has NCellCU->nrfrequencyref. #######
+####### NR4 if fails, NR5/6 cannot be executed.#######
 
 xSite_IDx_06_1_network_relations_NR_RELATION_BASE_MOS_xDatex_dynamic_script
 
@@ -1482,66 +1489,10 @@ st TermPointToGNodeB
 
 *** Recorded CLI session and putty logs needs to be saved in Daily logs folder under Execution Logs folder ***
 
-##########################
-********************************** Area Lite Checks *********************************************
-################################################################################################
-Area Lite Checks once  Integration is completed before releasing FE    #########################
-################################################################################################
-
-1. Run the Area lite for the node.
-2. Any GS mismatches needs to be address to scripting team or should be taken care from support end post Integration.
-3. Once GS checks completed please share the screen shoots in RSF and mention the GS audit passed for the node.
-
-############################################################
-##########  Area lite Process for clear GS Mismatch ###############################
-############################################################
- 
-### Please run the Area lite GS checks once the integration is completed, if there are any discrepancies in the Area lite GS use the below mentioned link inorder to clear the GS mismatch.
- 
-Please open the Qwest tool "http://192.168.10.12:8025/" hit the conversion tools, select Area Lite conversion.
- 
-Please add the input files as "Area lite GS log files " and take fresh kget all generate the scripts and follow the below mentioned process.
- 
-Step 1: Run Area-lite GS checks on the node.
- 
-Step 2: Use the output(Area-lite discrepancies) to generate the CMCLI commands script that are to be executed on the node.  
- 
-Step 3: Run the commands on the node.
- 
-Step 4: Please make sure we post the Area-lite discrepancies as well as the commands/scripts that were run on each node in the RSF.
-
-Step 5: Please perform Soft lock all the sectors on the node.
- 
-A) Incase if emergency calls are present on the cells please use the MIC_Integration tool to "verify the Emergency calls" and select the option "7" to validate.
-B) If emergency calls are present please wait for a while and rerun the "Verify Emergency calls".
-C) Post validation if there are no emergency calls, please update the emergency softlock as False by using the below mentioned command.
-
-cmedit get x5G_CRAN_SiteIDx ENodeBFunction.(ENodeBFunctionid==1,checkEmergencySoftLock) -t
-cmedit set x5G_CRAN_SiteIDx ENodeBFunction.(ENodeBFunctionid==1) checkEmergencySoftLock=FALSE
-cmedit get x5G_CRAN_SiteIDx ENodeBFunction.(ENodeBFunctionid==1,checkEmergencySoftLock) -t
-
-D) Proceed to soft lock the sectors and once the sectors are Soft locked, Please update the emergency softlock as True by using the below commands.
-cmedit get x5G_CRAN_SiteIDx ENodeBFunction.(ENodeBFunctionid==1,checkEmergencySoftLock) -t
-cmedit set x5G_CRAN_SiteIDx ENodeBFunction.(ENodeBFunctionid==1) checkEmergencySoftLock=TRUE
-cmedit get x5G_CRAN_SiteIDx ENodeBFunction.(ENodeBFunctionid==1,checkEmergencySoftLock) -t
-
-Step 6: Once found that all cells are softlocked,take a CV and restart the node.
-
-Step 7: Once restart is performed and node is up, Proceed to perform unlock on all the cells and ensure there are no alarms on the cells/commercial sectors post implementation of scripts as part of GS mismatch alignment
-
-Step 8: Put the status of the cells as per the final status required on the site (Ex: Pre cell status as per pre and  Non commercials/Newly added in locked state)
-
-###############################################################################################################
-
-##########################
-- Save the Above Area lite executions logs with below naming
-
-- xSite_IDx_Area_lite_Verification_logs_check_xDatex_Putty_Logs
-- xSite_IDx_Area_lite_Execution_logs_check_xDatex_ENM_Logs
-
-
-** Recorded CLI session and putty logs needs to be saved in Daily logs folder under Execution Logs folder ***
-
+#####################
+Postchecks (Putty Commands) -  Please make sure all putty logs are getting saved in putty logs folder in local machine before executing the postchecks commands in putty session
+Postchecks (CLI Commands) -    Please make sure ENM session is recorded before executing the CLI commands as part of postchecks in ENM CLI.
+#####################
 
 ########################################
 ## Putty Post checks get commands ##
