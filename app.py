@@ -241,6 +241,28 @@ def pre_hw_string(text, node_name):
 
 
 def extract_pdf_text(pdf_bytes):
+    """Some 'PDF' uploads are actually zip archives (confirmed this session, e.g. real
+    ECL02586 Pre/Post-checks files) — a zip containing per-page N.jpeg + N.txt + a
+    manifest.json, not a real PDF at all. pdfplumber correctly rejects these
+    ("No /Root object! - Is this really a PDF?"). Try the zip-bundle path first (cheap,
+    exact check via the zip magic number), fall back to pdfplumber for genuine PDFs —
+    same two-format resilience pattern already used for load_workbook_any's xlsx/xls
+    fallback."""
+    import zipfile
+    import json as _json
+
+    if pdf_bytes[:2] == b"PK":  # zip magic number
+        try:
+            with zipfile.ZipFile(io.BytesIO(pdf_bytes)) as zf:
+                manifest = _json.loads(zf.read("manifest.json"))
+                pages = sorted(manifest["pages"], key=lambda p: p["page_number"])
+                text = ""
+                for p in pages:
+                    text += zf.read(p["text"]["path"]).decode("utf-8", errors="replace") + "\n\n"
+                return text
+        except Exception:
+            pass  # fall through to pdfplumber, which will raise its own clear error
+
     import pdfplumber
     text = ""
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -1460,6 +1482,21 @@ def _fill_ngs_site_block(tpl_text, slot, site_id, rru_list, riport_list, priorit
     return tpl_text
 
 
+def _ngs_pair_is_pure_lte(a_to_b, b_to_a):
+    """Ported from main branch (confirmed real bug fix, was missing from report-feature):
+    own_cell is always an LTE cell by construction (only eUtran Parameters is scanned for
+    Co-Located Technology Cell references) — so whether a pair is genuinely LTE-LTE (needing
+    bidirectional confirmation) vs. mixed LTE-5G (one-directional suffices) depends on whether
+    any ref_cell matches the 5G naming pattern — NOT on whether the target node separately has
+    its own eNBId. A dual-tech TMBB node (its own LTE side unrelated to this specific shared
+    radio) would otherwise be wrongly classified as a pure-LTE pair, requiring an impossible
+    bidirectional confirmation and causing a false negative on a real shared-radio site."""
+    for _own_cell, ref_cell in a_to_b + b_to_a:
+        if nr_band_label(ref_cell)[0] is not None:
+            return False
+    return True
+
+
 def generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log):
     """Returns (outputs, summary_rows). For every confirmed NGS pair, generates the fully filled
     activation template (LTE-LTE or LTE-5G, whichever applies), keeping only the correct
@@ -1497,7 +1534,7 @@ def generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log):
             checked_pairs.add(pair_key)
             a_to_b = directional_refs.get((node_a, node_b), [])
             b_to_a = directional_refs.get((node_b, node_a), [])
-            both_lte = has_lte.get(node_a) and has_lte.get(node_b)
+            both_lte = _ngs_pair_is_pure_lte(a_to_b, b_to_a)
             confirmed = (a_to_b and b_to_a) if both_lte else (a_to_b or b_to_a)
             if not confirmed:
                 continue
@@ -1604,6 +1641,7 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
                 directional_refs.setdefault((own_node, ref_node), []).append((own_cell, ref_cell))
 
     checked_pairs = set()
+    confirmed_nodes = set()
     for i, node_a in enumerate(node_names):
         for node_b in node_names[i + 1:]:
             pair_key = frozenset((node_a, node_b))
@@ -1612,7 +1650,7 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
             checked_pairs.add(pair_key)
             a_to_b = directional_refs.get((node_a, node_b), [])
             b_to_a = directional_refs.get((node_b, node_a), [])
-            both_lte = has_lte.get(node_a) and has_lte.get(node_b)
+            both_lte = _ngs_pair_is_pure_lte(a_to_b, b_to_a)
             confirmed = (a_to_b and b_to_a) if both_lte else (a_to_b or b_to_a)
             if confirmed:
                 bands_a, bands_b = set(), set()
@@ -1633,6 +1671,31 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
                 })
                 log(f"\u2713 NGS Checks: {node_a} <-> {node_b} share a radio (bands: {band_list})")
                 scope_lines.append(f"NGS Activation on :\t{band_list}\t{node_a} <-> {node_b}")
+                confirmed_nodes.add(node_a)
+                confirmed_nodes.add(node_b)
+
+    # Safety-net (ported from main branch — confirmed missing from report-feature entirely
+    # until now): some CIQs carry an explicit "NodeGroupSync" = "Y" column marking cells
+    # that have NGS. This never drives detection on its own — it only flags a cell whose
+    # node wasn't already covered by a confirmed co-location pair above, so a genuine miss
+    # doesn't silently go unnoticed. Log/summary-row only, per explicit instruction — never
+    # feeds the Warnings tab, since the primary detection logic is trusted as-is.
+    for sheet_name, cell_col in (("eUtran Parameters", "EutranCellFDDId"), ("5G Info", "NRCellDU")):
+        if sheet_name not in ciq_wb.sheetnames:
+            continue
+        for row in sheet_objs(ciq_wb[sheet_name]):
+            if str(row.get("NodeGroupSync", "")).strip().upper() != "Y":
+                continue
+            cell = row.get(cell_col)
+            if not is_populated(cell):
+                continue
+            node = cell_to_node.get(str(cell).strip())
+            if node and node not in confirmed_nodes:
+                log(f"\u26a0 NodeGroupSync=Y flagged for {cell} ({node}) but no confirmed NGS pair was detected \u2014 check this cell manually.")
+                summary_rows.append({
+                    "Item": "NGS Checks", "Source": cell,
+                    "Value": "NodeGroupSync=Y, not confirmed", "Note": f"node {node} not part of any detected NGS pair \u2014 check manually",
+                })
 
     return summary_rows, scope_lines
 
@@ -3073,13 +3136,25 @@ elif st.session_state.qkx_page == "input":
                 pre_file = None
                 if top_scope not in ("N2E", "NSB"):
                     pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
+                post_file, controller_file = None, None
+                if st.session_state.get("qkx_report_only"):
+                    # Post-checks and controller-checks: added this session — nearly every
+                    # new report check (Integration/Retune/Moved Sectors/Port Conversion
+                    # verification, GPS Status, Transport SFP thresholds, 6610 hardware
+                    # state, SAU/External alarm status) depends on one or both of these.
+                    # Neither existed as an input on this flow before.
+                    post_file = st.file_uploader("Post-checks (.pdf) — required for report checks", type=["pdf"])
+                    controller_file = st.file_uploader(
+                        "6610 Controller checks (.pdf) — required only if a 6610 is present",
+                        type=["pdf"])
                 c1, c2 = st.columns(2)
                 with c1:
                     user_id = st.text_input("User ID", placeholder="e.g. pr970b")
                 with c2:
                     date_str = st.text_input("Execution date (mmddyyyy)", value=date.today().strftime("%m%d%Y"))
+                _report_ready = (ciq_file and edp_file and (post_file if st.session_state.get("qkx_report_only") else True))
                 run = st.button("Generate Report \u2192" if st.session_state.get("qkx_report_only") else "Generate templates \u2192",
-                                 type="primary", disabled=not (ciq_file and edp_file))
+                                 type="primary", disabled=not _report_ready)
         else:
             run = False
 
@@ -3160,6 +3235,16 @@ elif st.session_state.qkx_page == "input":
                 log("Extracting Pre-checks PDF text...")
                 precheck_text = extract_pdf_text(pre_file.read())
 
+            postcheck_text = ""
+            if post_file:
+                log("Extracting Post-checks PDF text...")
+                postcheck_text = extract_pdf_text(post_file.read())
+
+            controller_checks_text = ""
+            if controller_file:
+                log("Extracting 6610 Controller checks PDF text...")
+                controller_checks_text = extract_pdf_text(controller_file.read())
+
             pre_line = post_line = None
             uid = user_id or "xxUserIDxx"
             dstr = date_str or "xxDatexx"
@@ -3195,7 +3280,8 @@ elif st.session_state.qkx_page == "input":
                 "top_scope": top_scope, "scope_lines": scope_lines, "pre_line": pre_line, "post_line": post_line,
                 "siad_rows": siad_rows, "summary_rows": summary_rows, "outputs": outputs, "binary_outputs": binary_outputs,
                 "log_lines": log_lines, "mm_objs": mm_objs, "controller_objs": controller_objs, "ciq_wb": ciq_wb,
-                "precheck_text": precheck_text,
+                "precheck_text": precheck_text, "postcheck_text": postcheck_text,
+                "controller_checks_text": controller_checks_text, "edp_index": edp_index,
             }
             if not st.session_state.get("qkx_report_only"):
                 render_checks_panel_animated(ph_checks_top, top_scope, scope_lines)
@@ -3211,6 +3297,9 @@ elif st.session_state.qkx_page == "input":
             outputs, binary_outputs = r["outputs"], r["binary_outputs"]
             mm_objs, controller_objs, ciq_wb = r["mm_objs"], r["controller_objs"], r["ciq_wb"]
             precheck_text = r["precheck_text"]
+            postcheck_text = r.get("postcheck_text", "")
+            controller_checks_text = r.get("controller_checks_text", "")
+            edp_index = r.get("edp_index")
             if not report_only:
                 ph_log.code("\n".join(r["log_lines"]), language=None)
             else:
@@ -3270,4 +3359,5 @@ elif st.session_state.qkx_page == "input":
             import importlib
             import mca_report_ui
             importlib.reload(mca_report_ui)
-            mca_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines)
+            mca_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines,
+                                  postcheck_text=postcheck_text, controller_checks_text=controller_checks_text, edp_index=edp_index)
