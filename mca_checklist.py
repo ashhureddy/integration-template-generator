@@ -95,24 +95,24 @@ CHECKLIST = [
     {"key": "alarm_testing", "label": "External alarm testing:", "section": "completed", "toggle": True, "stakeholder": "MIC PM",
      "detect": lambda ctx: {"fill": {"controller": ctx.get("controller_id")}} if (ctx.get("controller_id") and ctx.get("controller_in_edp")) else None},
 
-    # ---------------- Completed: field-test sub-section (automatic pair) ----------------
-    {"key": "psap_moved_lte", "label": "PSAP test/Speedtest/VoLTE voice calltest:", "section": "completed",
-     "detect": lambda ctx: {"fill": {"bands": ctx.get("moved_lte_bands")}} if ctx.get("moved_lte_bands") else None},
+    # ---------------- Completed: Call Test (market-table driven, confirmed and built this
+    # session — replaces the previous stub items, which were permanently dead: none of
+    # their 6 trigger conditions were ever actually computed anywhere in the old code). ----
+    {"key": "psap_calltest", "label": "PSAP test/Speedtest/VoLTE voice calltest:", "section": "completed",
+     "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "PSAP test/Speedtest/VoLTE voice calltest:")}
+               if _scope_lines_matching(ctx, "PSAP test/Speedtest/VoLTE voice calltest:") else None},
 
-    {"key": "calltest_fnet", "label": "Calltest with F-NET SIM:", "section": "completed",
-     "detect": lambda ctx: {} if ctx.get("fnet_moved_or_new") else None},
+    {"key": "lte_speedtest_calltest", "label": "Speedtest/VoLTE voice calltest:", "section": "completed",
+     "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Speedtest/VoLTE voice calltest:")}
+               if _scope_lines_matching(ctx, "Speedtest/VoLTE voice calltest:") else None},
 
-    # ---------------- Completed: conditional PROMPT (only shown if the underlying condition exists) ----------------
-    {"key": "psap_new_lte", "label": "PSAP test/Speedtest/VoLTE voice calltest:", "section": "completed", "prompt": True,
-     "detect": lambda ctx: {} if ctx.get("new_lte_bands") else None},
-    {"key": "speedtest_new_lte", "label": "Speedtest/VoLTE voice calltest:", "section": "completed", "prompt": True,
-     "detect": lambda ctx: {} if ctx.get("new_lte_bands") else None},
-    {"key": "speedtest_moving_5g", "label": "Speed test: MOVING 5G Sectors", "section": "completed", "prompt": True,
-     "detect": lambda ctx: {} if ctx.get("moving_5g_bands_incl_cband") else None},
-    {"key": "speedtest_new_5g", "label": "Speed test: Newly adding 5G Sectors", "section": "completed", "prompt": True,
-     "detect": lambda ctx: {} if ctx.get("new_5g_bands_excl_cband") else None},
-    {"key": "speedtest_new_cband", "label": "Speed test: Newly adding CBAND|DOD", "section": "completed", "prompt": True,
-     "detect": lambda ctx: {} if ctx.get("new_cband_dod") else None},
+    {"key": "fiveg_speedtest_calltest", "label": "Speed test:", "section": "completed",
+     "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Speed test:")}
+               if _scope_lines_matching(ctx, "Speed test:") else None},
+
+    {"key": "fnet_calltest", "label": "Calltest with F-NET SIM:", "section": "completed",
+     "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Calltest with F-NET SIM:")}
+               if _scope_lines_matching(ctx, "Calltest with F-NET SIM:") else None},
 
     # ---------------- Completed: universal, new-node-triggered ----------------
     {"key": "area_test", "label": "Area test", "section": "pending", "stakeholder": "MIC PM",
