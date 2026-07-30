@@ -145,6 +145,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             moved_bands_by_tech["lte"].add(label)
 
     calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
+    market = None
     if calltest_path.exists() and mm_objs:
         prefix_to_market, calltest_rules = mcl.load_calltest_table(calltest_path)
         market = mcl.determine_market(mm_objs[0].get("Node to be built as"), prefix_to_market)
@@ -152,6 +153,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             scope_lines = scope_lines + mcl.call_test_lines(
                 classification, market, calltest_rules,
                 moved_bands_by_tech["lte"], added_bands_by_tech, moved_bands_by_tech)
+
+    # ---- Florida-only: newly added CBAND/DOD/DOD_BWE cells, one per row (93-104), overflow
+    # appended to the last row with '|' (confirmed this session — previously untouched). ----
+    florida_cells = mcl.florida_newly_added_cells(market, classification)
+    florida_rows = mcl.florida_cells_to_rows(florida_cells)
+    if florida_rows:
+        with st.container(border=True):
+            st.markdown(f"**Newly added Cells** (Florida market) \u2014 {len(florida_cells)} cell(s)")
+            for r in florida_rows:
+                st.caption(r)
 
     # ---- Radio Swap: remove the old single toggle-based line entirely (it can no longer
     # represent "some swaps done, some not" correctly) and compute the real split instead.
@@ -705,6 +716,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             buffer_pre_existing_extra=buffer_pre_existing_lines[:10],
         )
         row_writes += new_rw
+
+        # Florida-only newly added cells (rows 93-104, single column B, confirmed same
+        # pattern as Pre-Existing Issues rows — not the label:detail buffer format).
+        florida_xlsm_rows = list(range(93, 105))
+        for i, row_num in enumerate(florida_xlsm_rows):
+            if i < len(florida_rows):
+                row_writes.append((row_num, True, [(2, florida_rows[i])]))
+            else:
+                row_writes.append((row_num, False, []))
 
         if not TEMPLATE_PATH.exists():
             static_dir = TEMPLATE_PATH.parent
