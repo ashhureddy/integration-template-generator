@@ -354,6 +354,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     lkf_controller_needed = mcl.lkf_controller_triggered(controller_id)
     lkf_choices = {}
     lkf_controller_choice = None
+    emergency_unlock_notes = []
     if lkf_nodes or lkf_controller_needed:
         with st.container(border=True):
             st.markdown(f"**LKF Installation** \u2014 pick Completed or Pending for each "
@@ -368,6 +369,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                                           key=f"lkf_{node}", label_visibility="collapsed")
                     if pick != "\u2014 Select \u2014":
                         lkf_choices[node] = pick
+                if pick == "Pending":
+                    eu = st.selectbox(f"Emergency unlock activated on {node}? LKF is pending.",
+                                        ["\u2014 Select \u2014", "No", "Yes"], key=f"lkf_eu_{node}")
+                    if eu == "Yes":
+                        emergency_unlock_notes.append(node)
             if lkf_controller_needed:
                 c1, c2 = st.columns([2, 1])
                 with c1:
@@ -550,7 +556,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         not_mon_node = st.text_input("Node ID (not monitored)", key="rpt_not_mon_node", label_visibility="collapsed") if n_not_mon else ""
         choices["notes_not_monitored"] = {"checked": n_not_mon, "text": f"{not_mon_node} is in not monitored state."}
 
-        notes_generic = st.text_area("Enter Notes that need to be reported or addressed to Market", key="rpt_notes_generic", height=70)
+        emergency_unlock_default = "\n".join(
+            f"Emergency unlock activated on the node {n}." for n in emergency_unlock_notes)
+        notes_generic = st.text_area("Enter Notes that need to be reported or addressed to Market",
+                                      value=emergency_unlock_default, key="rpt_notes_generic", height=70)
         choices["notes_generic_text"] = notes_generic
 
     st.markdown("---")
