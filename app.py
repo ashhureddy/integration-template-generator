@@ -1898,7 +1898,11 @@ def derive_idl_build_type_label(ciq_wb, mm_objs):
     get_node_generation() the real IDL Connections generator uses), purely to extract the
     'Buildtype_X' suffix already embedded in the real template filenames (confirmed: e.g.
     'G3+G3_Buildtype_C.txt' -> 'Type C'). Returns None if no IDL combo applies (e.g. single-BBU
-    site) or the combo isn't in the registry."""
+    site) or the combo isn't in the registry.
+    Confirmed: when a combo has BOTH a Preferred and Alternate variant (e.g. G2+G3 -> Type BB
+    and Type B), show BOTH joined by '/' rather than silently picking just the first — which
+    physical ports are actually free on the board can't be known from the CIQ, so the engineer
+    picks which applies by deleting whichever didn't."""
     if len(mm_objs) < 2:
         return None
     gens = [get_node_generation(ciq_wb, row) for row in mm_objs]
@@ -1908,9 +1912,12 @@ def derive_idl_build_type_label(ciq_wb, mm_objs):
     entries = IDL_TEMPLATE_REGISTRY.get(combo)
     if not entries:
         return None
-    fname = entries[0][0]
-    m = re.search(r'Buildtype_([A-Z]+)', fname)
-    return f"Type {m.group(1)}" if m else None
+    labels = []
+    for fname, _variant in entries:
+        m = re.search(r'Buildtype_([A-Z]+)', fname)
+        if m:
+            labels.append(f"Type {m.group(1)}")
+    return "/".join(labels) if labels else None
 
 
 def build_mca_integration_report(pre_line, post_line, controller_objs, mm_objs, manual):
