@@ -915,3 +915,149 @@ def check_port_conversion_via_board_swap(ciq_wb, mm_objs, precheck_text, postche
                 "text": f"Port speed 1G to 10G conversion with MPST: {node}.",
             })
     return completed
+
+
+# ============================================================
+# SECTION 15 - SIDEHAUL INFO auto-fill for Switch type / Switch ID / Slot-Port / Node ID
+# (confirmed: Cable part number stays manual - no CIQ/EDP source exists for it)
+# ============================================================
+
+def sidehaul_display_rows(ciq_wb):
+    """Returns the auto-filled portion of each Switch/Slot-Port connection row - one dict
+    per row from Sidehaul Info, ready to combine with a manual Cable part number per row."""
+    return extract_sidehaul_info(ciq_wb)
+
+
+def format_sidehaul_lines(sidehaul_rows, cable_part_numbers=None):
+    """cable_part_numbers: {row_index: manual_value} - confirmed manual, keyed by row order
+    since Sidehaul Info has no unique cable identifier of its own. One line per connection."""
+    cable_part_numbers = cable_part_numbers or {}
+    lines = []
+    for i, row in enumerate(sidehaul_rows):
+        cable = cable_part_numbers.get(i, "")
+        lines.append(
+            f"Switch type: {row['switch_type']}  Switch ID: {row['switch_id']}  "
+            f"Slot/Port: {row['slot_port']}  Cable part number: {cable}  Node ID: {row['node_id']}"
+        )
+    return lines
+
+
+# ============================================================
+# SECTION 16 - EDP PUBLISH fallback (confirmed: replaces the old generic
+# "EDP is not published for the controller" message entirely with the real Pending row)
+# ============================================================
+
+def edp_publish_line(node_id, controller_id, switch_id_manual=""):
+    """Confirmed format, Pending only, stakeholder (AT&T). Switch ID is manual — no source
+    exists for it in this specific context (distinct from the IDL Connections Switch ID,
+    which DOES come from Sidehaul Info — this one doesn't, confirmed)."""
+    return f"EDP Publish: {node_id} | {controller_id} | {switch_id_manual}"
+
+
+# ============================================================
+# SECTION 17 - FDD RENAMING: proper band-label grouping (confirmed gap — was still using
+# raw cell names / report_detect.detect_fdd_renaming's un-grouped tuples instead of the
+# band_label()-based (node, old_label, new_label) grouping agreed on)
+# ============================================================
+
+def fdd_renaming_lines(ciq_wb):
+    """Re-derives renames the same way report_detect.detect_fdd_renaming does (Sector
+    Del_Movement rows where Source Node == Target Node but cell name differs), then groups
+    by (node, old_label, new_label) using band_label() — old_label/new_label already carry
+    the carrier-extension number (AWS_1, AWS_2, AWS_3, etc.), confirmed this is what
+    distinguishes real renames (never a different band family, only a carrier-number
+    change). Node field stays the Node ID per confirmed decision (not a sector letter)."""
+    if "Sector Del_Movement" not in ciq_wb.sheetnames:
+        return []
+    grouped = {}
+    for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
+        src_node, tgt_node = r.get("Source Node name"), r.get("Target Node name")
+        src_cell, tgt_cell = r.get("Source Sector"), r.get("Target Sector")
+        if not (qx.is_populated(src_node) and qx.is_populated(tgt_node) and qx.is_populated(src_cell) and qx.is_populated(tgt_cell)):
+            continue
+        if str(src_node).strip().upper() != str(tgt_node).strip().upper():
+            continue
+        if str(src_cell).strip() == str(tgt_cell).strip():
+            continue
+        old_label, _s1 = qx.band_label(src_cell)
+        new_label, _s2 = qx.band_label(tgt_cell)
+        if not old_label or not new_label:
+            continue
+        key = (str(src_node).strip(), old_label, new_label)
+        grouped.setdefault(key, []).append((src_cell, tgt_cell))
+
+    lines = []
+    for (node, old_label, new_label), _pairs in grouped.items():
+        lines.append(f"FDD Renaming on: {node} From: {old_label} To: {new_label}.")
+    return lines
+
+
+# ============================================================
+# SECTION 18 - CURRENT CONFIGURATION (confirmed rule, agreed early in this session but
+# never actually built): compare Post-checks' actual hardware state against the CIQ's
+# target Post Configuration; only populate this field when they DIFFER (equipment still
+# missing as per Final Configuration). qx.pre_hw_string is generic text parsing, reused
+# directly against postcheck_text, same as elsewhere this session.
+# ============================================================
+
+def current_configuration_line(ciq_wb, mm_objs, postcheck_text):
+    """Returns the Current Configuration string, or "" if Post-checks already matches the
+    CIQ target for every node (nothing missing, field should stay blank/not triggered)."""
+    if not postcheck_text:
+        return ""
+    mismatches = []
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        if not node:
+            continue
+        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        is_lte_primary = str(node).strip().upper() == str(e_name or "").strip().upper()
+        target_row = qx.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) if is_lte_primary else \
+            qx.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        if not target_row:
+            target_row = qx.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or \
+                qx.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        target_hw = qx.hw_string(target_row) or "NOT FOUND"
+        actual_hw = qx.pre_hw_string(postcheck_text, node) or "NOT FOUND"
+        if target_hw != actual_hw:
+            mismatches.append(f"{node}({actual_hw})")
+    if not mismatches:
+        return ""
+    return "/".join(mismatches)
+
+
+# ============================================================
+# SECTION 19 - LOCKED ALARM PORTS: the 6 confirmed buckets from the
+# 6610_Alarm_Cutover_Process_Reporting_Standards reference doc, reduced to simple text
+# generators (confirmed: reuse the shared buffer lines, no dedicated classification UI).
+# ============================================================
+
+def locked_port_bucket_1(ports):
+    """Pre-existing locked state -> Pre-Existing Issues."""
+    if not ports:
+        return None
+    return f"Alarm Ports {ports} remain in a locked state, matching the pre\u2011existing condition. (Owner: AT&T PM/OPS)"
+
+
+def locked_port_bucket_2(ports):
+    """Pre-existing active alarm, kept locked to avoid OPS tickets -> Pre-Existing Issues."""
+    if not ports:
+        return None
+    return f"Pre\u2011existing active alarms on ports {ports} are kept locked to avoid OPS tickets. (Owner: AT&T PM/OPS)"
+
+
+def locked_port_bucket_3(ports, note=""):
+    """Pre-existing loops/bridge clips/no equipment connections -> Pre-Existing Issues."""
+    if not ports:
+        return None
+    text = f"Active alarms observed on ports {ports} are kept locked (Owner: AT&T)."
+    if note:
+        text += f"\nNote: {note}"
+    return text
+
+
+def locked_port_bucket_4(ports, owner):
+    """Post-cutover, FE couldn't clear -> Pending."""
+    if not ports:
+        return None
+    return f"Post external alarm cutover, active alarms observed on ports {ports} have been kept locked (Owner: {owner})."
