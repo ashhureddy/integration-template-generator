@@ -82,6 +82,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
            postcheck_text="", controller_checks_text="", edp_index=None):
     st.subheader("Generate Report")
 
+    mcl.set_app_module(app)  # bind the already-loaded app module — see mca_completed_logic
+                              # docstring for why this can never be a fresh "import app"
+
     idl_build_type = app.derive_idl_build_type_label(ciq_wb, mm_objs)
     controller_id = _get_controller_id(controller_objs)
     controller_in_edp = bool(controller_id)
