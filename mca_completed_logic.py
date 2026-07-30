@@ -1143,3 +1143,143 @@ def locked_port_bucket_4(ports, owner):
     if not ports:
         return None
     return f"Post external alarm cutover, active alarms observed on ports {ports} have been kept locked (Owner: {owner})."
+
+
+# ============================================================
+# SECTION 20 - XLSM ROW WRITES for every item built this session. build_xlsm_row_writes()
+# only ever processed the ORIGINAL mca_checklist.CHECKLIST items — everything new (GPS,
+# Transport SFP structured data, Radio Swap split, LKF node/controller split, EDP Publish,
+# fixed FDD Renaming, Port-Conversion-via-swap, Current Config, locked-port buckets, and
+# the free-text buffer boxes themselves) was NEVER written into the .xlsm at all before this
+# — confirmed real gap. Reuses the exact ROW_MAP slots already reserved for these items.
+# ============================================================
+
+def build_new_xlsm_row_writes(
+        row_map,
+        current_config_text="",
+        gps_completed_groups=None, gps_pending_lines=None,
+        sfp_completed_groups=None, sfp_pending_lines=None,
+        radio_swap_completed=None, radio_swap_pending=None,
+        lkf_completed_line=None, lkf_pending_line=None,
+        fdd_lines=None,
+        edp_publish=None,
+        port_conv_swap_nodes=None,
+        buffer_completed_extra=None, buffer_pending_extra=None, buffer_pre_existing_extra=None):
+    """Every *_groups / *_lines argument is the STRUCTURED data (lists/tuples), not the
+    pre-formatted display strings, so exact column values can be written. Returns a list of
+    (row_num, checked, [(col, value), ...]) tuples, ready to combine with whatever
+    mca_glue.build_xlsm_row_writes already produced for the untouched original items."""
+    rw = []
+
+    # ---- Current Configuration (row 11) — checked only when it actually applies. ----
+    if current_config_text:
+        rw.append((row_map["current_configuration"], True, [(3, current_config_text)]))
+
+    # ---- GPS Installation (completed=[61], pending=[124]) — first group uses the
+    # dedicated row; additional distinct-type groups spill to the Completed buffer pool. ----
+    gcompleted_rows = row_map["gps_installation"]["completed"]
+    if gps_completed_groups:
+        first_nodes, first_type = gps_completed_groups[0]
+        rw.append((gcompleted_rows[0], True, [(3, "|".join(first_nodes)), (5, first_type)]))
+    else:
+        rw.append((gcompleted_rows[0], False, []))
+    gpending_rows = row_map["gps_installation"]["pending"]
+    if gps_pending_lines:
+        rw.append((gpending_rows[0], True, [(3, gps_pending_lines[0])]))
+    else:
+        rw.append((gpending_rows[0], False, []))
+
+    # ---- Transport SFP (completed=[67,68,69], pending=[132-135]) — one node-group per row,
+    # matching the same "one row per instance" pattern already used for Moved Sectors etc. ----
+    sfp_c_rows = row_map["transport_sfp"]["completed"]
+    sfp_completed_groups = sfp_completed_groups or []
+    for i, row_num in enumerate(sfp_c_rows):
+        if i < len(sfp_completed_groups):
+            nodes, bbu, siad = sfp_completed_groups[i]
+            rw.append((row_num, True, [(3, "|".join(nodes)), (4, f"{bbu} / {siad}")]))
+        else:
+            rw.append((row_num, False, []))
+    sfp_p_rows = row_map["transport_sfp"]["pending"]
+    sfp_pending_lines = sfp_pending_lines or []
+    for i, row_num in enumerate(sfp_p_rows):
+        if i < len(sfp_pending_lines):
+            rw.append((row_num, True, [(3, sfp_pending_lines[i])]))
+        else:
+            rw.append((row_num, False, []))
+
+    # ---- Radio Swap (completed=[56,57,58], pending=[119,120,121]) — placement now
+    # DETERMINED by Post-checks, not a manual toggle; write both sides independently. ----
+    rs_c_rows = row_map["radio_swap"]["completed"]
+    radio_swap_completed = radio_swap_completed or []
+    for i, row_num in enumerate(rs_c_rows):
+        if i < len(radio_swap_completed):
+            label, sectors_str, frm, to = radio_swap_completed[i]
+            rw.append((row_num, True, [(3, f"{label}{sectors_str}"), (5, frm), (7, to)]))
+        else:
+            rw.append((row_num, False, []))
+    rs_p_rows = row_map["radio_swap"]["pending"]
+    radio_swap_pending = radio_swap_pending or []
+    for i, row_num in enumerate(rs_p_rows):
+        if i < len(radio_swap_pending):
+            label, sectors_str, frm, to = radio_swap_pending[i]
+            rw.append((row_num, True, [(3, f"{label}{sectors_str}"), (5, frm), (7, to)]))
+        else:
+            rw.append((row_num, False, []))
+
+    # ---- LKF Installation (completed=[62], pending=[125]) — Node and Controller combine
+    # onto one line per section (confirmed: only ever one line max per section). ----
+    lkf_c_row = row_map["lkf_installation"]["completed"][0]
+    rw.append((lkf_c_row, bool(lkf_completed_line), [(3, lkf_completed_line)] if lkf_completed_line else []))
+    lkf_p_row = row_map["lkf_installation"]["pending"][0]
+    rw.append((lkf_p_row, bool(lkf_pending_line), [(3, lkf_pending_line)] if lkf_pending_line else []))
+
+    # ---- FDD Renaming, corrected (completed=[54,55], pending=[117,118]) — band-label
+    # grouped, not raw cell tuples. ----
+    fdd_c_rows = row_map["fdd_renaming"]["completed"]
+    fdd_lines = fdd_lines or []
+    for i, row_num in enumerate(fdd_c_rows):
+        if i < len(fdd_lines):
+            node, old_label, new_label = fdd_lines[i]
+            rw.append((row_num, True, [(3, node), (5, old_label), (8, new_label)]))
+        else:
+            rw.append((row_num, False, []))
+
+    # ---- EDP Publish (pending=[113], no Completed counterpart) ----
+    edp_row = row_map["edp_publish"]["pending"][0]
+    rw.append((edp_row, bool(edp_publish), []))  # no VALUE_COLUMNS entry (structural row) — text lives in the plain-text report
+
+    # ---- Port Conversion via board swap: reuses the SAME row as the original same-board
+    # check (completed=[46]) — confirmed this is the same conceptual item, just a second
+    # completion path, not a separate row. ----
+    pc_row = row_map["port_conversion"]["completed"][0]
+    if port_conv_swap_nodes:
+        rw.append((pc_row, True, [(3, "|".join(port_conv_swap_nodes))]))
+
+    # ---- Buffer pools: Completed (81-90), Pending (158-166), Pre-Existing (169-178) —
+    # first-come-first-served, "Label : Detail" already split into (label, detail) pairs
+    # by the caller. Whatever doesn't fit is simply not written (Warnings tab already
+    # flags pool exhaustion — confirmed decision, nothing silently duplicated here). ----
+    def _fill_buffer(rows, entries):
+        entries = entries or []
+        for i, row_num in enumerate(rows):
+            if i < len(entries):
+                label, detail = entries[i]
+                rw.append((row_num, True, [(2, label), (3, detail)]))
+            else:
+                rw.append((row_num, False, []))
+
+    def _fill_single_column_buffer(rows, entries):
+        """Pre-Existing Issues rows are single-column (just B) — confirmed different from
+        the Completed/Pending buffer rows' B&' : '&C combined format."""
+        entries = entries or []
+        for i, row_num in enumerate(rows):
+            if i < len(entries):
+                rw.append((row_num, True, [(2, entries[i])]))
+            else:
+                rw.append((row_num, False, []))
+
+    _fill_buffer(row_map["additional_completed"]["completed"], buffer_completed_extra)
+    _fill_buffer(row_map["additional_pending"]["pending"], buffer_pending_extra)
+    _fill_single_column_buffer(row_map["pre_existing_issues"], buffer_pre_existing_extra)
+
+    return rw
