@@ -391,20 +391,37 @@ def verify_retune_against_checks(ciq_wb, retune_events, post_text):
 # presence is NOT checked, per explicit instruction)
 # ============================================================
 
-def verify_moved_sectors_against_postcheck(classification, post_text):
+def verify_moved_sectors_against_postcheck(classification, post_text, ciq_wb=None):
+    """Confirmed real bug (found against ALL00640/ALL01340 data): classification['moved']
+    only carries the SOURCE cell name (src_sector) — but a move can rename the cell as part
+    of moving it (confirmed real example: ALL01340_7A_1 -> ALL00640_7A_1, every single move
+    in that CIQ was renamed). Checking the source name against the target node's Post-checks
+    entries can never match once a rename happened. Fixed to build a rename map straight from
+    Sector Del_Movement (same pattern Radio Swap already uses correctly) and check the
+    TARGET cell's identity, falling back to the unrenamed name only if no rename map is
+    available (ciq_wb not passed) or the specific cell wasn't renamed."""
     post_pairs, _ = qx.extract_precheck_sectors(post_text)
     post_by_node = {}
     for node, cell in post_pairs:
         post_by_node.setdefault(node, set()).add(cell)
 
+    rename_map = {}
+    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
+        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
+            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
+            tgt_node = r.get("Target Node name")
+            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
+                rename_map[src_sector] = tgt_sector
+
     warnings = []
     for mv in classification.get("moved", []):
         cell, to_node, from_node = mv["cell"], mv["to_node"], mv["from_node"]
-        if cell not in post_by_node.get(to_node, set()):
+        target_identity = rename_map.get(cell, cell)
+        if target_identity not in post_by_node.get(to_node, set()):
             label, sector = qx.band_label(cell)
             warnings.append({
                 "type": "moved_sector_missing",
-                "text": f"Moved sector {label} {sector} ({cell}) not confirmed on target node : "
+                "text": f"Moved sector {label} {sector} ({target_identity}) not confirmed on target node : "
                         f"{to_node} (moved from {from_node}).",
             })
     return warnings
@@ -835,16 +852,38 @@ def call_test_lines(classification, market, rules, moved_lte_bands, added_bands_
 # ============================================================
 
 def verify_port_conversion_against_postcheck(ciq_wb, mm_objs, precheck_text, postcheck_text, edp_index):
-    """Reuses qx.generate_port_conversion_checks for detection (unchanged), then re-checks
-    the same port in POST-checks - must now show 10G. Warning-only."""
+    """Reuses qx.generate_port_conversion_checks for detection (unchanged — it deliberately
+    fires using Pre-checks' board generation "regardless of what it's being swapped to").
+    Re-checks the SAME (Pre-generation's) port in POST-checks. Confirmed bug found against
+    real ALL00640 data: when a board swap is ALSO happening (Pre=G2, CIQ target=G3+), the
+    physical board changed, so the old generation's port (e.g. TN_A/TN_B) legitimately has
+    NO reading in Post-checks anymore — the new board only has TN_IDL_B. That's not a real
+    failure, it's the wrong port being checked; check_port_conversion_via_board_swap already
+    covers completion correctly for these nodes using the NEW board's port. Skip this stale
+    check entirely for any node where a board swap applies."""
     _outputs, summary_rows, _scope_lines = qx.generate_port_conversion_checks(
         ciq_wb, mm_objs, edp_index, precheck_text, lambda *a: None)
+
+    # Nodes where Pre generation != CIQ target generation — a board swap is in progress,
+    # so the stale-port check below doesn't apply to them at all.
+    swap_node_names = set()
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        if not node:
+            continue
+        pre_model = qx.extract_pre_hw(precheck_text, node)
+        pre_gen = qx.DU_TYPE_TO_GEN.get(str(pre_model).strip()) if pre_model else None
+        post_gen = qx.get_node_generation(ciq_wb, row)
+        if pre_gen and post_gen and pre_gen != post_gen:
+            swap_node_names.add(node)
 
     warnings = []
     for s in summary_rows:
         if s.get("Item") != "Port Conversion":
             continue
         node = s.get("Source")
+        if node in swap_node_names:
+            continue
         note = s.get("Note", "")
         m = re.search(r'\((\w+)\)? board, port: ([\w/]+)', note) or re.search(r'board: (\w+), port: ([\w/]+)', note)
         if not m:
