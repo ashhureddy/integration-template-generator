@@ -12,6 +12,7 @@ import report_detect
 import mca_checklist
 import mca_glue
 import mca_report_text
+import mca_completed_logic as mcl
 from mca_row_map import ROW_MAP
 from mca_xlsm_fill import fill_legacy_mca
 
@@ -122,15 +123,76 @@ def _item_card(item):
     return {"checked": checked, "section": section, "manual_extra": manual_extra, "per_node_manual": per_node_values}, stakeholder
 
 
-def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines):
+def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines,
+           postcheck_text="", controller_checks_text="", edp_index=None):
     st.subheader("Generate Report")
 
     idl_build_type = app.derive_idl_build_type_label(ciq_wb, mm_objs)
     controller_id = _get_controller_id(controller_objs)
     controller_in_edp = bool(controller_id)
 
+    # ---- Real classification, computed once, feeding both the checklist and every
+    # verification function below (confirmed this session — reuses qx.classify_carriers
+    # directly rather than re-deriving anything). ----
+    classification = app.classify_carriers(ciq_wb, mm_objs, precheck_text)
+    new_nodes, board_swaps = report_detect.detect_node_board_changes(app, ciq_wb, mm_objs, precheck_text)
+
+    # ---- Retune fix: replace the old sector-dropping "Retune on:" lines with the
+    # corrected, sector-tracked version before the checklist ever sees them — this way
+    # mca_checklist.py's existing "_scope_lines_matching(ctx, 'Retune on:')" mechanism
+    # picks up the FIXED lines automatically, no change needed to the checklist item itself. ----
+    retune_events = mcl.classify_retunes_with_sectors(ciq_wb)
+    corrected_retune_lines = mcl.format_retunes(retune_events)
+    scope_lines = [l for l in scope_lines if not l.startswith("Retune on:")] + corrected_retune_lines
+
+    # ---- Call Test: market-table-driven, confirmed and built this session, replacing the
+    # previously dead stub items entirely. Requires categorizing added/moved bands by
+    # tech (lte / 5g / cband_dod) via band_label() — reused directly, nothing new derived. ----
+    added_bands_by_tech = {"lte": set(), "5g": set(), "cband_dod": set()}
+    moved_bands_by_tech = {"lte": set(), "5g": set(), "cband_dod": set()}
+    for node, cells in classification.get("added", {}).items():
+        for cell in cells:
+            label, _sector = app.band_label(cell)
+            if label in ("CBAND", "DOD", "DOD_BWE"):
+                added_bands_by_tech["cband_dod"].add(label)
+            elif label and label.startswith("5G_"):
+                added_bands_by_tech["5g"].add(label)
+            elif label:
+                added_bands_by_tech["lte"].add(label)
+    for mv in classification.get("moved", []):
+        label, _sector = app.band_label(mv["cell"])
+        if label in ("CBAND", "DOD", "DOD_BWE"):
+            moved_bands_by_tech["cband_dod"].add(label)
+        elif label and label.startswith("5G_"):
+            moved_bands_by_tech["5g"].add(label)
+        elif label:
+            moved_bands_by_tech["lte"].add(label)
+
+    calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
+    if calltest_path.exists() and mm_objs:
+        prefix_to_market, calltest_rules = mcl.load_calltest_table(calltest_path)
+        market = mcl.determine_market(mm_objs[0].get("Node to be built as"), prefix_to_market)
+        if market:
+            scope_lines = scope_lines + mcl.call_test_lines(
+                classification, market, calltest_rules,
+                moved_bands_by_tech["lte"], added_bands_by_tech, moved_bands_by_tech)
+
     ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp)
     results = mca_checklist.evaluate_checklist(ctx)
+
+    # ---- Warnings tab collection: every verification function feeds here. Confirmed
+    # design: warning-only for most items (never touches report placement), except
+    # Radio Swap (which changes Completed/Pending placement itself) and the
+    # board-swap-triggered Transport SFP case (which is both Pending AND a warning). ----
+    warnings = []
+    if postcheck_text:
+        warnings += mcl.verify_integration_against_postcheck(classification, postcheck_text)
+        warnings += mcl.verify_moved_sectors_against_postcheck(classification, postcheck_text)
+        warnings += mcl.verify_deleted_sectors_against_postcheck(classification, postcheck_text)
+        warnings += mcl.verify_retune_against_checks(ciq_wb, retune_events, postcheck_text)
+        if edp_index:
+            warnings += mcl.verify_port_conversion_against_postcheck(
+                ciq_wb, mm_objs, precheck_text, postcheck_text, edp_index)
 
     site_ids = "/".join(r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as"))
     fa_code = ""
@@ -208,6 +270,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 stakeholders[item["key"]] = stakeholder
         additional_pending = st.text_area("Enter any additional pending information that needs to be reported to Market", key="rpt_add_pending", height=70)
         choices["additional_pending"] = {"text": additional_pending}
+
+    if warnings:
+        with st.expander(f"⚠️ Warnings ({len(warnings)})", expanded=True):
+            st.markdown(
+                "<div style='color:#c0392b; font-weight:600;'>These are informational only "
+                "— they never change what's in the report, they're here so nothing gets missed.</div>",
+                unsafe_allow_html=True)
+            for w in warnings:
+                st.markdown(f"<div style='color:#c0392b;'>• {w['text']}</div>", unsafe_allow_html=True)
 
     with st.expander("Pre-Existing Issues"):
         pre_existing_text = st.text_area("Enter any Pre-Existing Issues that needs to be reported to Market", key="rpt_preexisting", height=70)
