@@ -135,8 +135,60 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 classification, market, calltest_rules,
                 moved_bands_by_tech["lte"], added_bands_by_tech, moved_bands_by_tech)
 
+    # ---- Radio Swap: remove the old single toggle-based line entirely (it can no longer
+    # represent "some swaps done, some not" correctly) and compute the real split instead.
+    # Placement is DETERMINED by Post-checks, confirmed — not a manual toggle anymore. ----
+    scope_lines = [l for l in scope_lines if not l.startswith("Radio Swap on:")]
+    radio_swap_completed_lines, radio_swap_pending_lines = [], []
+    if postcheck_text:
+        rs_completed, rs_pending = mcl.classify_radio_swap_placement(precheck_text, postcheck_text, ciq_wb)
+        radio_swap_completed_lines = mcl.format_radio_swaps(rs_completed)
+        radio_swap_pending_lines = mcl.format_radio_swaps(rs_pending, label_prefix="Radio Swap on:")
+
+    # ---- Port Conversion via board swap: NEW completion path, confirmed against real
+    # ECL02586 data — a board swap can itself complete the 1G->10G conversion, which the
+    # existing same-board-only logic never recognized. ----
+    port_conv_swap_completed = []
+    if postcheck_text:
+        port_conv_swap_completed = mcl.check_port_conversion_via_board_swap(
+            ciq_wb, mm_objs, precheck_text, postcheck_text)
+        # A node completed via swap shouldn't also show as a pending "still needs conversion"
+        # line from the original same-board check.
+        swap_nodes = {r["node"] for r in port_conv_swap_completed}
+        scope_lines = [l for l in scope_lines
+                       if not (l.startswith("Port speed 1G to 10G conversion with MPST:")
+                               and any(n in l for n in swap_nodes))]
+
+    # ---- 6610 cascade: if a 6610 is present/EDP-published but the controller-checks file
+    # doesn't confirm alarm scripting, 4 items move to Pending together, no warning. ----
+    controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
+    cascade_fires = mcl.controller_integration_cascade(
+        bool(controller_in_edp), controller_checks_data, controller_id)
+    sau_placement = mcl.sau_connections_placement(controller_checks_data, controller_id) if controller_id else None
+    testing_section, testing_note = mcl.external_alarm_testing_placement(controller_checks_data) \
+        if controller_checks_data else (None, None)
+
     ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp)
     results = mca_checklist.evaluate_checklist(ctx)
+
+    if cascade_fires:
+        # Force these 4 items to Pending, drop them from wherever the normal detection put
+        # them, no warning per confirmed decision.
+        cascade_keys = {"controller_integration", "alarm_scripting", "lkf_installation", "alarm_testing"}
+        for item in results:
+            if item["key"] in cascade_keys:
+                item["section"] = "pending"
+                item["checked_by_default"] = True
+    if sau_placement and not cascade_fires:
+        for item in results:
+            if item["key"] == "sau_connections":
+                item["section"] = "completed" if sau_placement == "Completed" else "pending"
+                item["checked_by_default"] = True
+    if testing_section and not cascade_fires:
+        for item in results:
+            if item["key"] == "alarm_testing":
+                item["section"] = "completed" if testing_section == "Completed" else "pending"
+                item["checked_by_default"] = True
 
     # ---- Warnings tab collection: every verification function feeds here. Confirmed
     # design: warning-only for most items (never touches report placement), except
@@ -201,15 +253,102 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 idly = st.text_area("IDLy cable details (manual)", key="rpt_idly", height=60)
                 slot_port = st.text_area("Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
 
-    st.markdown("### Report preview")
-    report_placeholder = st.empty()
+    # ---- LKF Installation: user input per node, Completed or Pending (confirmed
+    # explicitly — reusing the toggle mechanism per-node, not per-item). ----
+    lkf_nodes = mcl.lkf_trigger_nodes(new_nodes, board_swaps, controller_id, precheck_text, mm_objs)
+    lkf_choices = {}
+    if lkf_nodes:
+        with st.container(border=True):
+            st.markdown(f"**LKF Installation** \u2014 {len(lkf_nodes)} node(s) need this. Pick Completed or Pending for each:")
+            for node in lkf_nodes:
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    st.caption(node)
+                with c2:
+                    lkf_choices[node] = st.selectbox("Status", ["Completed", "Pending"],
+                                                       key=f"lkf_{node}", label_visibility="collapsed")
+    lkf_lines_by_section = mcl.lkf_lines_by_choice(lkf_choices, controller_id) if lkf_choices else {}
+    if cascade_fires and lkf_lines_by_section.get("Completed"):
+        # Cascade forces LKF's 6610 portion to Pending too — move whatever the engineer
+        # marked Completed into Pending instead, no warning, per confirmed decision.
+        lkf_lines_by_section["Pending"] = (lkf_lines_by_section.get("Pending", "") + "\n"
+                                            + lkf_lines_by_section.pop("Completed")).strip()
+
+    # ---- GPS: Installation (new nodes, grouped by Post-checks type), Upgrade (existing
+    # nodes, type changed), and the two site-health checks — all fully automatic now that
+    # GPS Version comes from Post-checks, no manual entry needed. ----
+    gps_extra_completed, gps_extra_pending = [], []
+    if postcheck_text:
+        post_gps = mcl.extract_gps_status(postcheck_text)
+        pre_gps = mcl.extract_gps_status(precheck_text) if precheck_text else {}
+        existing_nodes = [row.get("Node to be built as") for row in mm_objs
+                           if row.get("Node to be built as") not in new_nodes]
+        gps_dedicated, gps_overflow = mcl.gps_installation_lines(new_nodes, post_gps)
+        if gps_dedicated:
+            gps_extra_completed.append(gps_dedicated)
+        gps_extra_completed += gps_overflow
+        gps_extra_completed += mcl.gps_upgrade_lines(existing_nodes, pre_gps, post_gps)
+
+        gps_unconfirmed = mcl.gps_unconfirmed_type_check(mm_objs, post_gps)
+        if gps_unconfirmed:
+            gps_extra_pending.append(gps_unconfirmed)
+            warnings.append({"type": "gps_unconfirmed_type", "text": gps_unconfirmed})
+        post_sync = mcl.extract_sync_status_2(postcheck_text)
+        gps_sync_line = mcl.gps_sync_disabled_check(mm_objs, post_sync)
+        if gps_sync_line:
+            gps_extra_pending.append(gps_sync_line)
+
+    # ---- Transport SFP: trigger nodes = new nodes OR Port-Conversion-triggered nodes.
+    # BBU/SIAD End models are MANUAL (confirmed), grouped by shared entered model. ----
+    port_conv_nodes = sorted({l.split("MPST: ")[-1].rstrip(".") for l in scope_lines
+                               if l.startswith("Port speed 1G to 10G conversion with MPST:")}
+                              | {r["node"] for r in port_conv_swap_completed})
+    sfp_trigger_nodes = sorted(set(new_nodes) | set(port_conv_nodes))
+    sfp_models_by_node = {}
+    if sfp_trigger_nodes:
+        with st.container(border=True):
+            st.markdown(f"**Transport SFP Installation** \u2014 {len(sfp_trigger_nodes)} node(s). SFP models are manual:")
+            for node in sfp_trigger_nodes:
+                c1, c2, c3 = st.columns([1, 1, 1])
+                with c1:
+                    st.caption(node)
+                with c2:
+                    bbu = st.text_input("BBU End", key=f"sfp_bbu_{node}", label_visibility="collapsed", placeholder="SFP Model (BBU End)")
+                with c3:
+                    siad = st.text_input("SIAD End", key=f"sfp_siad_{node}", label_visibility="collapsed", placeholder="SFP Model (SIAD End)")
+                sfp_models_by_node[node] = (bbu, siad)
+    transport_sfp_lines = mcl.transport_sfp_installation_lines(sfp_trigger_nodes, sfp_models_by_node) if sfp_trigger_nodes else []
+
+    sfp_pending_extra, sfp_pre_existing_extra = [], []
+    transport_sfp_data = {}
+    if postcheck_text:
+        transport_sfp_data = mcl.extract_transport_sfp(postcheck_text)
+        board_swap_names = [n for n, _p, _q in board_swaps] if board_swaps else []
+        sfp_pending_extra, sfp_warnings, sfp_pre_existing_extra = mcl.transport_sfp_verification(
+            ciq_wb, mm_objs, new_nodes, board_swap_names, postcheck_text, transport_sfp_data)
+        warnings += sfp_warnings
+
+    # ---- Filter the checklist to ONLY show items that actually apply (confirmed decision:
+    # whatever doesn't apply is simply not shown, not an empty unchecked row). ----
+    completed_items = [i for i in results if i["section"] == "completed" and i["checked_by_default"]]
+    pending_items = [i for i in results if i["section"] == "pending" and i["checked_by_default"]]
 
     st.markdown("### Which of these apply?")
-    st.caption("Checked = included in the report above. Uncheck anything that doesn't apply to this site; nothing else to fill in per item — use the manual boxes below for anything not auto-detected.")
+    st.caption("Only items QUICKIX actually detected are shown. Uncheck anything that doesn't apply; use the manual boxes below for anything not auto-detected.")
 
     choices, stakeholders = {}, {}
-    completed_items = [i for i in results if i["section"] == "completed"]
-    pending_items = [i for i in results if i["section"] == "pending"]
+
+    extra_completed_text = "\n".join(
+        gps_extra_completed + transport_sfp_lines + radio_swap_completed_lines
+        + [r["text"] for r in port_conv_swap_completed]
+        + ([lkf_lines_by_section["Completed"]] if lkf_lines_by_section.get("Completed") else [])
+    )
+    extra_pending_text = "\n".join(
+        gps_extra_pending + sfp_pending_extra + radio_swap_pending_lines
+        + ([lkf_lines_by_section["Pending"]] if lkf_lines_by_section.get("Pending") else [])
+    )
+    if testing_note:
+        extra_pending_text = (extra_pending_text + "\n" + testing_note).strip()
 
     with st.expander(f"Completed ({sum(1 for i in completed_items if i['checked_by_default'])} auto-detected)", expanded=True):
         cols = st.columns(2)
@@ -217,7 +356,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             with cols[i % 2]:
                 choice, stakeholder = _simple_item_row(item)
                 choices[item["key"]] = choice
-        additional_completed = st.text_area("Enter any additional completed information that needs to be added in report", key="rpt_add_completed", height=70)
+        additional_completed = st.text_area("Enter any additional completed information that needs to be added in report",
+                                             value=extra_completed_text, key="rpt_add_completed", height=100)
         choices["additional_completed"] = {"text": additional_completed}
 
     with st.expander(f"Pending ({sum(1 for i in pending_items if i['checked_by_default'])} auto-detected)", expanded=True):
@@ -227,20 +367,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 choice, stakeholder = _simple_item_row(item)
                 choices[item["key"]] = choice
                 stakeholders[item["key"]] = stakeholder
-        additional_pending = st.text_area("Enter any additional pending information that needs to be reported to Market", key="rpt_add_pending", height=70)
+        additional_pending = st.text_area("Enter any additional pending information that needs to be reported to Market",
+                                           value=extra_pending_text, key="rpt_add_pending", height=100)
         choices["additional_pending"] = {"text": additional_pending}
 
-    if warnings:
-        with st.expander(f"⚠️ Warnings ({len(warnings)})", expanded=True):
-            st.markdown(
-                "<div style='color:#c0392b; font-weight:600;'>These are informational only "
-                "— they never change what's in the report, they're here so nothing gets missed.</div>",
-                unsafe_allow_html=True)
-            for w in warnings:
-                st.markdown(f"<div style='color:#c0392b;'>• {w['text']}</div>", unsafe_allow_html=True)
-
     with st.expander("Pre-Existing Issues"):
-        pre_existing_text = st.text_area("Enter any Pre-Existing Issues that needs to be reported to Market", key="rpt_preexisting", height=70)
+        pre_existing_text = st.text_area("Enter any Pre-Existing Issues that needs to be reported to Market",
+                                          value="\n".join(sfp_pre_existing_extra), key="rpt_preexisting", height=70)
         choices["pre_existing_issues_text"] = pre_existing_text
 
     with st.expander("Notes"):
@@ -273,23 +406,35 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         notes_generic = st.text_area("Enter Notes that need to be reported or addressed to Market", key="rpt_notes_generic", height=70)
         choices["notes_generic_text"] = notes_generic
 
-    header_fields = {
-        "mic": "MIC", "market": market, "status": status, "site_name": site_name,
-        "fa_code": fa_code, "site_ids": site_ids, "sow": sow, "iwm_details": iwm_details,
-        "pre_configuration": pre_line, "current_configuration": current_config,
-        "post_configuration": post_line, "wll_node": wll_node, "controller_id": controller_id,
-        "software_version": software_version, "gs_version": gs_version,
-        "idl_build_type": idl_build_type, "idle": idle, "idly": idly, "switch": switch, "slot_port": slot_port,
-    }
-    report_text = mca_report_text.build_mca_report_text(mm_objs, results, choices, header_fields, stakeholder_by_key=stakeholders)
-    report_placeholder.text_area("Report preview (live — updates as you check/uncheck items below)",
-                                  report_text, height=400, key="rpt_preview_live")
-
     st.markdown("---")
     node_tag = mm_objs[0].get("Node to be built as", "site") if mm_objs else "site"
-    st.download_button("Download report (.txt)", report_text, file_name=f"{node_tag}_Integration_Report.txt", key="rpt_dl_txt")
 
-    if st.button("Generate filled checklist (.xlsm) \u2192", key="rpt_generate_mca"):
+    if st.button("Generate Report \u2192", type="primary", key="rpt_generate_mca"):
+        if warnings:
+            with st.container(border=True):
+                st.markdown(
+                    f"<div style='color:#c0392b; font-size:1.3em; font-weight:700;'>"
+                    f"⚠️ {len(warnings)} Warning{'s' if len(warnings) != 1 else ''}</div>"
+                    f"<div style='color:#c0392b; margin-bottom:0.5em;'>Informational only — these never change "
+                    f"what's in the report below, they're here so nothing gets missed.</div>",
+                    unsafe_allow_html=True)
+                for w in warnings:
+                    st.markdown(f"<div style='color:#c0392b; font-size:1.05em; padding:2px 0;'>• {w['text']}</div>",
+                                unsafe_allow_html=True)
+
+        header_fields = {
+            "mic": "MIC", "market": market, "status": status, "site_name": site_name,
+            "fa_code": fa_code, "site_ids": site_ids, "sow": sow, "iwm_details": iwm_details,
+            "pre_configuration": pre_line, "current_configuration": current_config,
+            "post_configuration": post_line, "wll_node": wll_node, "controller_id": controller_id,
+            "software_version": software_version, "gs_version": gs_version,
+            "idl_build_type": idl_build_type, "idle": idle, "idly": idly, "switch": switch, "slot_port": slot_port,
+        }
+        report_text = mca_report_text.build_mca_report_text(mm_objs, results, choices, header_fields, stakeholder_by_key=stakeholders)
+        st.success("Report generated.")
+        st.text_area("Report preview", report_text, height=400, key="rpt_preview")
+        st.download_button("Download report (.txt)", report_text, file_name=f"{node_tag}_Integration_Report.txt", key="rpt_dl_txt")
+
         row_writes = mca_glue.build_xlsm_row_writes(results, choices, ROW_MAP)
         row_writes.append((3, True, [(2, "MIC"), (3, market), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, sow)]))
         row_writes.append((6, True, [(3, iwm_details)]))
