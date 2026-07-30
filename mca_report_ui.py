@@ -340,20 +340,27 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 slot_port = st.text_area("Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
 
     # ---- LKF Installation: user input per node, Completed or Pending (confirmed
-    # explicitly — reusing the toggle mechanism per-node, not per-item). ----
+    # explicitly). No default — the engineer must actively pick; leaving it untouched
+    # excludes that node's LKF line entirely rather than silently assuming Completed. ----
     lkf_nodes = mcl.lkf_trigger_nodes(new_nodes, board_swaps, controller_id, precheck_text, mm_objs)
     lkf_choices = {}
     if lkf_nodes:
         with st.container(border=True):
-            st.markdown(f"**LKF Installation** \u2014 {len(lkf_nodes)} node(s) need this. Pick Completed or Pending for each:")
+            st.markdown(f"**LKF Installation** \u2014 {len(lkf_nodes)} node(s) need this. "
+                        f"Pick Completed or Pending for each (required — left blank = excluded from the report):")
             for node in lkf_nodes:
                 c1, c2 = st.columns([2, 1])
                 with c1:
                     st.caption(node)
                 with c2:
-                    lkf_choices[node] = st.selectbox("Status", ["Completed", "Pending"],
-                                                       key=f"lkf_{node}", label_visibility="collapsed")
+                    pick = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                          key=f"lkf_{node}", label_visibility="collapsed")
+                    if pick != "\u2014 Select \u2014":
+                        lkf_choices[node] = pick
     lkf_lines_by_section = mcl.lkf_lines_by_choice(lkf_choices, controller_id) if lkf_choices else {}
+    if lkf_nodes and len(lkf_choices) < len(lkf_nodes):
+        st.caption(f"\u26a0\ufe0f {len(lkf_nodes) - len(lkf_choices)} LKF node(s) still need a Completed/Pending pick "
+                   f"\u2014 they won't appear in the report until selected.")
     if cascade_fires and lkf_lines_by_section.get("Completed"):
         # Cascade forces LKF's 6610 portion to Pending too — move whatever the engineer
         # marked Completed into Pending instead, no warning, per confirmed decision.
