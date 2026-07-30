@@ -882,3 +882,36 @@ class BufferPool:
             return False
         bucket.append(f"{label} : {detail}")
         return True
+
+
+def check_port_conversion_via_board_swap(ciq_wb, mm_objs, precheck_text, postcheck_text):
+    """NEW scenario, confirmed against real ECL02586 data: when a board swap explains the
+    speed change (Pre board generation != CIQ target generation) rather than a pure
+    same-board 1G->10G conversion, the OLD generate_port_conversion_checks logic just
+    skips the site entirely (Rule 1: "a board swap is already in progress ... Port
+    Conversion doesn't apply"). That's still correct for the PLANNED/pending line - but
+    it means a real completed conversion (accomplished as a side-effect of the swap) was
+    never being recognized as complete at all. Real example: ECL02586 Pre=G2(6630, port
+    TN_B, 1G), CIQ target=G4(6672) -> check the NEW board's relevant port (TN_IDL_C) in
+    Post-checks: shows 10G_FULL -> conversion is COMPLETE via the swap.
+    Returns list of {"node":..., "text":...} for every node where this applies."""
+    completed = []
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        if not node:
+            continue
+        pre_model = qx.extract_pre_hw(precheck_text, node)
+        pre_gen = qx.DU_TYPE_TO_GEN.get(str(pre_model).strip()) if pre_model else None
+        post_gen = qx.get_node_generation(ciq_wb, row)
+        if not pre_gen or not post_gen or pre_gen == post_gen:
+            continue  # not a board-swap scenario - the existing same-board check handles this node instead
+        port_labels = qx.PORT_BY_GEN.get(post_gen)
+        if not port_labels:
+            continue
+        opmode = qx.extract_transport_fiber_opmode(postcheck_text, node, port_labels)
+        if opmode and "10G" in opmode.upper():
+            completed.append({
+                "node": node,
+                "text": f"Port speed 1G to 10G conversion with MPST: {node}.",
+            })
+    return completed
