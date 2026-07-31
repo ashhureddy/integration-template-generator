@@ -155,14 +155,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 moved_bands_by_tech["lte"], added_bands_by_tech, moved_bands_by_tech)
 
     # ---- Florida-only: newly added CBAND/DOD/DOD_BWE cells, one per row (93-104), overflow
-    # appended to the last row with '|' (confirmed this session — previously untouched). ----
+    # appended to the last row with '|' (confirmed this session — previously untouched).
+    # Rendered as a proper Completed checklist checkbox below, not a standalone block. ----
     florida_cells = mcl.florida_newly_added_cells(market, classification)
     florida_rows = mcl.florida_cells_to_rows(florida_cells)
-    if florida_rows:
-        with st.container(border=True):
-            st.markdown(f"**Newly added Cells** (Florida market) \u2014 {len(florida_cells)} cell(s)")
-            for r in florida_rows:
-                st.caption(r)
 
     # ---- Radio Swap: remove the old single toggle-based line entirely (it can no longer
     # represent "some swaps done, some not" correctly) and compute the real split instead.
@@ -499,6 +495,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             with cols[i % 2]:
                 choice, stakeholder = _simple_item_row(item)
                 choices[item["key"]] = choice
+        florida_checked = False
+        if florida_rows:
+            florida_checked = st.checkbox(f"Newly added Cells (Florida market) \u2014 {len(florida_cells)} cell(s)",
+                                            value=True, key="chk_florida_cells")
+            if florida_checked:
+                for r in florida_rows:
+                    st.caption(r)
         additional_completed = st.text_area("\U0001F4DD Enter any additional completed information that needs to be added in report",
                                              value=extra_completed_text, key="rpt_add_completed", height=100)
         choices["additional_completed"] = {"text": additional_completed}
@@ -723,10 +726,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
         # Florida-only newly added cells (rows 93-104, single column B, confirmed same
         # pattern as Pre-Existing Issues rows — not the label:detail buffer format).
+        # Gated on the checkbox — unchecked means excluded from the .xlsm entirely.
         florida_xlsm_rows = list(range(93, 105))
+        florida_active_rows = florida_rows if florida_checked else []
         for i, row_num in enumerate(florida_xlsm_rows):
-            if i < len(florida_rows):
-                row_writes.append((row_num, True, [(2, florida_rows[i])]))
+            if i < len(florida_active_rows):
+                row_writes.append((row_num, True, [(2, florida_active_rows[i])]))
             else:
                 row_writes.append((row_num, False, []))
 
