@@ -507,8 +507,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 if t1:
                     bucket_notes.append(t1)
 
-                nb2 = st.text_input("\U0001F4DD 2. Pre-Existing Loops and Bridge Clips on the 66 Block \u2014 port numbers", key="n2e_lp_loops")
-                t2 = n2e.n2e_locked_port_loops_bridge_clips(nb2, n2e_port_slogan_map)
+                nb2 = st.text_input("\U0001F4DD 2. Pre-Existing Loops and Bridge Clips on the 66 Block \u2014 currently locked port numbers", key="n2e_lp_loops")
+                nb2_loops_removed = st.text_input(
+                    "\U0001F4DD Loops/clips actually removed from \u2014 port numbers (leave blank to reuse the ports above; "
+                    "may include ports no longer locked)", key="n2e_lp_loops_removed", placeholder="e.g. 4, 5, 6, 7")
+                t2 = n2e.n2e_locked_port_loops_bridge_clips(nb2, n2e_port_slogan_map,
+                                                              loops_removed_ports=nb2_loops_removed if nb2_loops_removed.strip() else None)
                 if t2:
                     bucket_notes.append(t2)
 
