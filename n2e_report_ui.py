@@ -231,11 +231,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         else:
             st.caption("GPS Installation: Post-checks not uploaded \u2014 can't determine sync status.")
 
-        # LKF Installation — per-entity, no default.
+        # LKF Installation — Node(s) and Controller are independent installation points
+        # (confirmed real gap: was only showing a per-node dropdown, no separate
+        # Controller option at all). Reuses the same shared mcl.lkf_lines_by_choice()
+        # logic already tested for MCA — no default on either.
         lkf_completed, lkf_pending = None, None
         with st.container(border=True):
-            st.markdown("**LKF Installation** \u2014 per node/controller, required:")
-            lkf_c_nodes, lkf_p_nodes = [], []
+            st.markdown("**LKF Installation** \u2014 Node and Controller are tracked "
+                        "independently, required:")
+            lkf_node_choices = {}
             for row in mm_objs:
                 node = row.get("Node to be built as")
                 c1, c2 = st.columns([2, 1])
@@ -243,13 +247,25 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 with c2:
                     pick = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
                                           key=f"n2e_lkf_{node}", label_visibility="collapsed")
-                    (lkf_c_nodes if pick == "Completed" else lkf_p_nodes if pick == "Pending" else []).append(node) \
-                        if pick != "\u2014 Select \u2014" else None
-            if lkf_c_nodes:
-                lkf_completed = f"LKF Installation: {'|'.join(lkf_c_nodes)}|{controller_id or ''}."
+                    if pick != "\u2014 Select \u2014":
+                        lkf_node_choices[node] = pick
+            lkf_controller_choice = None
+            if controller_id:
+                c1, c2 = st.columns([2, 1])
+                with c1: st.caption(f"{controller_id} (controller)")
+                with c2:
+                    cpick = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                           key="n2e_lkf_controller", label_visibility="collapsed")
+                    if cpick != "\u2014 Select \u2014":
+                        lkf_controller_choice = cpick
+
+            lkf_lines_by_section = mcl.lkf_lines_by_choice(lkf_node_choices, lkf_controller_choice, controller_id) \
+                if (lkf_node_choices or lkf_controller_choice) else {}
+            if lkf_lines_by_section.get("Completed"):
+                lkf_completed = lkf_lines_by_section["Completed"]
                 choices_completed.append(lkf_completed)
-            if lkf_p_nodes:
-                lkf_pending = f"LKF Installation: {'|'.join(lkf_p_nodes)}|{controller_id or ''}. (MIC)"
+            if lkf_lines_by_section.get("Pending"):
+                lkf_pending = lkf_lines_by_section["Pending"]
 
         # Transport SFP — new-node trigger, manual SFP model per node. Confirmed
         # correction: blank fields simply produce nothing (no line at all) — no longer
