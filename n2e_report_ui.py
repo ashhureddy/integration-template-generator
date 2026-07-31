@@ -273,8 +273,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         sfp_completed_lines = []
         if new_nodes:
             with st.container(border=True):
-                st.markdown("**Transport SFP Installation on** \u2014 manual SFP models "
-                            "(leave blank if not applicable \u2014 prints empty, no auto-Pending):")
+                st.markdown("**Transport SFP Installation on** \u2014 Enter SFP models")
                 for node in new_nodes:
                     c1, c2, c3 = st.columns([1, 1, 1])
                     with c1: st.caption(node)
