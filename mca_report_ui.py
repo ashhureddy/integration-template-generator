@@ -176,17 +176,22 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     # ---- Port Conversion via board swap: NEW completion path, confirmed against real
     # ECL02586 data — a board swap can itself complete the 1G->10G conversion, which the
-    # existing same-board-only logic never recognized. ----
+    # existing same-board-only logic never recognized. Confirmed: merge ALL completed nodes
+    # (same-board AND via-swap) onto ONE line through Port Conversion's existing dedicated
+    # checklist row — no separate buffer injection, regardless of how many nodes. ----
     port_conv_swap_completed = []
     if postcheck_text:
         port_conv_swap_completed = mcl.check_port_conversion_via_board_swap(
             ciq_wb, mm_objs, precheck_text, postcheck_text)
-        # A node completed via swap shouldn't also show as a pending "still needs conversion"
-        # line from the original same-board check.
+        same_board_nodes = {
+            l.split("MPST:")[-1].strip().rstrip(".")
+            for l in scope_lines if l.startswith("Port speed 1G to 10G conversion with MPST:")
+        }
         swap_nodes = {r["node"] for r in port_conv_swap_completed}
-        scope_lines = [l for l in scope_lines
-                       if not (l.startswith("Port speed 1G to 10G conversion with MPST:")
-                               and any(n in l for n in swap_nodes))]
+        all_completed_nodes = sorted(same_board_nodes | swap_nodes)
+        scope_lines = [l for l in scope_lines if not l.startswith("Port speed 1G to 10G conversion with MPST:")]
+        if all_completed_nodes:
+            scope_lines = scope_lines + [f"Port speed 1G to 10G conversion with MPST: {'|'.join(all_completed_nodes)}."]
 
     # ---- 6610 cascade: if a 6610 is present/EDP-published but the controller-checks file
     # doesn't confirm alarm scripting, 4 items move to Pending together, no warning. ----
@@ -477,7 +482,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     extra_completed_text = "\n".join(
         gps_extra_completed + transport_sfp_lines + radio_swap_completed_lines
-        + [r["text"] for r in port_conv_swap_completed] + fdd_lines_fixed
+        + fdd_lines_fixed
         + ([lkf_lines_by_section["Completed"]] if lkf_lines_by_section.get("Completed") else [])
     )
     extra_pending_text = "\n".join(
@@ -676,7 +681,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 fdd_parsed.append((m.group(1), m.group(2), m.group(3)))
         lkf_completed_val = (lkf_lines_by_section.get("Completed", "") or "").replace("LKF Installation:", "").strip() or None
         lkf_pending_val = (lkf_lines_by_section.get("Pending", "") or "").replace("LKF Installation:", "").replace("(MIC)", "").strip() or None
-        port_conv_swap_node_names = [r["node"] for r in port_conv_swap_completed]
 
         def _split_buffer_lines(lines):
             """Buffer entries as (label, detail) — first ':' splits label from detail;
@@ -692,8 +696,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
         # Completed buffer = whatever's left after GPS's dedicated row + Transport SFP's
         # dedicated rows + FDD's dedicated rows + LKF's dedicated row are accounted for.
-        buffer_completed_lines = (gps_extra_completed[1:] + transport_sfp_lines[3:]
-                                    + [r["text"] for r in port_conv_swap_completed if r["node"] not in port_conv_swap_node_names[:0]])
+        # (Port Conversion is NOT here — it merges into one line through its own dedicated
+        # checklist row instead, confirmed, regardless of how many nodes.)
+        buffer_completed_lines = gps_extra_completed[1:] + transport_sfp_lines[3:]
         buffer_pending_lines = gps_extra_pending + sfp_pending_extra
         buffer_pre_existing_lines = sfp_pre_existing_extra + bucket_pre_existing
 
@@ -710,7 +715,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             lkf_pending_line=lkf_pending_val,
             fdd_lines=fdd_parsed[:2],
             edp_publish=edp_publish_text,
-            port_conv_swap_nodes=port_conv_swap_node_names,
             buffer_completed_extra=_split_buffer_lines(buffer_completed_lines)[:10],
             buffer_pending_extra=_split_buffer_lines(buffer_pending_lines)[:9],
             buffer_pre_existing_extra=buffer_pre_existing_lines[:10],
