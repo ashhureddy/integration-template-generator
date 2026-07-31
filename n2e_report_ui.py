@@ -105,6 +105,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         st.markdown("**Configuration**")
         st.markdown(f"Pre Configuration : **Nokia**")
         st.markdown(f"Post Configuration : **{post_line}**")
+        st.markdown(f"6610 Controller : **{controller_id or '(none detected)'}**")
         current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs, postcheck_text) if postcheck_text else ""
         if current_config_auto:
             current_config = st.text_input("\U0001F4DD Current Configuration \u2014 review/edit:",
@@ -145,8 +146,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 switch = "\n".join(mcl.format_sidehaul_lines(sidehaul_rows, cable_pns))
             else:
                 sidehaul_rows = []
-                switch = st.text_area("\U0001F4DD Switch details (manual)", key="n2e_switch", height=60)
-                slot_port = st.text_area("\U0001F4DD Slot/Port/Cable/Node ID (manual)", key="n2e_slotport", height=60)
+                # Confirmed: if Switch isn't present in Sidehaul Info at all, don't show
+                # any Switch UI — no manual fallback needed for N2E.
+                switch = ""
     else:
         sidehaul_rows = []
 
@@ -158,9 +160,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     warnings = []
 
     with st.expander("Completed", expanded=True):
-        # Integration — from generate_n2e's own scope_lines.
-        integration_line = next((l for l in scope_lines if l.startswith("Integration")), None)
-        int_checked, int_lines = _checked_group("Integration", [integration_line] if integration_line else [], "n2e_int")
+        # Integration — from generate_n2e's own scope_lines. Confirmed bug: was using
+        # next() which only grabbed the FIRST matching line, silently dropping every
+        # additional node's Integration line when 2+ nodes are present.
+        integration_lines_all = [l.replace("\t", " ") for l in scope_lines if l.startswith("Integration")]
+        int_checked, int_lines = _checked_group("Integration", integration_lines_all, "n2e_int")
         if int_checked:
             choices_completed += int_lines
 
@@ -206,7 +210,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if ngs_completed:
                 choices_completed.append(ngs_completed)
 
-        # GPS Installation — Post-checks Sync Status 2 TimeSyncIO.
+        # GPS Installation — Post-checks Sync Status 2 TimeSyncIO. Now uses the same
+        # visible checkbox pattern as Integration, instead of silently appending.
         gps_completed_line, gps_pending_line = None, None
         if postcheck_text:
             post_sync = mcl.extract_sync_status_2(postcheck_text)
@@ -214,11 +219,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             enabled_nodes, disabled_nodes = n2e.gps_sync_status(mm_objs, post_sync)
             if enabled_nodes:
                 gtype = post_gps.get(enabled_nodes[0], "")
-                gps_completed_line = n2e.gps_installation_line(enabled_nodes, gtype)
-                choices_completed.append(gps_completed_line)
-                st.caption(f"Detected: {gps_completed_line}")
+                candidate_line = n2e.gps_installation_line(enabled_nodes, gtype)
+                gps_checked, gps_lines = _checked_group("GPS Installation", [candidate_line], "n2e_gps")
+                if gps_checked:
+                    gps_completed_line = candidate_line
+                    choices_completed.append(gps_completed_line)
             if disabled_nodes:
                 gps_pending_line = f"GPS Installation: {'|'.join(disabled_nodes)} (MIC PM)"
+        else:
+            st.caption("GPS Installation: Post-checks not uploaded \u2014 can't determine sync status.")
 
         # LKF Installation — per-entity, no default.
         lkf_completed, lkf_pending = None, None
@@ -240,11 +249,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if lkf_p_nodes:
                 lkf_pending = f"LKF Installation: {'|'.join(lkf_p_nodes)}|{controller_id or ''}. (MIC)"
 
-        # Transport SFP — new-node trigger, manual SFP model.
-        sfp_completed_lines = []
+        # Transport SFP — new-node trigger, manual SFP model per node. Confirmed fix:
+        # nodes left blank here automatically become the Pending ("Compatible Transport
+        # SFP Installation") case — no separate manual box needed for that.
+        sfp_completed_lines, sfp_pending_nodes = [], []
         if new_nodes:
             with st.container(border=True):
-                st.markdown("**Transport SFP Installation on** \u2014 manual SFP models:")
+                st.markdown("**Transport SFP Installation on** \u2014 manual SFP models "
+                            "(leave blank if not yet installed \u2014 goes to Pending automatically):")
                 for node in new_nodes:
                     c1, c2, c3 = st.columns([1, 1, 1])
                     with c1: st.caption(node)
@@ -252,6 +264,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     with c3: siad = st.text_input("SIAD", key=f"n2e_sfp_siad_{node}", label_visibility="collapsed", placeholder="SFP Model (SIAD End)")
                     if bbu.strip() or siad.strip():
                         sfp_completed_lines.append(f"Transport SFP Installation on: {node} {bbu} (BBU End) & {siad} (SIAD End)")
+                    else:
+                        sfp_pending_nodes.append(node)
             choices_completed += sfp_completed_lines
 
         # RET configuration — always Pending, never Completed.
@@ -264,11 +278,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if mcl.external_alarm_scripting_confirmed(controller_checks_data):
                 alarm_scripting_completed = f"External alarm Scripting: {controller_id}"
                 choices_completed.append(alarm_scripting_completed)
+                st.caption(f"\u2705 {alarm_scripting_completed}")
             sau_state = controller_checks_data.get("sau_state")
             if sau_state:
                 if sau_state["oper"] == "ENABLED":
                     sau_completed = f"SAU Connection: {controller_id}."
                     choices_completed.append(sau_completed)
+                    st.caption(f"\u2705 {sau_completed}")
                 else:
                     sau_pending = f"SAU Connections: {controller_id}. (MIC PM)"
 
@@ -285,6 +301,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 (xmu_completed_lines if state == "ENABLED" else xmu_pending_lines).append(
                     f"XMU Installation: {node}" + ("" if state == "ENABLED" else ". (MIC PM)"))
         choices_completed += sup_completed_lines + xmu_completed_lines
+        for l in sup_completed_lines + xmu_completed_lines:
+            st.caption(f"\u2705 {l}")
 
         # IDL connections — 2+ nodes trigger, manual Completed/Pending.
         idl_completed, idl_pending = None, None
@@ -305,15 +323,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         elif smm_choice == "Pending":
             smm_pending = "SMM Triggering (MIC PM)"
 
-        # Area test — new-node trigger, manual Area Lite Pass/Fail.
+        # Area test — new-node trigger. Confirmed: Area Lite result is always "Failed",
+        # so this always lands in Pending, never Completed — no choice needed.
         area_completed, area_pending = None, None
         if new_nodes:
-            area_choice = st.selectbox("Area test \u2014 Area Lite result", ["\u2014 Select \u2014", "Passed", "Failed"], key="n2e_area")
-            if area_choice == "Passed":
-                area_completed = n2e.area_test_line(new_nodes, "Passed")
-                choices_completed.append(area_completed)
-            elif area_choice == "Failed":
-                area_pending = n2e.area_test_line(new_nodes, "Failed") + " (MIC PM)"
+            area_pending = n2e.area_test_line(new_nodes, "Failed") + " (MIC PM)"
 
         # External alarm testing — Completed if any scripted port unlocked, else Pending+Notes.
         testing_section, testing_note = mcl.external_alarm_testing_placement(controller_checks_data) \
@@ -322,6 +336,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         if testing_section == "Completed":
             testing_completed = f"External alarm testing: {controller_id}."
             choices_completed.append(testing_completed)
+            st.caption(f"\u2705 {testing_completed}")
         elif testing_section == "Pending":
             testing_pending = f"External alarm testing: {controller_id}. (MIC PM)"
 
@@ -350,61 +365,97 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_completed.append(additional_completed)
 
     with st.expander("Pending", expanded=True):
-        choices_pending.append(ret_pending)
-        st.caption(ret_pending)
-
+        # Row order below matches the real template exactly: 78 On Site Nokia cutover,
+        # 79 6610, 80 DSS, 81 NGS, 82 GPS, 83 LKF, 84 PSAP/Speedtest, 85 Speed test,
+        # 86 F-NET, 87-89 Compatible SFP, 90 RET, 91 Scripting, 92 SAU, 93 SUP, 94 XMU,
+        # 95 IDL, 97 SIAD, 98 Area test, 99 testing, 100 6673 Config, 101 6673 ENM,
+        # 102-103 Link failure/SFP, 104 SA Conversion.
         choices_pending.append("On Site Nokia cutover (Tower Crew)")
         st.caption("On Site Nokia cutover (Tower Crew)")
 
         if cascade_fires and controller_line:
-            choices_pending.append(f"{controller_line.replace(chr(9), ' ')} (MIC PM)")
-            choices_pending.append("SAU Connections. (MIC PM)")
-            choices_pending.append("LKF Installation. (MIC)")
-            choices_pending.append("External alarm Scripting. (MIC)")
-            choices_pending.append("External alarm testing. (MIC PM)")
-        else:
-            for line in (dss_pending, ngs_pending, gps_pending_line, lkf_pending, sau_pending, testing_pending):
-                if line:
-                    choices_pending.append(line)
-        choices_pending += sup_pending_lines + xmu_pending_lines
-        if idl_pending: choices_pending.append(idl_pending)
-        if smm_pending: choices_pending.append(smm_pending)
-        if area_pending: choices_pending.append(area_pending)
-        if testing_note:
-            choices_pending.append(testing_note)
+            l = f"{controller_line.replace(chr(9), ' ')} (MIC PM)"
+            choices_pending.append(l)
+            st.caption(l)
 
-        # PSAP/Speedtest + Speed test — Integration bands split LTE/5G, all markets, no lookup.
+        for line in (dss_pending, ngs_pending, gps_pending_line):
+            if line:
+                choices_pending.append(line)
+                st.caption(line)
+
+        if cascade_fires:
+            choices_pending.append("LKF Installation. (MIC)")
+            st.caption("LKF Installation. (MIC)")
+        elif lkf_pending:
+            choices_pending.append(lkf_pending)
+            st.caption(lkf_pending)
+
+        # PSAP/Speedtest + Speed test + F-NET — Integration bands split LTE/5G, all
+        # markets, no lookup table for N2E.
         lte_bands, fiveg_bands = n2e.integration_bands_by_tech(classification)
         if lte_bands:
             psap_line = f"PSAP/Speed test/VoLTE voice call test on: {lte_bands}. (MIC PM)"
             choices_pending.append(psap_line)
+            st.caption(psap_line)
         if fiveg_bands:
             speed_line = f"Speed test on: {fiveg_bands}. (MIC PM)"
             choices_pending.append(speed_line)
+            st.caption(speed_line)
 
-        # Compatible Transport SFP Installation (Pending) — manual.
-        sfp_pending_manual = st.text_area("\U0001F4DD Compatible Transport SFP Installation (Pending, manual)",
-                                            key="n2e_sfp_pending", height=60)
-        if sfp_pending_manual.strip():
-            choices_pending.append(f"Compatible Transport SFP Installation: {sfp_pending_manual}. (MIC PM)")
+        # Compatible Transport SFP Installation — derived automatically from nodes left
+        # blank in the Completed section above, not a separate manual box.
+        if sfp_pending_nodes:
+            l = f"Compatible Transport SFP Installation: {'|'.join(sfp_pending_nodes)}. (MIC PM)"
+            choices_pending.append(l)
+            st.caption(l)
 
-        # 6673 Configuration / 6673 Port Configuration in ENM — auto, always Pending.
-        if has_6673:
-            switch_id = sidehaul_rows[0]["switch_id"] if sidehaul_rows else ""
-            choices_pending.append(f"6673 Configuration: {switch_id}. (AT&T)")
-            choices_pending.append(f"6673 Port Configuration in ENM: {switch_id}. (AT&T)")
+        choices_pending.append(ret_pending)
+        st.caption(ret_pending)
+
+        if cascade_fires:
+            choices_pending.append("External alarm Scripting. (MIC)")
+            choices_pending.append("SAU Connections. (MIC PM)")
+            st.caption("External alarm Scripting. (MIC)")
+            st.caption("SAU Connections. (MIC PM)")
+        else:
+            if sau_pending:
+                choices_pending.append(sau_pending)
+                st.caption(sau_pending)
+
+        for l in sup_pending_lines + xmu_pending_lines:
+            choices_pending.append(l)
+            st.caption(l)
+
+        if idl_pending:
+            choices_pending.append(idl_pending)
+            st.caption(idl_pending)
 
         # SIAD provisioning — manual.
         siad_manual = st.text_input("\U0001F4DD SIAD provisioning (Node ID, manual)", key="n2e_siad")
         if siad_manual.strip():
             choices_pending.append(f"SIAD provisioning: {siad_manual}. (MIC PM)")
 
-        # Active external alarm — per-port, auto.
-        if controller_checks_data:
-            active_alarm_lines = n2e.active_external_alarm_lines(controller_checks_data, controller_id or "")
-            choices_pending += active_alarm_lines
-            for l in active_alarm_lines:
-                st.caption(l)
+        if area_pending:
+            choices_pending.append(area_pending)
+            st.caption(area_pending)
+
+        if cascade_fires:
+            choices_pending.append("External alarm testing. (MIC PM)")
+            st.caption("External alarm testing. (MIC PM)")
+        elif testing_pending:
+            choices_pending.append(testing_pending)
+            st.caption(testing_pending)
+        if testing_note:
+            choices_pending.append(testing_note)
+            st.caption(testing_note)
+
+        # 6673 Configuration / 6673 Port Configuration in ENM — auto, always Pending.
+        if has_6673:
+            switch_id = sidehaul_rows[0]["switch_id"] if sidehaul_rows else ""
+            l1 = f"6673 Configuration: {switch_id}. (AT&T)"
+            l2 = f"6673 Port Configuration in ENM: {switch_id}. (AT&T)"
+            choices_pending += [l1, l2]
+            st.caption(l1); st.caption(l2)
 
         # Link failure / SFP Not Present — single selector, reuses Integration's full band list.
         full_bands, _ = n2e.integration_bands_and_nodes(classification)
@@ -414,43 +465,68 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         elif link_choice == "SFP Not Present":
             choices_pending.append(f"SFP Not Present: {full_bands}. (Tower Crew)")
 
+        if smm_pending:
+            choices_pending.append(smm_pending)
+            st.caption(smm_pending)
+
+        # Active external alarm — per-port, auto.
+        if controller_checks_data:
+            active_alarm_lines = n2e.active_external_alarm_lines(controller_checks_data, controller_id or "")
+            choices_pending += active_alarm_lines
+            for l in active_alarm_lines:
+                st.caption(l)
+
         additional_pending = st.text_area("\U0001F4DD Enter any additional pending information",
                                            key="n2e_add_pending", height=80)
         if additional_pending.strip():
             choices_pending.append(additional_pending)
 
     with st.expander("Notes"):
-        choices_notes = ["Final Port Configuration attached."]
+        choices_notes = []
+        final_port_checked = st.checkbox("Final Port Configuration attached.", value=True, key="n2e_notes_finalport")
+        if final_port_checked:
+            choices_notes.append("Final Port Configuration attached.")
+
         has_5g = any(app.is_populated(row.get("gNBId")) for row in mm_objs)
         if has_5g:
-            choices_notes.append("NR configuration has been verified.")
+            nr_checked = st.checkbox("NR configuration has been verified.", value=True, key="n2e_notes_nr")
+            if nr_checked:
+                choices_notes.append("NR configuration has been verified.")
+
         if new_nodes:
-            choices_notes.append(f"{'|'.join(new_nodes)} nodes is in Not monitored state.")
+            mon_checked = st.checkbox(f"{'|'.join(new_nodes)} nodes is in Not monitored state.", value=True, key="n2e_notes_mon")
+            if mon_checked:
+                choices_notes.append(f"{'|'.join(new_nodes)} nodes is in Not monitored state.")
+
         if controller_id:
             ctrl_mon_choice = st.selectbox(f"{controller_id} monitored state", ["\u2014 Select \u2014", "Monitored", "Not monitored"], key="n2e_ctrl_mon")
             if ctrl_mon_choice == "Monitored":
                 choices_notes.append(f"{controller_id} is in monitored state.")
             elif ctrl_mon_choice == "Not monitored":
                 choices_notes.append(f"{controller_id} is in not monitored state.")
+
         sa_note = n2e.sa_conversion_note(sa_nodes)
         if sa_note:
-            choices_notes.append(sa_note)
+            sa_note_checked = st.checkbox(sa_note, value=True, key="n2e_notes_sa")
+            if sa_note_checked:
+                choices_notes.append(sa_note)
+
         cpri_choice = st.selectbox("Area prechecks verification for CPRI/SFP check", ["\u2014 Select \u2014", "Completed", "Pending"], key="n2e_cpri") \
             if new_nodes else "\u2014 Select \u2014"
         if cpri_choice == "Completed":
             choices_notes.append("Area prechecks verification for CPRI/SFP check is completed.")
         elif cpri_choice == "Pending":
             choices_notes.append("Area prechecks verification for CPRI/SFP check is pending. (Nodes not replicating in the area tool)")
+
         notes_manual = st.text_area("\U0001F4DD Enter Notes", key="n2e_notes_manual", height=60)
         if notes_manual.strip():
             choices_notes.append(notes_manual)
-        for l in choices_notes:
-            st.caption(l)
 
     # ==================== Report text + xlsm ====================
-    report_lines = ["Subject", f"MIC | MNS | N2E | IX-STF | {site_name} | {fa_code} | {site_ids}",
+    report_lines = ["Subject", f"MIC | MNS | N2E | IX-STF | {site_name} | {fa_code} | {site_ids} | {sow}",
                     "", "IWM Details", iwm_details,
-                    "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_line}"]
+                    "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_line}",
+                    f"6610 Controller : {controller_id or ''}"]
     if current_config: report_lines.append(f"Current Configuration : {current_config}")
     report_lines += ["", "Completed"] + choices_completed
     report_lines += ["", "Pending"] + choices_pending
