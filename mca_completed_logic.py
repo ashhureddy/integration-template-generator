@@ -97,13 +97,16 @@ def extract_sync_status_2(post_text):
         ECL02586   Transport=1,Synchronization=1,TimeSyncIO=1    ENABLED
 
     Returns {node: opstate} for the TimeSyncIO=1 row specifically — confirmed this row
-    reflects GPS sync status, not the SyncPort row (which we ignore per instruction)."""
+    reflects GPS sync status, not the SyncPort row (which we ignore per instruction).
+    Confirmed real bug found against real N2E data (WAWN094133/WAWN084133): the value
+    after 'TimeSyncIO=' isn't always literally '1' — real example shows
+    'TimeSyncIO=GPS ENABLED'. Regex now accepts any sync-source identifier there."""
     out = {}
     text = _normalize(post_text)
     if not text:
         return out
     for m in re.finditer(
-            r'(\S+) Transport=1,Synchronization=1,TimeSyncIO=1 (ENABLED|DISABLED)', text):
+            r'(\S+) Transport=1,Synchronization=1,TimeSyncIO=\S+ (ENABLED|DISABLED)', text):
         node, opstate = m.groups()
         out[node.strip()] = opstate
     return out
