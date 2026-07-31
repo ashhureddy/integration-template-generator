@@ -15,7 +15,7 @@ import mca_glue
 import mca_report_text
 import mca_completed_logic as mcl
 from mca_row_map import ROW_MAP
-from mca_xlsm_fill import fill_legacy_mca
+from mca_xlsm_surgical import fill_legacy_mca_surgical
 
 from pathlib import Path
 
@@ -991,6 +991,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             else:
                 st.warning(f"Template not found at {TEMPLATE_PATH} \u2014 and the folder {static_dir} doesn't exist at all.")
         else:
-            xlsm_bytes = fill_legacy_mca(TEMPLATE_PATH, {"row_writes": row_writes})
+            xlsm_bytes = fill_legacy_mca_surgical(TEMPLATE_PATH, row_writes)
             st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
                                 file_name=f"{node_tag}_Legacy_MCA_Filled.xlsm", key="rpt_dl_xlsm")
