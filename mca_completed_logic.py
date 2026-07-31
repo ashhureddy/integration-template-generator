@@ -1184,6 +1184,7 @@ def build_new_xlsm_row_writes(
         lkf_completed_line=None, lkf_pending_line=None,
         fdd_lines=None,
         edp_publish=None,
+        ngs_completed_line=None, ngs_pending_line=None,
         buffer_completed_extra=None, buffer_pending_extra=None, buffer_pre_existing_extra=None):
     """Every *_groups / *_lines argument is the STRUCTURED data (lists/tuples), not the
     pre-formatted display strings, so exact column values can be written. Returns a list of
@@ -1252,6 +1253,15 @@ def build_new_xlsm_row_writes(
     rw.append((lkf_c_row, bool(lkf_completed_line), [(3, lkf_completed_line)] if lkf_completed_line else []))
     lkf_p_row = row_map["lkf_installation"]["pending"][0]
     rw.append((lkf_p_row, bool(lkf_pending_line), [(3, lkf_pending_line)] if lkf_pending_line else []))
+
+    # ---- NGS activation (completed=[60], pending=[123]) — per-pair 3-way choice, confirmed
+    # change from auto-Completed-only. Multiple confirmed pairs sharing the same choice
+    # combine onto the one dedicated row. Pre-Existing choices don't appear here at all —
+    # they only add a Notes line, handled separately in the UI. ----
+    ngs_c_row = row_map["ngs_activation"]["completed"][0]
+    rw.append((ngs_c_row, bool(ngs_completed_line), [(3, ngs_completed_line)] if ngs_completed_line else []))
+    ngs_p_row = row_map["ngs_activation"]["pending"][0]
+    rw.append((ngs_p_row, bool(ngs_pending_line), [(3, ngs_pending_line)] if ngs_pending_line else []))
 
     # ---- FDD Renaming, corrected (completed=[54,55], pending=[117,118]) — band-label
     # grouped, not raw cell tuples. ----
