@@ -991,6 +991,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             else:
                 st.warning(f"Template not found at {TEMPLATE_PATH} \u2014 and the folder {static_dir} doesn't exist at all.")
         else:
-            xlsm_bytes = fill_legacy_mca(TEMPLATE_PATH, {"row_writes": row_writes}, report_text=report_text)
+            xlsm_bytes = fill_legacy_mca(TEMPLATE_PATH, {"row_writes": row_writes})
             st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
                                 file_name=f"{node_tag}_Legacy_MCA_Filled.xlsm", key="rpt_dl_xlsm")
