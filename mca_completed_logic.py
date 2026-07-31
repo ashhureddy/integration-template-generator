@@ -1114,35 +1114,56 @@ def current_configuration_line(ciq_wb, mm_objs, postcheck_text):
 # generators (confirmed: reuse the shared buffer lines, no dedicated classification UI).
 # ============================================================
 
-def locked_port_bucket_1(ports):
+def format_ports_with_slogans(ports_str, port_slogan_map):
+    """ports_str: the engineer's typed comma-separated port numbers (e.g. '2, 4, 10').
+    port_slogan_map: {port_number_str: slogan} from the detected locked_ports_list.
+    Confirmed format: 'port[SLOGAN]' per port, joined with Oxford comma + 'and' before the
+    last one — e.g. '2[RBS INTRUSION], 4[RBS HEX FAIL], and 10[RBS COMMERCIAL]'. A port with
+    no matching detected slogan (typo, or a port outside the detected set) is shown bare."""
+    if not ports_str:
+        return ""
+    port_list = [p.strip() for p in ports_str.split(",") if p.strip()]
+    annotated = [f"{p}[{port_slogan_map[p]}]" if p in port_slogan_map else p for p in port_list]
+    if len(annotated) == 1:
+        return annotated[0]
+    if len(annotated) == 2:
+        return f"{annotated[0]} and {annotated[1]}"
+    return ", ".join(annotated[:-1]) + f", and {annotated[-1]}"
+
+
+def locked_port_bucket_1(ports, port_slogan_map=None):
     """Pre-existing locked state -> Pre-Existing Issues."""
     if not ports:
         return None
-    return f"Alarm Ports {ports} remain in a locked state, matching the pre\u2011existing condition. (Owner: AT&T PM/OPS)"
+    ports_fmt = format_ports_with_slogans(ports, port_slogan_map or {})
+    return f"Alarm Ports {ports_fmt} remain in a locked state, matching the pre\u2011existing condition. (Owner: AT&T PM/OPS)"
 
 
-def locked_port_bucket_2(ports):
+def locked_port_bucket_2(ports, port_slogan_map=None):
     """Pre-existing active alarm, kept locked to avoid OPS tickets -> Pre-Existing Issues."""
     if not ports:
         return None
-    return f"Pre\u2011existing active alarms on ports {ports} are kept locked to avoid OPS tickets. (Owner: AT&T PM/OPS)"
+    ports_fmt = format_ports_with_slogans(ports, port_slogan_map or {})
+    return f"Pre\u2011existing active alarms on ports {ports_fmt} are kept locked to avoid OPS tickets. (Owner: AT&T PM/OPS)"
 
 
-def locked_port_bucket_3(ports, note=""):
+def locked_port_bucket_3(ports, note="", port_slogan_map=None):
     """Pre-existing loops/bridge clips/no equipment connections -> Pre-Existing Issues."""
     if not ports:
         return None
-    text = f"Active alarms observed on ports {ports} are kept locked (Owner: AT&T)."
+    ports_fmt = format_ports_with_slogans(ports, port_slogan_map or {})
+    text = f"Active alarms observed on ports {ports_fmt} are kept locked (Owner: AT&T)."
     if note:
         text += f"\nNote: {note}"
     return text
 
 
-def locked_port_bucket_4(ports, owner):
+def locked_port_bucket_4(ports, owner, port_slogan_map=None):
     """Post-cutover, FE couldn't clear -> Pending."""
     if not ports:
         return None
-    return f"Post external alarm cutover, active alarms observed on ports {ports} have been kept locked (Owner: {owner})."
+    ports_fmt = format_ports_with_slogans(ports, port_slogan_map or {})
+    return f"Post external alarm cutover, active alarms observed on ports {ports_fmt} have been kept locked (Owner: {owner})."
 
 
 # ============================================================
