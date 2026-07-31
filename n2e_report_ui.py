@@ -170,9 +170,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # 6610 Controller Integration + cascade.
         controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
         cascade_fires = n2e.controller_cascade_fires(controller_in_edp, bool(controller_checks_text))
-        st.caption(f"(debug) controller_checks_text length: {len(controller_checks_text or '')} | "
-                   f"controller_in_edp: {controller_in_edp} | cascade_fires: {cascade_fires} | "
-                   f"controller_checks_data keys: {list(controller_checks_data.keys()) if controller_checks_data else '(empty)'}")
         controller_line = next((l for l in scope_lines if l.startswith("6610 Controller Integration") or l.startswith("EDP Publish")), None)
         if cascade_fires:
             st.caption("\u26a0\ufe0f Controller-checks file not uploaded \u2014 6610 Controller Integration, SAU Connections, "
@@ -254,14 +251,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if lkf_p_nodes:
                 lkf_pending = f"LKF Installation: {'|'.join(lkf_p_nodes)}|{controller_id or ''}. (MIC)"
 
-        # Transport SFP — new-node trigger, manual SFP model per node. Confirmed fix:
-        # nodes left blank here automatically become the Pending ("Compatible Transport
-        # SFP Installation") case — no separate manual box needed for that.
-        sfp_completed_lines, sfp_pending_nodes = [], []
+        # Transport SFP — new-node trigger, manual SFP model per node. Confirmed
+        # correction: blank fields simply produce nothing (no line at all) — no longer
+        # auto-converted into a Pending "Compatible Transport SFP Installation" entry.
+        sfp_completed_lines = []
         if new_nodes:
             with st.container(border=True):
                 st.markdown("**Transport SFP Installation on** \u2014 manual SFP models "
-                            "(leave blank if not yet installed \u2014 goes to Pending automatically):")
+                            "(leave blank if not applicable \u2014 prints empty, no auto-Pending):")
                 for node in new_nodes:
                     c1, c2, c3 = st.columns([1, 1, 1])
                     with c1: st.caption(node)
@@ -269,8 +266,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     with c3: siad = st.text_input("SIAD", key=f"n2e_sfp_siad_{node}", label_visibility="collapsed", placeholder="SFP Model (SIAD End)")
                     if bbu.strip() or siad.strip():
                         sfp_completed_lines.append(f"Transport SFP Installation on: {node} {bbu} (BBU End) & {siad} (SIAD End)")
-                    else:
-                        sfp_pending_nodes.append(node)
             choices_completed += sfp_completed_lines
 
         # RET configuration — always Pending, never Completed.
@@ -407,12 +402,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_pending.append(speed_line)
             st.caption(speed_line)
 
-        # Compatible Transport SFP Installation — derived automatically from nodes left
-        # blank in the Completed section above, not a separate manual box.
-        if sfp_pending_nodes:
-            l = f"Compatible Transport SFP Installation: {'|'.join(sfp_pending_nodes)}. (MIC PM)"
-            choices_pending.append(l)
-            st.caption(l)
+        # Compatible Transport SFP Installation — confirmed removed, not needed: blank
+        # Transport SFP fields simply print empty now, no Pending auto-conversion.
 
         choices_pending.append(ret_pending)
         st.caption(ret_pending)
