@@ -183,3 +183,50 @@ def area_test_line(nodes, area_lite_result):
 
 def has_6673(sidehaul_rows):
     return any(str(r.get("switch_type", "")).strip() == "6673" for r in sidehaul_rows)
+
+
+# ============================================================
+# LOCKED ALARM PORTS — N2E-specific rules, confirmed from the real "6610 Alarm Cutover
+# Process & Reporting Standards" reference doc's dedicated N2E tab. Genuinely different
+# from MCA's Legacy tab: no equivalent to MCA's bucket 1, different Owner tags, a new
+# "Power Plant Swap" scenario that produces BOTH a Pending line and a Note together.
+# ============================================================
+
+def n2e_locked_port_active_alarms(ports, port_slogan_map=None):
+    """Pre-existing Active Alarms -> Note ONLY (confirmed: not Pending/Pre-Existing at
+    all for N2E). Owner is plain 'AT&T', not 'AT&T PM/OPS' like MCA's equivalent."""
+    if not ports:
+        return None
+    ports_fmt = mcl.format_ports_with_slogans(ports, port_slogan_map or {})
+    return f"Pre\u2011existing active alarms on ports {ports_fmt} are kept locked to avoid OPS tickets.(Owner:AT&T)"
+
+
+def n2e_locked_port_loops_bridge_clips(ports, port_slogan_map=None):
+    """Pre-Existing Loops and Bridge Clips -> Note ONLY, a single combined note (loops
+    line + active-alarms line together) — confirmed real format from the N2E tab."""
+    if not ports:
+        return None
+    plain_ports_fmt = mcl.format_ports_with_slogans(ports, {})
+    ports_fmt = mcl.format_ports_with_slogans(ports, port_slogan_map or {})
+    return (f"Pre\u2011existing loops have been removed from alarm ports {plain_ports_fmt}.\n"
+            f"Active alarms observed on ports {ports_fmt} are kept locked (Owner: AT&T).")
+
+
+def n2e_locked_port_power_plant_swap(ports, port_slogan_map=None):
+    """Power Plant Swap — confirmed new N2E-only scenario, produces BOTH a Pending line
+    and a Note line together. Returns (pending_text, note_text)."""
+    if not ports:
+        return None, None
+    ports_fmt = mcl.format_ports_with_slogans(ports, port_slogan_map or {})
+    pending = f"Post external alarm cutover, active alarms observed on ports {ports_fmt} are kept locked (Owner: Tower crew)."
+    note = "External alarms have been scripted according to the new power plant configuration."
+    return pending, note
+
+
+def n2e_locked_port_not_cleared_by_fe(ports, port_slogan_map=None):
+    """Post-Cutover Alarms Not Cleared by FE -> Pending ONLY. Confirmed matches MCA's
+    bucket 4 concept, same Owner (Tower crew)."""
+    if not ports:
+        return None
+    ports_fmt = mcl.format_ports_with_slogans(ports, port_slogan_map or {})
+    return f"Post external alarm cutover, active alarms observed on ports {ports_fmt} have been kept locked (Owner: Tower crew)."
