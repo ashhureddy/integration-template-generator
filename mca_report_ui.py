@@ -517,14 +517,19 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                                            value=extra_pending_text, key="rpt_add_pending", height=100)
         choices["additional_pending"] = {"text": additional_pending}
 
-    locked_ports_exist = bool(controller_checks_data) and any(
-        p["admin"] == "LOCKED" and p["slogan"] for p in controller_checks_data.get("alarm_ports", []))
+    locked_ports_list = [p for p in (controller_checks_data.get("alarm_ports", []) if controller_checks_data else [])
+                          if p["admin"] == "LOCKED" and p["slogan"]]
+    locked_ports_exist = bool(locked_ports_list)
 
     bucket_pre_existing, bucket_pending = [], []
     if locked_ports_exist:
         with st.container(border=True):
-            st.markdown("**Locked alarm ports** \u2014 classify each locked port (per the confirmed "
-                        "6610 Alarm Cutover reporting standard). Leave blank whichever don't apply.")
+            st.markdown(f"**Locked alarm ports** \u2014 {len(locked_ports_list)} scripted port(s) detected LOCKED "
+                        f"in the controller-checks file:")
+            for p in locked_ports_list:
+                st.caption(f"Port {p['port']} \u2014 {p['slogan']} ({p['severity']})")
+            st.markdown("Classify each one below (per the confirmed 6610 Alarm Cutover reporting "
+                        "standard). Leave blank whichever don't apply.")
             b1 = st.text_input("\U0001F4DD 1. Pre-existing locked \u2014 port numbers", key="lp_b1", placeholder="e.g. 1, 5, 25")
             b2 = st.text_input("\U0001F4DD 2. Pre-existing active alarm \u2014 port numbers", key="lp_b2", placeholder="e.g. 3, 6, 20")
             c1, c2 = st.columns([2, 1])
@@ -548,10 +553,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             with c2:
                 b6_dest = st.selectbox("Goes to", ["Pre-Existing Issues", "Pending"], key="lp_b6_dest", label_visibility="collapsed")
 
-            t1 = mcl.locked_port_bucket_1(b1)
-            t2 = mcl.locked_port_bucket_2(b2)
-            t3 = mcl.locked_port_bucket_3(b3, b3_note)
-            t4 = mcl.locked_port_bucket_4(b4, b4_owner)
+            port_slogan_map = {p["port"]: p["slogan"] for p in locked_ports_list}
+            t1 = mcl.locked_port_bucket_1(b1, port_slogan_map)
+            t2 = mcl.locked_port_bucket_2(b2, port_slogan_map)
+            t3 = mcl.locked_port_bucket_3(b3, b3_note, port_slogan_map)
+            t4 = mcl.locked_port_bucket_4(b4, b4_owner, port_slogan_map)
             for t in (t1, t2, t3):
                 if t:
                     bucket_pre_existing.append(t)
