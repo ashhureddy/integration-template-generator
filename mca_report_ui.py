@@ -64,6 +64,24 @@ def _detected_preview(item):
     return ", ".join(bits) if bits else None
 
 
+def _checked_group(label, lines, key):
+    """Renders one checkbox (checked by default) covering a whole group of auto-computed
+    lines, with each line shown as a caption underneath while checked. Confirmed fix for a
+    real Streamlit bug: a text_area's `value=` default is only honored on that widget's
+    FIRST render — once its `key` exists in session_state, later reruns (e.g. triggered by
+    typing into an unrelated field) silently ignore any newly recomputed default, so content
+    that only becomes known after the user interacts with something else (like Transport
+    SFP's manual model fields) could never actually appear. A checkbox+caption recomputes
+    fresh on every rerun, so nothing goes stale. Returns (checked, lines_or_empty)."""
+    if not lines:
+        return False, []
+    checked = st.checkbox(label, value=True, key=key)
+    if checked:
+        for l in lines:
+            st.caption(l)
+    return checked, (lines if checked else [])
+
+
 def _simple_item_row(item):
     """Simplified per your instruction: just a checkbox (checked if QUICKIX detected it,
     unchecked otherwise) with the live detected preview underneath. No dropdowns, no
@@ -281,6 +299,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     for item in results:
         if item["key"] == "lkf_installation":
             item["checked_by_default"] = False
+    # Same confirmed bug found for Transport SFP — never suppressed, only triggered on
+    # new_nodes in the old item, so it could show as a duplicate alongside the new
+    # multi-trigger (new node/Port Conversion/board swap) section on any site where
+    # new_nodes happened to be non-empty.
+    for item in results:
+        if item["key"] == "transport_sfp":
+            item["checked_by_default"] = False
 
     # ---- Warnings tab collection: every verification function feeds here. Confirmed
     # design: warning-only for most items (never touches report placement), except
@@ -476,25 +501,20 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     choices, stakeholders = {}, {}
 
-    extra_completed_text = "\n".join(
-        gps_extra_completed + transport_sfp_lines + radio_swap_completed_lines
-        + fdd_lines_fixed
-        + ([lkf_lines_by_section["Completed"]] if lkf_lines_by_section.get("Completed") else [])
-    )
-    extra_pending_text = "\n".join(
-        gps_extra_pending + sfp_pending_extra + radio_swap_pending_lines
-        + ([edp_publish_text] if edp_publish_text else [])
-        + ([lkf_lines_by_section["Pending"]] if lkf_lines_by_section.get("Pending") else [])
-    )
-    if testing_note:
-        extra_pending_text = (extra_pending_text + "\n" + testing_note).strip()
-
     with st.expander(f"Completed ({sum(1 for i in completed_items if i['checked_by_default'])} auto-detected)", expanded=True):
         cols = st.columns(2)
         for i, item in enumerate(completed_items):
             with cols[i % 2]:
                 choice, stakeholder = _simple_item_row(item)
                 choices[item["key"]] = choice
+
+        gps_c_checked, gps_c_lines = _checked_group("GPS Installation / Upgrade", gps_extra_completed, "chk_gps_c")
+        sfp_c_checked, sfp_c_lines = _checked_group("Transport SFP Installation on", transport_sfp_lines, "chk_sfp_c")
+        rs_c_checked, rs_c_lines = _checked_group("Radio Swap on", radio_swap_completed_lines, "chk_rs_c")
+        fdd_c_checked, fdd_c_lines = _checked_group("FDD Renaming on", fdd_lines_fixed, "chk_fdd_c")
+        lkf_c_group_lines = [lkf_lines_by_section["Completed"]] if lkf_lines_by_section.get("Completed") else []
+        lkf_c_checked, lkf_c_lines = _checked_group("LKF Installation", lkf_c_group_lines, "chk_lkf_c")
+
         florida_checked = False
         if florida_rows:
             florida_checked = st.checkbox(f"Newly added Cells (Florida market) \u2014 {len(florida_cells)} cell(s)",
@@ -503,7 +523,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 for r in florida_rows:
                     st.caption(r)
         additional_completed = st.text_area("\U0001F4DD Enter any additional completed information that needs to be added in report",
-                                             value=extra_completed_text, key="rpt_add_completed", height=100)
+                                             key="rpt_add_completed", height=100)
         choices["additional_completed"] = {"text": additional_completed}
 
     with st.expander(f"Pending ({sum(1 for i in pending_items if i['checked_by_default'])} auto-detected)", expanded=True):
@@ -513,8 +533,19 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 choice, stakeholder = _simple_item_row(item)
                 choices[item["key"]] = choice
                 stakeholders[item["key"]] = stakeholder
+
+        gps_p_checked, gps_p_lines = _checked_group("GPS-related Pending items", gps_extra_pending, "chk_gps_p")
+        sfp_p_checked, sfp_p_lines = _checked_group("Transport SFP (Pending)", sfp_pending_extra, "chk_sfp_p")
+        rs_p_checked, rs_p_lines = _checked_group("Radio Swap on (Pending)", radio_swap_pending_lines, "chk_rs_p")
+        edp_group_lines = [edp_publish_text] if edp_publish_text else []
+        edp_checked, edp_lines = _checked_group("EDP Publish", edp_group_lines, "chk_edp")
+        lkf_p_group_lines = [lkf_lines_by_section["Pending"]] if lkf_lines_by_section.get("Pending") else []
+        lkf_p_checked, lkf_p_lines = _checked_group("LKF Installation (Pending)", lkf_p_group_lines, "chk_lkf_p")
+        testing_note_lines = [testing_note] if testing_note else []
+        testing_note_checked, testing_note_out = _checked_group("External alarm testing note", testing_note_lines, "chk_testing_note")
+
         additional_pending = st.text_area("\U0001F4DD Enter any additional pending information that needs to be reported to Market",
-                                           value=extra_pending_text, key="rpt_add_pending", height=100)
+                                           key="rpt_add_pending", height=100)
         choices["additional_pending"] = {"text": additional_pending}
 
     locked_ports_list = [p for p in (controller_checks_data.get("alarm_ports", []) if controller_checks_data else [])
@@ -574,6 +605,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # (dicts are mutable; build_mca_report_text reads this at button-click time, later).
         choices["additional_pending"]["text"] = (
             (choices["additional_pending"]["text"] or "") + "\n" + "\n".join(bucket_pending)).strip()
+
+    # Same safe-mutation pattern for every checked-gated group above — appended onto the
+    # dict directly rather than relying on a widget's (staleness-prone) displayed value.
+    choices["additional_completed"]["text"] = "\n".join(
+        [choices["additional_completed"]["text"] or ""] + gps_c_lines + sfp_c_lines + rs_c_lines
+        + fdd_c_lines + lkf_c_lines
+    ).strip()
+    choices["additional_pending"]["text"] = "\n".join(
+        [choices["additional_pending"]["text"] or ""] + gps_p_lines + sfp_p_lines + rs_p_lines
+        + edp_lines + lkf_p_lines + testing_note_out
+    ).strip()
 
     with st.expander("Pre-Existing Issues"):
         pre_existing_default = "\n".join(sfp_pre_existing_extra + bucket_pre_existing)
@@ -658,38 +700,40 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
         # ---- Everything built this session that build_xlsm_row_writes never knew about —
         # parsed back out of the already-tested formatted strings rather than re-deriving
-        # structured data, since the exact format is controlled and safe to parse. ----
+        # structured data, since the exact format is controlled and safe to parse. Uses the
+        # CHECKBOX-GATED lines (gps_c_lines, sfp_c_lines, etc.) so unchecking any group
+        # correctly excludes it from the .xlsm too, not just the plain-text report. ----
         gps_completed_groups = []
-        for line in gps_extra_completed[:1]:  # only the first (dedicated-row) group belongs here
+        for line in gps_c_lines[:1]:  # only the first (dedicated-row) group belongs here
             if "Version:" in line:
                 nodes_part, ver_part = line.split("Version:", 1)
                 nodes = nodes_part.replace("GPS Installation:", "").strip().split("|")
                 gps_completed_groups.append((nodes, ver_part.strip()))
         sfp_completed_groups = []
-        for line in transport_sfp_lines:
+        for line in sfp_c_lines:
             m = re.match(r"Transport SFP Installation on:\s*(.+?)\s+SFP Model \(BBU End\):\s*(.*?)\s+SFP Model \(SIAD End\):\s*(.*)", line)
             if m:
                 nodes = m.group(1).split("|")
                 sfp_completed_groups.append((nodes, m.group(2).strip(), m.group(3).strip()))
         radio_swap_completed_parsed = []
-        for line in radio_swap_completed_lines:
+        for line in rs_c_lines:
             parts = line.split("\t")
             if len(parts) >= 6:
                 label_sectors = parts[1]
                 radio_swap_completed_parsed.append((label_sectors, "", parts[3], parts[5]))
         radio_swap_pending_parsed = []
-        for line in radio_swap_pending_lines:
+        for line in rs_p_lines:
             parts = line.split("\t")
             if len(parts) >= 6:
                 label_sectors = parts[1]
                 radio_swap_pending_parsed.append((label_sectors, "", parts[3], parts[5]))
         fdd_parsed = []
-        for line in fdd_lines_fixed:
+        for line in fdd_c_lines:
             m = re.match(r"FDD Renaming on:\s*(.+?)\s+From:\s*(.+?)\s+To:\s*(.+?)\.", line)
             if m:
                 fdd_parsed.append((m.group(1), m.group(2), m.group(3)))
-        lkf_completed_val = (lkf_lines_by_section.get("Completed", "") or "").replace("LKF Installation:", "").strip() or None
-        lkf_pending_val = (lkf_lines_by_section.get("Pending", "") or "").replace("LKF Installation:", "").replace("(MIC)", "").strip() or None
+        lkf_completed_val = (lkf_c_lines[0] if lkf_c_lines else "").replace("LKF Installation:", "").strip() or None
+        lkf_pending_val = (lkf_p_lines[0] if lkf_p_lines else "").replace("LKF Installation:", "").replace("(MIC)", "").strip() or None
 
         def _split_buffer_lines(lines):
             """Buffer entries as (label, detail) — first ':' splits label from detail;
@@ -707,17 +751,21 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # dedicated rows + FDD's dedicated rows + LKF's dedicated row are accounted for.
         # (Port Conversion is NOT here — it merges into one line through its own dedicated
         # checklist row instead, confirmed, regardless of how many nodes.)
-        buffer_completed_lines = gps_extra_completed[1:] + transport_sfp_lines[3:]
-        buffer_pending_lines = gps_extra_pending + sfp_pending_extra
+        # Completed buffer = only genuine OVERFLOW beyond each item's dedicated row capacity
+        # (GPS: 1 completed row, Transport SFP: 3 completed rows) — NOT the full lists, since
+        # those already go to their own dedicated rows via build_new_xlsm_row_writes below;
+        # including them again here would double-count the same content in two places.
+        buffer_completed_lines = gps_c_lines[1:] + sfp_c_lines[3:]
+        buffer_pending_lines = gps_p_lines[1:] + sfp_p_lines[4:]
         buffer_pre_existing_lines = sfp_pre_existing_extra + bucket_pre_existing
 
         new_rw = mcl.build_new_xlsm_row_writes(
             ROW_MAP,
             current_config_text="",  # already written above at row 11 — avoid double-write
             gps_completed_groups=gps_completed_groups,
-            gps_pending_lines=gps_extra_pending[:1],
+            gps_pending_lines=gps_p_lines[:1],
             sfp_completed_groups=sfp_completed_groups[:3],
-            sfp_pending_lines=sfp_pending_extra[:4],
+            sfp_pending_lines=sfp_p_lines[:4],
             radio_swap_completed=radio_swap_completed_parsed[:3],
             radio_swap_pending=radio_swap_pending_parsed[:3],
             lkf_completed_line=lkf_completed_val,
