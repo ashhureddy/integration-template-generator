@@ -577,6 +577,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             if florida_checked:
                 for r in florida_rows:
                     st.caption(r)
+        florida_active_rows = florida_rows if florida_checked else []
         additional_completed = st.text_area("\U0001F4DD Enter any additional completed information that needs to be added in report",
                                              key="rpt_add_completed", height=100)
         choices["additional_completed"] = {"text": additional_completed}
@@ -668,7 +669,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # dict directly rather than relying on a widget's (staleness-prone) displayed value.
     choices["additional_completed"]["text"] = "\n".join(
         [choices["additional_completed"]["text"] or ""] + gps_c_lines + sfp_c_lines + rs_c_display
-        + fdd_c_lines + lkf_c_lines + ngs_completed_lines
+        + fdd_c_lines + lkf_c_lines + ngs_completed_lines + florida_active_rows
     ).strip()
     choices["additional_pending"]["text"] = "\n".join(
         [choices["additional_pending"]["text"] or ""] + gps_p_lines + sfp_p_lines + rs_p_display
@@ -992,7 +993,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # Row 92 ("Newly added Cells" sub-header) matches the same checkbox state.
         row_writes.append((92, bool(florida_checked), []))
         florida_xlsm_rows = list(range(93, 105))
-        florida_active_rows = florida_rows if florida_checked else []
         for i, row_num in enumerate(florida_xlsm_rows):
             if i < len(florida_active_rows):
                 row_writes.append((row_num, True, [(2, florida_active_rows[i])]))
