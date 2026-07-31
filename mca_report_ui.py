@@ -64,6 +64,20 @@ def _detected_preview(item):
     return ", ".join(bits) if bits else None
 
 
+def _humanize_scope_line(raw_line):
+    """Radio Swap's lines use the same raw tab-separated convention as every other
+    scope_line in this codebase (meant to flow through mca_report_text.py's automatic
+    tab->sentence conversion) — but displaying/injecting them directly here (via
+    _checked_group, not the normal per-item mechanism) would show literal tab characters
+    instead of a clean sentence. Same conversion algorithm as mca_report_text.py, applied
+    explicitly since this bypasses that normal path."""
+    parts = [p.strip() for p in raw_line.split("\t") if p.strip()]
+    if len(parts) <= 1:
+        return raw_line
+    rest = " ".join(parts[1:])
+    return f"{parts[0]} {rest}.".replace("  ", " ")
+
+
 def _checked_group(label, lines, key):
     """Renders one checkbox (checked by default) covering a whole group of auto-computed
     lines, with each line shown as a caption underneath while checked. Confirmed fix for a
@@ -260,9 +274,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     results = mca_checklist.evaluate_checklist(ctx)
 
     if cascade_fires:
-        # Force these 4 items to Pending, drop them from wherever the normal detection put
-        # them, no warning per confirmed decision.
-        cascade_keys = {"controller_integration", "alarm_scripting", "lkf_installation", "alarm_testing"}
+        # Force these 5 items to Pending, drop them from wherever the normal detection put
+        # them, no warning per confirmed decision. (Confirmed gap: sau_connections was
+        # missing from this set — only 4 of the 5 real cascade items were being forced.)
+        cascade_keys = {"controller_integration", "alarm_scripting", "lkf_installation",
+                         "alarm_testing", "sau_connections"}
         for item in results:
             if item["key"] in cascade_keys:
                 item["section"] = "pending"
@@ -291,6 +307,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         for item in results:
             if item["key"] == "fdd_renaming":
                 item["checked_by_default"] = False
+    # Suppress the checklist's own NGS activation item unconditionally — confirmed change:
+    # was auto-Completed with no toggle; now needs a per-pair 3-way choice
+    # (Completed/Pending/Pre-Existing), replaced by the custom section below.
+    for item in results:
+        if item["key"] == "ngs_activation":
+            item["checked_by_default"] = False
     # Suppress the checklist's own LKF Installation item unconditionally — confirmed bug:
     # it was showing alongside the new per-node Completed/Pending dropdown section as a
     # confusing duplicate. The custom section (built this pass) fully replaces it, since it
@@ -405,6 +427,38 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 switch = st.text_area("\U0001F4DD Switch details (manual)", key="rpt_switch", height=60)
                 slot_port = st.text_area("\U0001F4DD Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
 
+    # ---- NGS activation: per-pair 3-way choice (Completed/Pending/Pre-Existing), confirmed
+    # change from the old auto-Completed-only behavior. No default — same "require an active
+    # pick" pattern as LKF. Pre-Existing doesn't appear in Completed/Pending at all, it only
+    # adds a Notes line. ----
+    ngs_raw_lines = [l for l in scope_lines if l.startswith("NGS Activation on")]
+    ngs_completed_lines, ngs_pending_lines, ngs_notes_lines = [], [], []
+    if ngs_raw_lines:
+        with st.container(border=True):
+            st.markdown(f"**NGS activation** \u2014 {len(ngs_raw_lines)} pair(s) detected. "
+                        f"Pick a status for each (required):")
+            for i, line in enumerate(ngs_raw_lines):
+                parts = [p.strip() for p in line.split("\t") if p.strip()]
+                bands = parts[1] if len(parts) > 1 else ""
+                pair = parts[2] if len(parts) > 2 else ""
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    st.caption(f"{bands}  {pair}")
+                with c2:
+                    pick = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending", "Pre-Existing"],
+                                          key=f"ngs_{i}", label_visibility="collapsed")
+                if pick == "Completed":
+                    ngs_completed_lines.append(f"NGS Activation on : {bands}  {pair}")
+                elif pick == "Pending":
+                    ngs_pending_lines.append(f"NGS Activation on : {bands}  {pair} (MIC)")
+                elif pick == "Pre-Existing":
+                    ngs_notes_lines.append(f"Pre existing NGS found activated on : {pair}")
+            still_needed = sum(1 for i in range(len(ngs_raw_lines))
+                                if st.session_state.get(f"ngs_{i}", "\u2014 Select \u2014") == "\u2014 Select \u2014")
+            if still_needed > 0:
+                st.caption(f"\u26a0\ufe0f {still_needed} NGS pair(s) still need a status pick \u2014 "
+                           f"they won't appear in the report until selected.")
+
     # ---- LKF Installation: Node(s) and Controller are independent installation points
     # (confirmed — one can be Completed while the other is Pending), so each gets its own
     # dropdown. No default on either — leaving one untouched excludes just that entity. ----
@@ -510,7 +564,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
         gps_c_checked, gps_c_lines = _checked_group("GPS Installation / Upgrade", gps_extra_completed, "chk_gps_c")
         sfp_c_checked, sfp_c_lines = _checked_group("Transport SFP Installation on", transport_sfp_lines, "chk_sfp_c")
-        rs_c_checked, rs_c_lines = _checked_group("Radio Swap on", radio_swap_completed_lines, "chk_rs_c")
+        rs_c_checked, rs_c_display = _checked_group(
+            "Radio Swap on", [_humanize_scope_line(l) for l in radio_swap_completed_lines], "chk_rs_c")
         fdd_c_checked, fdd_c_lines = _checked_group("FDD Renaming on", fdd_lines_fixed, "chk_fdd_c")
         lkf_c_group_lines = [lkf_lines_by_section["Completed"]] if lkf_lines_by_section.get("Completed") else []
         lkf_c_checked, lkf_c_lines = _checked_group("LKF Installation", lkf_c_group_lines, "chk_lkf_c")
@@ -536,7 +591,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
         gps_p_checked, gps_p_lines = _checked_group("GPS-related Pending items", gps_extra_pending, "chk_gps_p")
         sfp_p_checked, sfp_p_lines = _checked_group("Transport SFP (Pending)", sfp_pending_extra, "chk_sfp_p")
-        rs_p_checked, rs_p_lines = _checked_group("Radio Swap on (Pending)", radio_swap_pending_lines, "chk_rs_p")
+        rs_p_checked, rs_p_display = _checked_group(
+            "Radio Swap on (Pending)", [_humanize_scope_line(l) for l in radio_swap_pending_lines], "chk_rs_p")
         edp_group_lines = [edp_publish_text] if edp_publish_text else []
         edp_checked, edp_lines = _checked_group("EDP Publish", edp_group_lines, "chk_edp")
         lkf_p_group_lines = [lkf_lines_by_section["Pending"]] if lkf_lines_by_section.get("Pending") else []
@@ -609,12 +665,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # Same safe-mutation pattern for every checked-gated group above — appended onto the
     # dict directly rather than relying on a widget's (staleness-prone) displayed value.
     choices["additional_completed"]["text"] = "\n".join(
-        [choices["additional_completed"]["text"] or ""] + gps_c_lines + sfp_c_lines + rs_c_lines
-        + fdd_c_lines + lkf_c_lines
+        [choices["additional_completed"]["text"] or ""] + gps_c_lines + sfp_c_lines + rs_c_display
+        + fdd_c_lines + lkf_c_lines + ngs_completed_lines
     ).strip()
     choices["additional_pending"]["text"] = "\n".join(
-        [choices["additional_pending"]["text"] or ""] + gps_p_lines + sfp_p_lines + rs_p_lines
-        + edp_lines + lkf_p_lines + testing_note_out
+        [choices["additional_pending"]["text"] or ""] + gps_p_lines + sfp_p_lines + rs_p_display
+        + edp_lines + lkf_p_lines + testing_note_out + ngs_pending_lines
     ).strip()
 
     with st.expander("Pre-Existing Issues"):
@@ -669,7 +725,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             st.caption("Auto-added (Emergency unlock confirmed):")
             for l in emergency_unlock_lines:
                 st.caption(l)
-        choices["notes_generic_text"] = "\n".join([notes_generic or ""] + emergency_unlock_lines).strip()
+        if ngs_notes_lines:
+            st.caption("Auto-added (NGS marked Pre-Existing):")
+            for l in ngs_notes_lines:
+                st.caption(l)
+        choices["notes_generic_text"] = "\n".join(
+            [notes_generic or ""] + emergency_unlock_lines + ngs_notes_lines).strip()
 
     st.markdown("---")
     node_tag = mm_objs[0].get("Node to be built as", "site") if mm_objs else "site"
@@ -731,13 +792,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 nodes = m.group(1).split("|")
                 sfp_completed_groups.append((nodes, m.group(2).strip(), m.group(3).strip()))
         radio_swap_completed_parsed = []
-        for line in rs_c_lines:
+        for line in (radio_swap_completed_lines if rs_c_checked else []):
             parts = line.split("\t")
             if len(parts) >= 6:
                 label_sectors = parts[1]
                 radio_swap_completed_parsed.append((label_sectors, "", parts[3], parts[5]))
         radio_swap_pending_parsed = []
-        for line in rs_p_lines:
+        for line in (radio_swap_pending_lines if rs_p_checked else []):
             parts = line.split("\t")
             if len(parts) >= 6:
                 label_sectors = parts[1]
@@ -749,6 +810,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 fdd_parsed.append((m.group(1), m.group(2), m.group(3)))
         lkf_completed_val = (lkf_c_lines[0] if lkf_c_lines else "").replace("LKF Installation:", "").strip() or None
         lkf_pending_val = (lkf_p_lines[0] if lkf_p_lines else "").replace("LKF Installation:", "").replace("(MIC)", "").strip() or None
+        ngs_completed_val = "; ".join(ngs_completed_lines) or None
+        ngs_pending_val = "; ".join(ngs_pending_lines) or None
 
         def _split_buffer_lines(lines):
             """Buffer entries as (label, detail) — first ':' splits label from detail;
@@ -767,11 +830,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # (Port Conversion is NOT here — it merges into one line through its own dedicated
         # checklist row instead, confirmed, regardless of how many nodes.)
         # Completed buffer = only genuine OVERFLOW beyond each item's dedicated row capacity
-        # (GPS: 1 completed row, Transport SFP: 3 completed rows) — NOT the full lists, since
-        # those already go to their own dedicated rows via build_new_xlsm_row_writes below;
-        # including them again here would double-count the same content in two places.
-        buffer_completed_lines = gps_c_lines[1:] + sfp_c_lines[3:]
-        buffer_pending_lines = gps_p_lines[1:] + sfp_p_lines[4:]
+        # (GPS: 1 completed row, Transport SFP: 3 completed rows, Radio Swap: 3 completed
+        # rows) — NOT the full lists, since those already go to their own dedicated rows via
+        # build_new_xlsm_row_writes below; including them again here would double-count the
+        # same content in two places.
+        buffer_completed_lines = gps_c_lines[1:] + sfp_c_lines[3:] + rs_c_display[3:]
+        buffer_pending_lines = gps_p_lines[1:] + sfp_p_lines[4:] + rs_p_display[3:]
         buffer_pre_existing_lines = sfp_pre_existing_extra + bucket_pre_existing
 
         new_rw = mcl.build_new_xlsm_row_writes(
@@ -787,6 +851,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             lkf_pending_line=lkf_pending_val,
             fdd_lines=fdd_parsed[:2],
             edp_publish=edp_publish_text,
+            ngs_completed_line=ngs_completed_val,
+            ngs_pending_line=ngs_pending_val,
             buffer_completed_extra=_split_buffer_lines(buffer_completed_lines)[:10],
             buffer_pending_extra=_split_buffer_lines(buffer_pending_lines)[:9],
             buffer_pre_existing_extra=buffer_pre_existing_lines[:10],
