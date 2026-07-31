@@ -693,31 +693,54 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         ).strip()
 
     with st.expander("Notes"):
-        note_defs = [
-            ("notes_final_port_config", "Final Port Configuration attached."),
-            ("notes_nr_verified", "NR configuration has been verified."),
-            ("notes_cpri_sfp", "Area prechecks verification for CPRI/SFP check is completed."),
-            ("notes_no_external_alarms", "No scope of external alarms."),
-        ]
-        cols = st.columns(2)
-        for i, (note_key, text) in enumerate(note_defs):
-            with cols[i % 2]:
-                checked = st.checkbox(text, key=f"chk_{note_key}")
-                choices[note_key] = {"checked": checked, "text": text}
+        has_5g = any(app.is_populated(row.get("gNBId")) for row in mm_objs)
 
+        # Final Port Configuration: always included, no longer optional.
+        choices["notes_final_port_config"] = {"checked": True, "text": "Final Port Configuration attached."}
+
+        # NR configuration verified: auto-triggers when 5G is present at the site (checked
+        # by default, still overridable — same pattern as every other auto-detected item).
+        nr_verified_checked = st.checkbox("NR configuration has been verified.", value=has_5g, key="chk_notes_nr_verified")
+        choices["notes_nr_verified"] = {"checked": nr_verified_checked, "text": "NR configuration has been verified."}
+        if not has_5g:
+            st.caption("(No 5G detected at this site)")
+
+        st.markdown("**Area prechecks verification for CPRI/SFP check**")
+        cpri_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                     key="cpri_sfp_status", label_visibility="collapsed")
+        cpri_text = ("Area prechecks verification for CPRI/SFP check is completed." if cpri_choice == "Completed"
+                     else "Area prechecks verification for CPRI/SFP check is pending(Node is not replicating in tool)."
+                     if cpri_choice == "Pending" else "")
+        choices["notes_cpri_sfp"] = {"checked": bool(cpri_choice != "\u2014 Select \u2014"), "text": cpri_text}
+
+        # No scope of external alarms: user's own choice, unchanged.
+        n_no_alarms = st.checkbox("No scope of external alarms.", key="chk_notes_no_external_alarms")
+        choices["notes_no_external_alarms"] = {"checked": n_no_alarms, "text": "No scope of external alarms."}
+
+        n_mme = st.checkbox("Pre-Existing MME configuration left as it is on nodes", key="chk_notes_mme_config")
+        mme_nodes = st.text_input("\U0001F4DD Node ID(s), comma/pipe separated", key="rpt_mme_node", label_visibility="collapsed",
+                                    placeholder="e.g. NodeA, NodeB") if n_mme else ""
+        choices["notes_mme_config"] = {"checked": n_mme, "text": f"Pre-Existing MME configuration left as it is on nodes: {mme_nodes}"}
+
+        # Monitored/not-monitored: auto-filled from the already-known pre-existing vs.
+        # newly-added node lists — confirmed, no manual typing needed.
+        pre_existing_node_names = [row.get("Node to be built as") for row in mm_objs
+                                    if row.get("Node to be built as") not in new_nodes]
         c1, c2 = st.columns(2)
         with c1:
-            n_mme = st.checkbox("Pre-Existing MME configuration left as it is on node", key="chk_notes_mme_config")
-            mme_node = st.text_input("Node ID", key="rpt_mme_node", label_visibility="collapsed") if n_mme else ""
-            choices["notes_mme_config"] = {"checked": n_mme, "text": f"Pre-Existing MME configuration left as it is on node {mme_node}"}
+            if pre_existing_node_names:
+                n_mon = st.checkbox(f"Node is in monitored state ({'|'.join(pre_existing_node_names)})",
+                                      value=True, key="chk_notes_monitored")
+            else:
+                n_mon = False
+            choices["notes_monitored"] = {"checked": n_mon, "text": f"{'|'.join(pre_existing_node_names)} is in monitored state."}
         with c2:
-            n_mon = st.checkbox("Node is in monitored state", key="chk_notes_monitored")
-            mon_node = st.text_input("Node ID (monitored)", key="rpt_mon_node", label_visibility="collapsed") if n_mon else ""
-            choices["notes_monitored"] = {"checked": n_mon, "text": f"{mon_node} is in monitored state."}
-
-        n_not_mon = st.checkbox("Node is in not monitored state", key="chk_notes_not_monitored")
-        not_mon_node = st.text_input("Node ID (not monitored)", key="rpt_not_mon_node", label_visibility="collapsed") if n_not_mon else ""
-        choices["notes_not_monitored"] = {"checked": n_not_mon, "text": f"{not_mon_node} is in not monitored state."}
+            if new_nodes:
+                n_not_mon = st.checkbox(f"Node is in not monitored state ({'|'.join(new_nodes)})",
+                                          value=True, key="chk_notes_not_monitored")
+            else:
+                n_not_mon = False
+            choices["notes_not_monitored"] = {"checked": n_not_mon, "text": f"{'|'.join(new_nodes)} is in not monitored state."}
 
         emergency_unlock_lines = [f"Emergency unlock activated on the node {n}." for n in emergency_unlock_notes]
         notes_generic = st.text_area("\U0001F4DD Enter Notes that need to be reported or addressed to Market",
