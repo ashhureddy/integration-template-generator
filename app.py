@@ -3144,12 +3144,10 @@ elif st.session_state.qkx_page == "input":
                 if top_scope not in ("N2E", "NSB"):
                     pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
                 post_file, controller_file = None, None
-                if st.session_state.get("qkx_report_only"):
-                    # Post-checks and controller-checks: added this session — nearly every
-                    # new report check (Integration/Retune/Moved Sectors/Port Conversion
-                    # verification, GPS Status, Transport SFP thresholds, 6610 hardware
-                    # state, SAU/External alarm status) depends on one or both of these.
-                    # Neither existed as an input on this flow before.
+                if st.session_state.get("qkx_report_only") or top_scope == "N2E":
+                    # Post-checks and controller-checks: N2E's GPS/SUP/XMU/controller-checks
+                    # logic needs these too, confirmed this session — previously this
+                    # uploader only ever showed for MCA's report flow.
                     post_file = st.file_uploader("Post-checks (.pdf) — required for report checks", type=["pdf"])
                     controller_file = st.file_uploader(
                         "6610 Controller checks (.pdf) — required only if a 6610 is present",
@@ -3380,3 +3378,14 @@ elif st.session_state.qkx_page == "input":
             importlib.reload(mca_report_ui)
             mca_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines,
                                   postcheck_text=postcheck_text, controller_checks_text=controller_checks_text, edp_index=edp_index)
+
+        if top_scope == "N2E":
+            import importlib
+            import mca_completed_logic, n2e_completed_logic, mca_xlsm_surgical
+            importlib.reload(mca_completed_logic)
+            importlib.reload(n2e_completed_logic)
+            importlib.reload(mca_xlsm_surgical)
+            import n2e_report_ui
+            importlib.reload(n2e_report_ui)
+            n2e_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, edp_index, uid, dstr,
+                                  postcheck_text=postcheck_text, controller_checks_text=controller_checks_text)
