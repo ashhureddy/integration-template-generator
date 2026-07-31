@@ -803,6 +803,40 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if idl_build_type:
             row_writes.append((19, True, [(3, idl_build_type)]))
 
+        # ---- Notes section (confirmed real gap — none of this was ever written to the
+        # .xlsm before). Rows 181/182/183 are the only genuinely dedicated Notes rows in
+        # the real template; "CPRI/SFP", "No scope of external alarms", and "monitored/
+        # not-monitored state" have NO dedicated row at all (confirmed by searching the
+        # actual template text) — they route through the 8-row generic buffer (184-191)
+        # alongside the free-text notes, emergency-unlock lines, NGS Pre-Existing notes,
+        # and bucket-3 notes, first-come-first-served. Overflow beyond 8 -> Warnings tab. ----
+        row_writes.append((181, True, [(2, "Final Port Configuration attached.")]))
+        row_writes.append((182, nr_verified_checked, [(2, "NR configuration has been verified.")] if nr_verified_checked else []))
+        row_writes.append((183, n_mme, [(2, f"Pre-Existing MME configuration left as it is on nodes: {mme_nodes}")] if n_mme else []))
+
+        notes_buffer_lines = []
+        if cpri_choice not in ("", "\u2014 Select \u2014"):
+            notes_buffer_lines.append(cpri_text)
+        if n_no_alarms:
+            notes_buffer_lines.append("No scope of external alarms.")
+        if n_mon:
+            notes_buffer_lines.append(f"{'|'.join(pre_existing_node_names)} is in monitored state.")
+        if n_not_mon:
+            notes_buffer_lines.append(f"{'|'.join(new_nodes)} is in not monitored state.")
+        notes_buffer_lines += [l for l in (notes_generic or "").split("\n") if l.strip()]
+        notes_buffer_lines += emergency_unlock_lines + ngs_notes_lines + bucket_notes
+
+        notes_buffer_rows = list(range(184, 192))
+        for i, row_num in enumerate(notes_buffer_rows):
+            if i < len(notes_buffer_lines):
+                row_writes.append((row_num, True, [(2, notes_buffer_lines[i])]))
+            else:
+                row_writes.append((row_num, False, []))
+        if len(notes_buffer_lines) > len(notes_buffer_rows):
+            warnings.append({"type": "notes_buffer_exhausted",
+                              "text": f"Notes \u2014 {len(notes_buffer_lines) - len(notes_buffer_rows)} additional "
+                                      f"entries could not fit in report, review manually."})
+
         # ---- Everything built this session that build_xlsm_row_writes never knew about —
         # parsed back out of the already-tested formatted strings rather than re-deriving
         # structured data, since the exact format is controlled and safe to parse. Uses the
