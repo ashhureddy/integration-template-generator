@@ -706,9 +706,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if not has_5g:
             st.caption("(No 5G detected at this site)")
 
-        st.markdown("**Area prechecks verification for CPRI/SFP check**")
-        cpri_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
-                                     key="cpri_sfp_status", label_visibility="collapsed")
+        cpri_choice = "\u2014 Select \u2014"
+        if new_nodes:
+            st.markdown(f"**Area prechecks verification for CPRI/SFP check** \u2014 {len(new_nodes)} new node(s)")
+            cpri_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                         key="cpri_sfp_status", label_visibility="collapsed")
         cpri_text = ("Area prechecks verification for CPRI/SFP check is completed." if cpri_choice == "Completed"
                      else "Area prechecks verification for CPRI/SFP check is pending(Node is not replicating in tool)."
                      if cpri_choice == "Pending" else "")
