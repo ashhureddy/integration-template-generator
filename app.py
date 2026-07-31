@@ -3077,6 +3077,8 @@ if st.session_state.qkx_page == "home":
         st.caption("Nokia to Ericsson site integration")
         if st.button("N2E", use_container_width=True, key="qkx_card_n2e"):
             _qkx_go("input", "N2E")
+        if st.button("\U0001F4CB  N2E - Generate Report", use_container_width=True, key="qkx_card_n2e_report"):
+            _qkx_go("input", "N2E", report_only=True)
     with c3:
         st.caption("New site build")
         if st.button("NSB", use_container_width=True, key="qkx_card_nsb"):
@@ -3144,10 +3146,11 @@ elif st.session_state.qkx_page == "input":
                 if top_scope not in ("N2E", "NSB"):
                     pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
                 post_file, controller_file = None, None
-                if st.session_state.get("qkx_report_only") or top_scope == "N2E":
+                if st.session_state.get("qkx_report_only"):
                     # Post-checks and controller-checks: N2E's GPS/SUP/XMU/controller-checks
-                    # logic needs these too, confirmed this session — previously this
-                    # uploader only ever showed for MCA's report flow.
+                    # logic needs these too, confirmed this session — gated on report_only
+                    # so plain template generation (no report) doesn't ask for them
+                    # unnecessarily.
                     post_file = st.file_uploader("Post-checks (.pdf) — required for report checks", type=["pdf"])
                     controller_file = st.file_uploader(
                         "6610 Controller checks (.pdf) — required only if a 6610 is present",
@@ -3379,7 +3382,7 @@ elif st.session_state.qkx_page == "input":
             mca_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines,
                                   postcheck_text=postcheck_text, controller_checks_text=controller_checks_text, edp_index=edp_index)
 
-        if top_scope == "N2E":
+        if top_scope == "N2E" and st.session_state.get("qkx_report_only"):
             import importlib
             import mca_completed_logic, n2e_completed_logic, mca_xlsm_surgical
             importlib.reload(mca_completed_logic)
