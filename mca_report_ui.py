@@ -829,6 +829,26 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             row_writes.append((23, False, []))
             row_writes.append((24, False, []))
 
+        # Rows 25-39 (15 "Manual Feed based on NEST & CIQ" rows) — confirmed real gap:
+        # overflow slots for ADDITIONAL Sidehaul connections beyond the first (real example:
+        # FSL00456 had 2 connections on the same switch). Never wired at all before this fix.
+        extra_sidehaul_rows = list(range(25, 40))
+        extra_connections = sidehaul_rows_data[1:] if sidehaul_rows_data else []
+        for i, row_num in enumerate(extra_sidehaul_rows):
+            if i < len(extra_connections):
+                conn = extra_connections[i]
+                cable_pn_extra = st.session_state.get(f"cable_pn_{i+1}", "")
+                line = (f"Switch type: {conn['switch_type']}  Switch ID: {conn['switch_id']}  "
+                        f"Slot/Port: {conn['slot_port']}  Cable part number: {cable_pn_extra}  Node ID: {conn['node_id']}")
+                row_writes.append((row_num, True, [(2, line)]))
+            else:
+                row_writes.append((row_num, False, []))
+
+        # Row 80 "Swap Sector Verification" — confirmed explicitly removed from scope
+        # earlier this session, but never wrote False, so its template default (True,
+        # placeholder "CBAND|DOD") was leaking through unchanged.
+        row_writes.append((80, False, []))
+
         # ---- Notes section (confirmed real gap — none of this was ever written to the
         # .xlsm before). Rows 181/182/183 are the only genuinely dedicated Notes rows in
         # the real template; "CPRI/SFP", "No scope of external alarms", and "monitored/
@@ -951,6 +971,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # Florida-only newly added cells (rows 93-104, single column B, confirmed same
         # pattern as Pre-Existing Issues rows — not the label:detail buffer format).
         # Gated on the checkbox — unchecked means excluded from the .xlsm entirely.
+        # Row 92 ("Newly added Cells" sub-header) matches the same checkbox state.
+        row_writes.append((92, bool(florida_checked), []))
         florida_xlsm_rows = list(range(93, 105))
         florida_active_rows = florida_rows if florida_checked else []
         for i, row_num in enumerate(florida_xlsm_rows):
