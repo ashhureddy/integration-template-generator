@@ -1163,7 +1163,6 @@ def build_new_xlsm_row_writes(
         lkf_completed_line=None, lkf_pending_line=None,
         fdd_lines=None,
         edp_publish=None,
-        port_conv_swap_nodes=None,
         buffer_completed_extra=None, buffer_pending_extra=None, buffer_pre_existing_extra=None):
     """Every *_groups / *_lines argument is the STRUCTURED data (lists/tuples), not the
     pre-formatted display strings, so exact column values can be written. Returns a list of
@@ -1248,12 +1247,10 @@ def build_new_xlsm_row_writes(
     edp_row = row_map["edp_publish"]["pending"][0]
     rw.append((edp_row, bool(edp_publish), []))  # no VALUE_COLUMNS entry (structural row) — text lives in the plain-text report
 
-    # ---- Port Conversion via board swap: reuses the SAME row as the original same-board
-    # check (completed=[46]) — confirmed this is the same conceptual item, just a second
-    # completion path, not a separate row. ----
-    pc_row = row_map["port_conversion"]["completed"][0]
-    if port_conv_swap_nodes:
-        rw.append((pc_row, True, [(3, "|".join(port_conv_swap_nodes))]))
+    # Port Conversion (including the via-board-swap completion path) is now merged into ONE
+    # line at the scope_lines level before the checklist ever runs — it flows through the
+    # NORMAL mca_glue.build_xlsm_row_writes path via its existing dedicated row, same as any
+    # other checklist item. No separate writer needed here (would double-write row 46).
 
     # ---- Buffer pools: Completed (81-90), Pending (158-166), Pre-Existing (169-178) —
     # first-come-first-served, "Label : Detail" already split into (label, detail) pairs
