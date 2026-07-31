@@ -88,7 +88,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     with st.container(border=True):
         st.markdown("**Subject** (MIC / MNS / N2E / IX-STF are constants)")
         site_name = st.text_input("\U0001F4DD Site Name", key="n2e_site_name")
-        sow = st.text_input("\U0001F4DD SOW", key="n2e_sow")
         fa_code = ""
         if "5G Info" in ciq_wb.sheetnames:
             for row in app.sheet_objs(ciq_wb["5G Info"]):
@@ -171,6 +170,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # 6610 Controller Integration + cascade.
         controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
         cascade_fires = n2e.controller_cascade_fires(controller_in_edp, bool(controller_checks_text))
+        st.caption(f"(debug) controller_checks_text length: {len(controller_checks_text or '')} | "
+                   f"controller_in_edp: {controller_in_edp} | cascade_fires: {cascade_fires} | "
+                   f"controller_checks_data keys: {list(controller_checks_data.keys()) if controller_checks_data else '(empty)'}")
         controller_line = next((l for l in scope_lines if l.startswith("6610 Controller Integration") or l.startswith("EDP Publish")), None)
         if cascade_fires:
             st.caption("\u26a0\ufe0f Controller-checks file not uploaded \u2014 6610 Controller Integration, SAU Connections, "
@@ -226,6 +228,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     choices_completed.append(gps_completed_line)
             if disabled_nodes:
                 gps_pending_line = f"GPS Installation: {'|'.join(disabled_nodes)} (MIC PM)"
+            if not enabled_nodes and not disabled_nodes:
+                st.caption(f"GPS Installation: no TimeSyncIO state found in Post-checks for "
+                           f"{'|'.join(row.get('Node to be built as') for row in mm_objs)} \u2014 check Post-checks parsing.")
         else:
             st.caption("GPS Installation: Post-checks not uploaded \u2014 can't determine sync status.")
 
@@ -347,22 +352,22 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             script_6673_completed = f"6673 Script load: {switch_id}"
             choices_completed.append(script_6673_completed)
 
-        # Installation — manual free text.
-        installation_manual = st.text_input("\U0001F4DD Installation (6673/6675/6610/SIAD/Baseband's etc)", key="n2e_install_manual")
-        if installation_manual.strip():
-            choices_completed.append(f"Installation: {installation_manual}")
+        # Installation and "additional completed information" — confirmed: these are
+        # purely manual with no auto-detection value at all; the engineer fills them in
+        # directly in the downloaded macro file itself rather than duplicating entry here.
 
-        # SA Conversion — CIQ NR_SA tab presence, Completed only.
+        # SA Conversion — CIQ NR_SA tab presence, Completed only. Confirmed same
+        # silent-append bug as the others — now uses the visible checkbox pattern.
         sa_nodes = n2e.sa_conversion_nodes(ciq_wb, mm_objs)
         sa_completed_line = None
         if sa_nodes:
-            sa_completed_line = f"SA conversion.: {'|'.join(sa_nodes)}"
-            choices_completed.append(sa_completed_line)
-
-        additional_completed = st.text_area("\U0001F4DD Enter any additional completed information",
-                                             key="n2e_add_completed", height=80)
-        if additional_completed.strip():
-            choices_completed.append(additional_completed)
+            candidate_sa_line = f"SA conversion.: {'|'.join(sa_nodes)}"
+            sa_checked, sa_lines = _checked_group("SA Conversion", [candidate_sa_line], "n2e_sa")
+            if sa_checked:
+                sa_completed_line = candidate_sa_line
+                choices_completed.append(sa_completed_line)
+        else:
+            st.caption("SA Conversion: not detected (no node found in CIQ's NR_SA tab).")
 
     with st.expander("Pending", expanded=True):
         # Row order below matches the real template exactly: 78 On Site Nokia cutover,
@@ -430,10 +435,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_pending.append(idl_pending)
             st.caption(idl_pending)
 
-        # SIAD provisioning — manual.
-        siad_manual = st.text_input("\U0001F4DD SIAD provisioning (Node ID, manual)", key="n2e_siad")
-        if siad_manual.strip():
-            choices_pending.append(f"SIAD provisioning: {siad_manual}. (MIC PM)")
+        # SIAD provisioning — confirmed purely manual, handled directly in the macro,
+        # not duplicated here.
 
         if area_pending:
             choices_pending.append(area_pending)
@@ -523,7 +526,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_notes.append(notes_manual)
 
     # ==================== Report text + xlsm ====================
-    report_lines = ["Subject", f"MIC | MNS | N2E | IX-STF | {site_name} | {fa_code} | {site_ids} | {sow}",
+    report_lines = ["Subject", f"MIC | MNS | N2E | IX-STF | {site_name} | {fa_code} | {site_ids}",
                     "", "IWM Details", iwm_details,
                     "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_line}",
                     f"6610 Controller : {controller_id or ''}"]
