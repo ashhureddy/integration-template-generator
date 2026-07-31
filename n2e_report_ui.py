@@ -485,6 +485,49 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             for l in active_alarm_lines:
                 st.caption(l)
 
+        # Locked alarm ports — confirmed N2E-specific rules from the reference doc's
+        # dedicated N2E tab, genuinely different from MCA's Legacy tab: no equivalent to
+        # MCA's "pre-existing locked" bucket, different Owner tags, and a new "Power
+        # Plant Swap" scenario producing both a Pending AND a Note line together.
+        locked_ports_list = [p for p in (controller_checks_data.get("alarm_ports", []) if controller_checks_data else [])
+                              if p["admin"] == "LOCKED" and p["slogan"]]
+        bucket_pending, bucket_notes = [], []
+        if locked_ports_list:
+            with st.container(border=True):
+                st.markdown(f"**Locked alarm ports** \u2014 {len(locked_ports_list)} scripted port(s) detected LOCKED "
+                            f"in the controller-checks file:")
+                for p in locked_ports_list:
+                    st.caption(f"Port {p['port']} \u2014 {p['slogan']} ({p['severity']})")
+                st.markdown("Classify each one below (per the confirmed N2E 6610 Alarm Cutover reporting "
+                            "standard). Leave blank whichever don't apply.")
+                n2e_port_slogan_map = {p["port"]: p["slogan"] for p in locked_ports_list}
+
+                nb1 = st.text_input("\U0001F4DD 1. Pre-existing Active Alarms \u2014 port numbers", key="n2e_lp_active", placeholder="e.g. 3, 20")
+                t1 = n2e.n2e_locked_port_active_alarms(nb1, n2e_port_slogan_map)
+                if t1:
+                    bucket_notes.append(t1)
+
+                nb2 = st.text_input("\U0001F4DD 2. Pre-Existing Loops and Bridge Clips on the 66 Block \u2014 port numbers", key="n2e_lp_loops")
+                t2 = n2e.n2e_locked_port_loops_bridge_clips(nb2, n2e_port_slogan_map)
+                if t2:
+                    bucket_notes.append(t2)
+
+                nb3 = st.text_input("\U0001F4DD 3. Power Plant Swap \u2014 port numbers", key="n2e_lp_power")
+                t3_pending, t3_note = n2e.n2e_locked_port_power_plant_swap(nb3, n2e_port_slogan_map)
+                if t3_pending:
+                    bucket_pending.append(t3_pending)
+                if t3_note:
+                    bucket_notes.append(t3_note)
+
+                nb4 = st.text_input("\U0001F4DD 4. Post-Cutover Alarms Not Cleared by FE \u2014 port numbers", key="n2e_lp_notcleared")
+                t4 = n2e.n2e_locked_port_not_cleared_by_fe(nb4, n2e_port_slogan_map)
+                if t4:
+                    bucket_pending.append(t4)
+
+                choices_pending += bucket_pending
+                for l in bucket_pending:
+                    st.caption(l)
+
         additional_pending = st.text_area("\U0001F4DD Enter any additional pending information",
                                            key="n2e_add_pending", height=80)
         if additional_pending.strip():
@@ -530,6 +573,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         notes_manual = st.text_area("\U0001F4DD Enter Notes", key="n2e_notes_manual", height=60)
         if notes_manual.strip():
             choices_notes.append(notes_manual)
+
+        if bucket_notes:
+            st.caption("Auto-added (Locked-port classification):")
+            for l in bucket_notes:
+                st.caption(l)
+            choices_notes += bucket_notes
 
     # ==================== Report text + xlsm ====================
     report_lines = ["Subject", f"MIC | MNS | N2E | IX-STF | {site_name} | {fa_code} | {site_ids}",
