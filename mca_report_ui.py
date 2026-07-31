@@ -313,6 +313,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     for item in results:
         if item["key"] == "ngs_activation":
             item["checked_by_default"] = False
+    # Suppress the checklist's own DSS Activation item unconditionally — confirmed real
+    # gap: it originally had toggle=True (Completed/Pending + AT&T/MIC stakeholder if
+    # Pending), but that got silently lost when the UI was simplified to a plain checkbox.
+    # Replaced by the custom section below, matching the original spec exactly.
+    for item in results:
+        if item["key"] == "dss_activation":
+            item["checked_by_default"] = False
     # Suppress the checklist's own LKF Installation item unconditionally — confirmed bug:
     # it was showing alongside the new per-node Completed/Pending dropdown section as a
     # confusing duplicate. The custom section (built this pass) fully replaces it, since it
@@ -426,6 +433,25 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             else:
                 switch = st.text_area("\U0001F4DD Switch details (manual)", key="rpt_switch", height=60)
                 slot_port = st.text_area("\U0001F4DD Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
+
+    # ---- DSS Activation: Completed/Pending choice, stakeholder (AT&T/MIC) prompt only if
+    # Pending — confirmed real gap, restoring the original spec exactly. No default —
+    # same "require an active pick" pattern used elsewhere. ----
+    dss_raw_lines = [l for l in scope_lines if l.startswith("DSS Activation")]
+    dss_completed_line, dss_pending_line = None, None
+    if dss_raw_lines:
+        with st.container(border=True):
+            st.markdown(f"**DSS Activation** \u2014 detected. Pick a status (required):")
+            dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                        key="dss_status", label_visibility="collapsed")
+            dss_line = dss_raw_lines[0].replace("\t", " ")
+            if dss_choice == "Completed":
+                dss_completed_line = dss_line
+            elif dss_choice == "Pending":
+                dss_stakeholder = st.selectbox("Stakeholder", ["\u2014 Select \u2014", "AT&T", "MIC"],
+                                                 key="dss_stakeholder")
+                if dss_stakeholder != "\u2014 Select \u2014":
+                    dss_pending_line = f"{dss_line} ({dss_stakeholder})"
 
     # ---- NGS activation: per-pair 3-way choice (Completed/Pending/Pre-Existing), confirmed
     # change from the old auto-Completed-only behavior. No default — same "require an active
@@ -667,13 +693,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     # Same safe-mutation pattern for every checked-gated group above — appended onto the
     # dict directly rather than relying on a widget's (staleness-prone) displayed value.
+    dss_completed_lines = [dss_completed_line] if dss_completed_line else []
+    dss_pending_lines = [dss_pending_line] if dss_pending_line else []
     choices["additional_completed"]["text"] = "\n".join(
         [choices["additional_completed"]["text"] or ""] + gps_c_lines + sfp_c_lines + rs_c_display
-        + fdd_c_lines + lkf_c_lines + ngs_completed_lines + florida_active_rows
+        + fdd_c_lines + lkf_c_lines + ngs_completed_lines + florida_active_rows + dss_completed_lines
     ).strip()
     choices["additional_pending"]["text"] = "\n".join(
         [choices["additional_pending"]["text"] or ""] + gps_p_lines + sfp_p_lines + rs_p_display
-        + edp_lines + lkf_p_lines + testing_note_out + ngs_pending_lines
+        + edp_lines + lkf_p_lines + testing_note_out + ngs_pending_lines + dss_pending_lines
     ).strip()
 
     with st.expander("Pre-Existing Issues"):
@@ -867,6 +895,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             row_writes.append((46, True, [(3, pc_nodes)]))
         else:
             row_writes.append((46, False, []))
+
+        # DSS Activation (completed=59, pending=122) — restored toggle, confirmed real gap.
+        row_writes.append((59, bool(dss_completed_line), [(3, dss_completed_line)] if dss_completed_line else []))
+        row_writes.append((122, bool(dss_pending_line), [(3, dss_pending_line)] if dss_pending_line else []))
 
         # ---- Notes section (confirmed real gap — none of this was ever written to the
         # .xlsm before). Rows 181/182/183 are the only genuinely dedicated Notes rows in
