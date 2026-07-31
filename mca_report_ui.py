@@ -797,11 +797,37 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         row_writes.append((11, bool(current_config.strip()), [(3, current_config)]))
         row_writes.append((12, True, [(3, post_line)]))
         row_writes.append((13, bool(wll_node.strip()), [(3, wll_node)]))
-        row_writes.append((14, True, [(3, controller_id)]))
-        row_writes.append((15, True, [(3, software_version)]))
-        row_writes.append((16, True, [(3, gs_version)]))
-        if idl_build_type:
-            row_writes.append((19, True, [(3, idl_build_type)]))
+        # Confirmed real bug: the raw template defaults these to checked=True with
+        # placeholder text baked in — anywhere we don't explicitly override with the real
+        # value/False, that default silently leaks straight through to the final .xlsm.
+        row_writes.append((14, bool(controller_id), [(3, controller_id)] if controller_id else []))
+        row_writes.append((15, bool(software_version.strip()), [(3, software_version)] if software_version.strip() else []))
+        row_writes.append((16, bool(gs_version.strip()), [(3, gs_version)] if gs_version.strip() else []))
+        row_writes.append((19, bool(idl_build_type), [(3, idl_build_type)] if idl_build_type else []))
+
+        # IDLe / IDLy (rows 20/21) — same confirmed bug: never written before this fix, so
+        # the template's default (checked=True, placeholder text) always leaked through
+        # regardless of whether the engineer actually entered anything.
+        row_writes.append((20, bool(idle.strip()), [(3, idle)] if idle.strip() else []))
+        row_writes.append((21, bool(idly.strip()), [(3, idly)] if idly.strip() else []))
+
+        # Switch / Slot-Port (rows 23/24) — confirmed NEVER written at all before this fix,
+        # so the template's default (checked=True, placeholder text) always leaked through
+        # regardless of whether this site actually has Sidehaul Info data. Two paths: the
+        # Sidehaul-auto-fill case, and the manual-fallback case (when no Sidehaul data
+        # exists but the engineer typed into the manual Switch/Slot-Port text areas).
+        sidehaul_rows_data = mcl.sidehaul_display_rows(ciq_wb)
+        if sidehaul_rows_data:
+            first = sidehaul_rows_data[0]
+            row_writes.append((23, True, [(3, first["switch_type"]), (4, first["switch_id"])]))
+            cable_pn = st.session_state.get("cable_pn_0", "")
+            row_writes.append((24, True, [(3, cable_pn), (4, first["node_id"])]))
+        elif switch.strip() or slot_port.strip():
+            row_writes.append((23, bool(switch.strip()), [(3, switch)] if switch.strip() else []))
+            row_writes.append((24, bool(slot_port.strip()), [(3, slot_port)] if slot_port.strip() else []))
+        else:
+            row_writes.append((23, False, []))
+            row_writes.append((24, False, []))
 
         # ---- Notes section (confirmed real gap — none of this was ever written to the
         # .xlsm before). Rows 181/182/183 are the only genuinely dedicated Notes rows in
@@ -941,6 +967,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             else:
                 st.warning(f"Template not found at {TEMPLATE_PATH} \u2014 and the folder {static_dir} doesn't exist at all.")
         else:
-            xlsm_bytes = fill_legacy_mca(TEMPLATE_PATH, {"row_writes": row_writes})
+            xlsm_bytes = fill_legacy_mca(TEMPLATE_PATH, {"row_writes": row_writes}, report_text=report_text)
             st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
                                 file_name=f"{node_tag}_Legacy_MCA_Filled.xlsm", key="rpt_dl_xlsm")
