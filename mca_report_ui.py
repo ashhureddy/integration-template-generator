@@ -648,10 +648,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             b2 = st.text_input("\U0001F4DD 2. Pre-existing active alarm \u2014 port numbers", key="lp_b2", placeholder="e.g. 3, 6, 20")
             c1, c2 = st.columns([2, 1])
             with c1:
-                b3 = st.text_input("\U0001F4DD 3. Pre-existing loops/bridge clips/no equipment connections \u2014 port numbers", key="lp_b3")
+                b3 = st.text_input("\U0001F4DD 3. Pre-existing loops/bridge clips/no equipment connections \u2014 currently locked port numbers", key="lp_b3")
             with c2:
                 b3_reason = st.selectbox("Reason", ["\u2014 Select \u2014", "Pre-existing loops", "Bridge Clips", "No equipment end connections"],
                                            key="lp_b3_reason", label_visibility="collapsed")
+            b3_loops_removed = st.text_input(
+                "\U0001F4DD Loops/clips actually removed from \u2014 port numbers (leave blank to reuse the ports above; "
+                "may include ports no longer locked, e.g. if removing the loop cleared the alarm)",
+                key="lp_b3_loops_removed", placeholder="e.g. 4, 5, 6, 7")
             c1, c2 = st.columns([2, 1])
             with c1:
                 b4 = st.text_input("\U0001F4DD 4. Post-cutover, FE couldn't clear \u2014 port numbers", key="lp_b4")
@@ -671,7 +675,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             port_slogan_map = {p["port"]: p["slogan"] for p in locked_ports_list}
             t1 = mcl.locked_port_bucket_1(b1, port_slogan_map)
             t2 = mcl.locked_port_bucket_2(b2, port_slogan_map)
-            t3, t3_note = mcl.locked_port_bucket_3(b3, b3_reason if b3_reason != "\u2014 Select \u2014" else "", port_slogan_map)
+            t3, t3_note = mcl.locked_port_bucket_3(b3, b3_reason if b3_reason != "\u2014 Select \u2014" else "", port_slogan_map,
+                                                     loops_removed_ports=b3_loops_removed if b3_loops_removed.strip() else None)
             t4 = mcl.locked_port_bucket_4(b4, b4_owner, port_slogan_map)
             for t in (t1, t2, t3):
                 if t:
