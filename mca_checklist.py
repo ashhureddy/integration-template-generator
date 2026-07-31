@@ -98,19 +98,19 @@ CHECKLIST = [
     # ---------------- Completed: Call Test (market-table driven, confirmed and built this
     # session — replaces the previous stub items, which were permanently dead: none of
     # their 6 trigger conditions were ever actually computed anywhere in the old code). ----
-    {"key": "psap_calltest", "label": "PSAP test/Speedtest/VoLTE voice calltest:", "section": "completed",
+    {"key": "psap_moved_lte", "label": "PSAP test/Speedtest/VoLTE voice calltest:", "section": "completed",
      "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "PSAP test/Speedtest/VoLTE voice calltest:")}
                if _scope_lines_matching(ctx, "PSAP test/Speedtest/VoLTE voice calltest:") else None},
 
-    {"key": "lte_speedtest_calltest", "label": "Speedtest/VoLTE voice calltest:", "section": "completed",
+    {"key": "speedtest_new_lte", "label": "Speedtest/VoLTE voice calltest:", "section": "completed",
      "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Speedtest/VoLTE voice calltest:")}
                if _scope_lines_matching(ctx, "Speedtest/VoLTE voice calltest:") else None},
 
-    {"key": "fiveg_speedtest_calltest", "label": "Speed test:", "section": "completed",
+    {"key": "speedtest_5g", "label": "Speed test:", "section": "completed",
      "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Speed test:")}
                if _scope_lines_matching(ctx, "Speed test:") else None},
 
-    {"key": "fnet_calltest", "label": "Calltest with F-NET SIM:", "section": "completed",
+    {"key": "calltest_fnet", "label": "Calltest with F-NET SIM:", "section": "completed",
      "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Calltest with F-NET SIM:")}
                if _scope_lines_matching(ctx, "Calltest with F-NET SIM:") else None},
 
