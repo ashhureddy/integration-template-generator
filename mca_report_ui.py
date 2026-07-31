@@ -608,7 +608,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                           if p["admin"] == "LOCKED" and p["slogan"]]
     locked_ports_exist = bool(locked_ports_list)
 
-    bucket_pre_existing, bucket_pending = [], []
+    bucket_pre_existing, bucket_pending, bucket_notes = [], [], []
     if locked_ports_exist:
         with st.container(border=True):
             st.markdown(f"**Locked alarm ports** \u2014 {len(locked_ports_list)} scripted port(s) detected LOCKED "
@@ -644,11 +644,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             port_slogan_map = {p["port"]: p["slogan"] for p in locked_ports_list}
             t1 = mcl.locked_port_bucket_1(b1, port_slogan_map)
             t2 = mcl.locked_port_bucket_2(b2, port_slogan_map)
-            t3 = mcl.locked_port_bucket_3(b3, b3_reason if b3_reason != "\u2014 Select \u2014" else "", port_slogan_map)
+            t3, t3_note = mcl.locked_port_bucket_3(b3, b3_reason if b3_reason != "\u2014 Select \u2014" else "", port_slogan_map)
             t4 = mcl.locked_port_bucket_4(b4, b4_owner, port_slogan_map)
             for t in (t1, t2, t3):
                 if t:
                     bucket_pre_existing.append(t)
+            bucket_notes = [t3_note] if t3_note else []
             if t4:
                 bucket_pending.append(t4)
             if b5:
@@ -753,8 +754,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             st.caption("Auto-added (NGS marked Pre-Existing):")
             for l in ngs_notes_lines:
                 st.caption(l)
+        if bucket_notes:
+            st.caption("Auto-added (Locked-port classification, bucket 3):")
+            for l in bucket_notes:
+                st.caption(l)
         choices["notes_generic_text"] = "\n".join(
-            [notes_generic or ""] + emergency_unlock_lines + ngs_notes_lines).strip()
+            [notes_generic or ""] + emergency_unlock_lines + ngs_notes_lines + bucket_notes).strip()
 
     st.markdown("---")
     node_tag = mm_objs[0].get("Node to be built as", "site") if mm_objs else "site"
