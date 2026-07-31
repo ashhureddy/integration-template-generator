@@ -851,6 +851,22 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # placeholder "CBAND|DOD") was leaking through unchanged.
         row_writes.append((80, False, []))
 
+        # Row 46 "Port speed 1G to 10G conversion with MPST:" — confirmed real, pre-existing
+        # bug in mca_glue._result_to_column_values: it expects tab-separated scope lines
+        # (matching most other items), but this item's line has never had tabs (confirmed
+        # even in the original pre-session code) — splitting on tab produces one element,
+        # then dropping "the label token" empties it, so the checkbox always correctly
+        # showed True but the Node ID column always silently stayed blank. Bypasses that
+        # broken path with an explicit write instead. Re-derives the node list directly
+        # from scope_lines (not a variable from earlier in the function) to avoid any
+        # scoping risk if postcheck_text was falsy.
+        pc_lines = [l for l in scope_lines if l.startswith("Port speed 1G to 10G conversion with MPST:")]
+        if pc_lines:
+            pc_nodes = pc_lines[0].split("MPST:")[-1].strip().rstrip(".")
+            row_writes.append((46, True, [(3, pc_nodes)]))
+        else:
+            row_writes.append((46, False, []))
+
         # ---- Notes section (confirmed real gap — none of this was ever written to the
         # .xlsm before). Rows 181/182/183 are the only genuinely dedicated Notes rows in
         # the real template; "CPRI/SFP", "No scope of external alarms", and "monitored/
