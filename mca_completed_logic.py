@@ -1149,17 +1149,20 @@ def locked_port_bucket_2(ports, port_slogan_map=None):
 
 def locked_port_bucket_3(ports, reason="", port_slogan_map=None):
     """Pre-existing loops/bridge clips/no equipment connections -> Pre-Existing Issues.
-    Confirmed: the Note is auto-generated (not manual/optional) using the SAME ports,
-    with the engineer selecting which specific reason applies (loops / bridge clips /
-    no equipment end connections) rather than always showing a generic all-3 phrase."""
+    Confirmed: the Note is auto-generated (not manual/optional) using the SAME ports, with
+    the engineer selecting which specific reason applies (loops / bridge clips / no
+    equipment end connections). Confirmed: the Note goes in the report's NOTES section,
+    not bundled into the Pre-Existing Issues text — so this returns them separately.
+    Returns (pre_existing_text, note_text_or_None)."""
     if not ports:
-        return None
+        return None, None
     ports_fmt = format_ports_with_slogans(ports, port_slogan_map or {})
     text = f"Active alarms observed on ports {ports_fmt} are kept locked (Owner: AT&T)."
+    note = None
     if reason:
         plain_ports_fmt = format_ports_with_slogans(ports, {})  # same Oxford-comma join, no slogan annotation
-        text += f"\nNote:\n[{reason}] have been removed from alarm ports {plain_ports_fmt}."
-    return text
+        note = f"[{reason}] have been removed from alarm ports {plain_ports_fmt}."
+    return text, note
 
 
 def locked_port_bucket_4(ports, owner, port_slogan_map=None):
