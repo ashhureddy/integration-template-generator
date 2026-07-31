@@ -3290,6 +3290,7 @@ elif st.session_state.qkx_page == "input":
                 "log_lines": log_lines, "mm_objs": mm_objs, "controller_objs": controller_objs, "ciq_wb": ciq_wb,
                 "precheck_text": precheck_text, "postcheck_text": postcheck_text,
                 "controller_checks_text": controller_checks_text, "edp_index": edp_index,
+                "uid": uid, "dstr": dstr,
             }
             if not st.session_state.get("qkx_report_only"):
                 render_checks_panel_animated(ph_checks_top, top_scope, scope_lines)
@@ -3308,6 +3309,8 @@ elif st.session_state.qkx_page == "input":
             postcheck_text = r.get("postcheck_text", "")
             controller_checks_text = r.get("controller_checks_text", "")
             edp_index = r.get("edp_index")
+            uid = r.get("uid") or "xxUserIDxx"
+            dstr = r.get("dstr") or "xxDatexx"
             if not report_only:
                 ph_log.code("\n".join(r["log_lines"]), language=None)
             else:
