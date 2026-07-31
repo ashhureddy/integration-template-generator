@@ -618,10 +618,22 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     ).strip()
 
     with st.expander("Pre-Existing Issues"):
-        pre_existing_default = "\n".join(sfp_pre_existing_extra + bucket_pre_existing)
         pre_existing_text = st.text_area("\U0001F4DD Enter any Pre-Existing Issues that needs to be reported to Market",
-                                          value=pre_existing_default, key="rpt_preexisting", height=70)
-        choices["pre_existing_issues_text"] = pre_existing_text
+                                          key="rpt_preexisting", height=70)
+        if sfp_pre_existing_extra:
+            st.caption("Auto-detected (Transport SFP, existing node):")
+            for l in sfp_pre_existing_extra:
+                st.caption(l)
+        if bucket_pre_existing:
+            st.caption("From locked-port classification:")
+            for l in bucket_pre_existing:
+                st.caption(l)
+        # Same confirmed staleness bug as the other buffer boxes — appended onto the
+        # collected value directly rather than relying on this widget's `value=` default,
+        # which is only honored on its very first render.
+        choices["pre_existing_issues_text"] = "\n".join(
+            [pre_existing_text or ""] + sfp_pre_existing_extra + bucket_pre_existing
+        ).strip()
 
     with st.expander("Notes"):
         note_defs = [
@@ -650,11 +662,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         not_mon_node = st.text_input("Node ID (not monitored)", key="rpt_not_mon_node", label_visibility="collapsed") if n_not_mon else ""
         choices["notes_not_monitored"] = {"checked": n_not_mon, "text": f"{not_mon_node} is in not monitored state."}
 
-        emergency_unlock_default = "\n".join(
-            f"Emergency unlock activated on the node {n}." for n in emergency_unlock_notes)
+        emergency_unlock_lines = [f"Emergency unlock activated on the node {n}." for n in emergency_unlock_notes]
         notes_generic = st.text_area("\U0001F4DD Enter Notes that need to be reported or addressed to Market",
-                                      value=emergency_unlock_default, key="rpt_notes_generic", height=70)
-        choices["notes_generic_text"] = notes_generic
+                                      key="rpt_notes_generic", height=70)
+        if emergency_unlock_lines:
+            st.caption("Auto-added (Emergency unlock confirmed):")
+            for l in emergency_unlock_lines:
+                st.caption(l)
+        choices["notes_generic_text"] = "\n".join([notes_generic or ""] + emergency_unlock_lines).strip()
 
     st.markdown("---")
     node_tag = mm_objs[0].get("Node to be built as", "site") if mm_objs else "site"
