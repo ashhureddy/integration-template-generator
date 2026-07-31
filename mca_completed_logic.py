@@ -979,6 +979,10 @@ def check_port_conversion_via_board_swap(ciq_wb, mm_objs, precheck_text, postche
     never being recognized as complete at all. Real example: ECL02586 Pre=G2(6630, port
     TN_B, 1G), CIQ target=G4(6672) -> check the NEW board's relevant port (TN_IDL_C) in
     Post-checks: shows 10G_FULL -> conversion is COMPLETE via the swap.
+    Confirmed real fix: this must be a genuine BEFORE/AFTER comparison, not just checking
+    the new board's port alone — the OLD board's port in Pre-checks must actually show 1G
+    first. Without that check, this could fire even when the old board was already at
+    10G, which isn't a real "conversion" at all, just a coincidental match.
     Returns list of {"node":..., "text":...} for every node where this applies."""
     completed = []
     for row in mm_objs:
@@ -990,10 +994,19 @@ def check_port_conversion_via_board_swap(ciq_wb, mm_objs, precheck_text, postche
         post_gen = qx.get_node_generation(ciq_wb, row)
         if not pre_gen or not post_gen or pre_gen == post_gen:
             continue  # not a board-swap scenario - the existing same-board check handles this node instead
-        port_labels = qx.PORT_BY_GEN.get(post_gen)
-        if not port_labels:
+
+        # Confirmed fix: verify the OLD board's port actually shows 1G in Pre-checks first.
+        pre_port_labels = qx.PORT_BY_GEN.get(pre_gen)
+        if not pre_port_labels:
             continue
-        opmode = qx.extract_transport_fiber_opmode(postcheck_text, node, port_labels)
+        pre_opmode = qx.extract_transport_fiber_opmode(precheck_text, node, pre_port_labels)
+        if not pre_opmode or "1G" not in pre_opmode.upper() or "10G" in pre_opmode.upper():
+            continue  # old board wasn't genuinely at 1G — not a real conversion
+
+        post_port_labels = qx.PORT_BY_GEN.get(post_gen)
+        if not post_port_labels:
+            continue
+        opmode = qx.extract_transport_fiber_opmode(postcheck_text, node, post_port_labels)
         if opmode and "10G" in opmode.upper():
             completed.append({
                 "node": node,
