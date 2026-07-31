@@ -221,17 +221,25 @@ def extract_controller_checks(text):
     result["controller_state"] = _fru_state("Controller6610")
     result["sau_state"] = _fru_state("SAU")
 
-    # External alarms table — confirmed real rows:
-    # "FieldReplaceableUnit=SAU,AlarmPort=1 false 1 (UNLOCKED) RBS INTRUSION false 1 (ENABLED) 3 (MAJOR)"
-    # "FieldReplaceableUnit=SAU,AlarmPort=11 false 0 (LOCKED) true 1 (ENABLED) 4 (MINOR)"  <- no slogan
+    # External alarms table — confirmed real rows (verified against the actual PDF table,
+    # column order: MO | activeExternalAlarm | administrativeState | alarmSlogan |
+    # normallyOpen | operationalState | perceivedSeverity):
+    # "FieldReplaceableUnit=SAU,AlarmPort=1  false 1 (UNLOCKED) RBS PNC DC MJ  false 1 (ENABLED) 3 (MAJOR)"
+    # "FieldReplaceableUnit=SAU,AlarmPort=11 true  0 (LOCKED)   RBS HVAC FAIL  false 1 (ENABLED) 2 (CRITICAL)"
+    # "FieldReplaceableUnit=SAU,AlarmPort=20 false 0 (LOCKED)                  true  1 (ENABLED) 4 (MINOR)"  <- no slogan
+    # Confirmed real bug: the OLD regex never captured activeExternalAlarm at all, and
+    # confused operationalState (a static circuit-enable flag — ALWAYS "ENABLED" whether
+    # or not there's a real fault, confirmed by inspecting the raw data) for it. That's
+    # why every scripted port was being reported as "active" regardless of its real state.
     port_re = re.compile(
-        r'FieldReplaceableUnit=SAU,AlarmPort=(\d+)\s+\S+\s+\d+\s+\((\w+)\)\s*'
-        r'([A-Z][A-Z0-9 ]*?)?\s*(?:true|false)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)')
+        r'FieldReplaceableUnit=SAU,AlarmPort=(\d+)\s+(true|false)\s+\d+\s+\((\w+)\)\s*'
+        r'([A-Z][A-Z0-9 +]*?)?\s*(true|false)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)')
     for m3 in port_re.finditer(text):
-        port, admin, slogan, _oper, severity = m3.groups()
+        port, active, admin, slogan, _normally_open, oper, severity = m3.groups()
         slogan = slogan.strip() if slogan and slogan.strip() else None
         result["alarm_ports"].append({
             "port": port, "admin": admin, "slogan": slogan, "severity": severity,
+            "active": active == "true", "alarm_state": oper,
         })
     return result
 
@@ -1163,20 +1171,22 @@ def locked_port_bucket_2(ports, port_slogan_map=None):
     return f"Pre\u2011existing active alarms on ports {ports_fmt} are kept locked to avoid OPS tickets. (Owner: AT&T PM/OPS)"
 
 
-def locked_port_bucket_3(ports, reason="", port_slogan_map=None):
+def locked_port_bucket_3(locked_ports, reason="", port_slogan_map=None, loops_removed_ports=None):
     """Pre-existing loops/bridge clips/no equipment connections -> Pre-Existing Issues.
-    Confirmed: the Note is auto-generated (not manual/optional) using the SAME ports, with
-    the engineer selecting which specific reason applies (loops / bridge clips / no
-    equipment end connections). Confirmed: the Note goes in the report's NOTES section,
-    not bundled into the Pre-Existing Issues text — so this returns them separately.
+    Confirmed real fix: the "kept locked" line and the "loops removed" note can legitimately
+    cover DIFFERENT port sets — removing a loop can clear the alarm and let that port
+    auto-unlock, so loops_removed_ports (the Note) may include ports no longer in
+    locked_ports (the "kept locked" line) at all. Falls back to locked_ports for the note
+    if loops_removed_ports isn't given, for backward compatibility.
     Returns (pre_existing_text, note_text_or_None)."""
-    if not ports:
+    if not locked_ports:
         return None, None
-    ports_fmt = format_ports_with_slogans(ports, port_slogan_map or {})
+    ports_fmt = format_ports_with_slogans(locked_ports, port_slogan_map or {})
     text = f"Active alarms observed on ports {ports_fmt} are kept locked (Owner: AT&T)."
     note = None
     if reason:
-        plain_ports_fmt = format_ports_with_slogans(ports, {})  # same Oxford-comma join, no slogan annotation
+        note_ports = loops_removed_ports if loops_removed_ports else locked_ports
+        plain_ports_fmt = format_ports_with_slogans(note_ports, {})  # same Oxford-comma join, no slogan annotation
         note = f"[{reason}] have been removed from alarm ports {plain_ports_fmt}."
     return text, note
 
