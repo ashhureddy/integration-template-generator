@@ -623,7 +623,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             with c1:
                 b3 = st.text_input("\U0001F4DD 3. Pre-existing loops/bridge clips/no equipment connections \u2014 port numbers", key="lp_b3")
             with c2:
-                b3_note = st.text_input("Note (optional)", key="lp_b3_note", label_visibility="collapsed", placeholder="Note (optional)")
+                b3_reason = st.selectbox("Reason", ["\u2014 Select \u2014", "Pre-existing loops", "Bridge Clips", "No equipment end connections"],
+                                           key="lp_b3_reason", label_visibility="collapsed")
             c1, c2 = st.columns([2, 1])
             with c1:
                 b4 = st.text_input("\U0001F4DD 4. Post-cutover, FE couldn't clear \u2014 port numbers", key="lp_b4")
@@ -643,7 +644,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             port_slogan_map = {p["port"]: p["slogan"] for p in locked_ports_list}
             t1 = mcl.locked_port_bucket_1(b1, port_slogan_map)
             t2 = mcl.locked_port_bucket_2(b2, port_slogan_map)
-            t3 = mcl.locked_port_bucket_3(b3, b3_note, port_slogan_map)
+            t3 = mcl.locked_port_bucket_3(b3, b3_reason if b3_reason != "\u2014 Select \u2014" else "", port_slogan_map)
             t4 = mcl.locked_port_bucket_4(b4, b4_owner, port_slogan_map)
             for t in (t1, t2, t3):
                 if t:
