@@ -672,7 +672,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             with c2:
                 b6_dest = st.selectbox("Goes to", ["Pre-Existing Issues", "Pending"], key="lp_b6_dest", label_visibility="collapsed")
 
-            port_slogan_map = {p["port"]: p["slogan"] for p in locked_ports_list}
+            # Confirmed fix: build from ALL alarm ports (not just currently-locked ones),
+            # so a port that's since been unlocked (e.g. loops_removed_ports including a
+            # port whose alarm cleared) still gets its slogan looked up correctly.
+            all_alarm_ports = controller_checks_data.get("alarm_ports", []) if controller_checks_data else []
+            port_slogan_map = {p["port"]: p["slogan"] for p in all_alarm_ports if p["slogan"]}
             t1 = mcl.locked_port_bucket_1(b1, port_slogan_map)
             t2 = mcl.locked_port_bucket_2(b2, port_slogan_map)
             t3, t3_note = mcl.locked_port_bucket_3(b3, b3_reason if b3_reason != "\u2014 Select \u2014" else "", port_slogan_map,
