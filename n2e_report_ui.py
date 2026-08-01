@@ -630,6 +630,112 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             row_writes.append((N2E_ROW_MAP["software_version"], bool(software_version.strip()), [(3, software_version)] if software_version.strip() else []))
             row_writes.append((N2E_ROW_MAP["gs_version"], bool(gs_version.strip()), [(3, gs_version)] if gs_version.strip() else []))
 
+            def _rw(key, section, checked, value=None, col=3):
+                rows = N2E_ROW_MAP[key][section] if isinstance(N2E_ROW_MAP[key], dict) else None
+                if not rows:
+                    return
+                row_writes.append((rows[0], bool(checked), [(col, value)] if checked and value else []))
+
+            def _rw_multi(key, section, lines):
+                rows = N2E_ROW_MAP[key][section] if isinstance(N2E_ROW_MAP[key], dict) else None
+                if not rows:
+                    return
+                for i, row_num in enumerate(rows):
+                    if i < len(lines):
+                        row_writes.append((row_num, True, [(3, lines[i])]))
+                    else:
+                        row_writes.append((row_num, False, []))
+
+            # ---- Completed ----
+            _rw_multi("integration", "completed", int_lines if int_checked else [])
+            _rw("controller_integration", "completed", not cascade_fires and controller_line and ctrl_checked, controller_line)
+            _rw("dss_activation", "completed", dss_completed, dss_completed)
+            _rw("ngs_activation", "completed", ngs_completed, ngs_completed)
+            _rw("gps_installation", "completed", gps_completed_line, gps_completed_line)
+            _rw("lkf_installation", "completed", lkf_completed, lkf_completed)
+            _rw_multi("transport_sfp", "completed", sfp_completed_lines)
+            _rw("ret_configuration", "completed", False)  # always Pending, never Completed
+            _rw("external_alarm_scripting", "completed", not cascade_fires and alarm_scripting_completed, alarm_scripting_completed)
+            _rw("sau_connections", "completed", not cascade_fires and sau_completed, sau_completed)
+            _rw("sup_connections", "completed", sup_completed_lines, "|".join(sup_completed_lines))
+            _rw("xmu_installation", "completed", xmu_completed_lines, "|".join(xmu_completed_lines))
+            _rw("idl_connections", "completed", idl_completed, idl_completed)
+            _rw("smm_triggering", "completed", smm_completed, smm_completed)
+            _rw("area_test", "completed", False)  # Area Lite is always "Failed" -> always Pending
+            _rw("external_alarm_testing", "completed", not cascade_fires and testing_completed, testing_completed)
+            _rw("script_load_6673", "completed", script_6673_completed, script_6673_completed)
+            _rw("installation_manual", "completed", False)  # confirmed removed from UI, handled directly in the macro
+            _rw("sa_conversion", "completed", sa_completed_line, sa_completed_line)
+
+            # ---- Pending ----
+            _rw("on_site_nokia_cutover", "pending", True, "On Site Nokia cutover (Tower Crew)")
+            _rw("controller_integration", "pending",
+                (cascade_fires and controller_line) or (not cascade_fires and False),
+                f"{controller_line.replace(chr(9), ' ')} (MIC PM)" if cascade_fires and controller_line else None)
+            _rw("dss_activation", "pending", dss_pending, dss_pending)
+            _rw("ngs_activation", "pending", ngs_pending, ngs_pending)
+            _rw("gps_installation", "pending", gps_pending_line, gps_pending_line)
+            _rw("lkf_installation", "pending",
+                "LKF Installation. (MIC)" if cascade_fires else lkf_pending,
+                "LKF Installation. (MIC)" if cascade_fires else lkf_pending)
+            _rw("psap_speedtest", "pending", lte_bands, f"PSAP/Speed test/VoLTE voice call test on: {lte_bands}. (MIC PM)" if lte_bands else None)
+            _rw("speed_test_5g", "pending", fiveg_bands, f"Speed test on: {fiveg_bands}. (MIC PM)" if fiveg_bands else None)
+            _rw("calltest_fnet", "pending", False)  # confirmed: never built for N2E, no trigger condition defined
+            _rw_multi("transport_sfp", "pending", [])  # confirmed removed: Compatible Transport SFP no longer auto-generates
+            _rw("ret_configuration", "pending", True, ret_pending)
+            _rw("external_alarm_scripting", "pending",
+                "External alarm Scripting. (MIC)" if cascade_fires else None,
+                "External alarm Scripting. (MIC)" if cascade_fires else None)
+            _rw("sau_connections", "pending",
+                "SAU Connections. (MIC PM)" if cascade_fires else sau_pending,
+                "SAU Connections. (MIC PM)" if cascade_fires else sau_pending)
+            _rw("sup_connections", "pending", sup_pending_lines, "|".join(sup_pending_lines))
+            _rw("xmu_installation", "pending", xmu_pending_lines, "|".join(xmu_pending_lines))
+            _rw("idl_connections", "pending", idl_pending, idl_pending)
+            _rw("siad_provisioning", "pending", False)  # confirmed removed from UI
+            _rw("area_test", "pending", area_pending, area_pending)
+            _rw("external_alarm_testing", "pending",
+                "External alarm testing. (MIC PM)" if cascade_fires else testing_pending,
+                "External alarm testing. (MIC PM)" if cascade_fires else testing_pending)
+            _rw("config_6673", "pending", has_6673, f"6673 Configuration: {sidehaul_rows[0]['switch_id'] if sidehaul_rows else ''}. (AT&T)" if has_6673 else None)
+            _rw("port_config_6673_enm", "pending", has_6673, f"6673 Port Configuration in ENM: {sidehaul_rows[0]['switch_id'] if sidehaul_rows else ''}. (AT&T)" if has_6673 else None)
+            link_rows = N2E_ROW_MAP["link_failure_or_sfp"]["pending"]
+            if link_choice == "Link failure":
+                row_writes.append((link_rows[0], True, [(3, f"Link failure: {full_bands}. (Tower Crew)")]))
+                row_writes.append((link_rows[1], False, []))
+            elif link_choice == "SFP Not Present":
+                row_writes.append((link_rows[0], False, []))
+                row_writes.append((link_rows[1], True, [(3, f"SFP Not Present: {full_bands}. (Tower Crew)")]))
+            else:
+                row_writes.append((link_rows[0], False, []))
+                row_writes.append((link_rows[1], False, []))
+            _rw("sa_conversion", "pending", False)  # confirmed Completed-only, no Pending path built
+
+            # Pending buffer (105-112): the merged Power Plant Swap/Not-Cleared-by-FE
+            # line + any free-text "additional pending information".
+            pending_buffer_lines = list(bucket_pending) + ([additional_pending] if additional_pending.strip() else [])
+            pending_buffer_rows = N2E_ROW_MAP["additional_pending"]
+            for i, row_num in enumerate(pending_buffer_rows):
+                if i < len(pending_buffer_lines):
+                    row_writes.append((row_num, True, [(2, pending_buffer_lines[i])]))
+                else:
+                    row_writes.append((row_num, False, []))
+
+            # ---- Notes ----
+            final_port_line = "Final Port Configuration attached." if "Final Port Configuration attached." in choices_notes else None
+            row_writes.append((N2E_ROW_MAP["notes_final_port_config"], bool(final_port_line), [(2, final_port_line)] if final_port_line else []))
+            nr_line = "NR configuration has been verified." if "NR configuration has been verified." in choices_notes else None
+            row_writes.append((N2E_ROW_MAP["notes_nr_verified"], bool(nr_line), [(2, nr_line)] if nr_line else []))
+
+            other_notes = [n for n in choices_notes
+                            if n not in ("Final Port Configuration attached.", "NR configuration has been verified.")]
+            notes_buffer_rows = N2E_ROW_MAP["notes_buffer"]
+            for i, row_num in enumerate(notes_buffer_rows):
+                if i < len(other_notes):
+                    row_writes.append((row_num, True, [(2, other_notes[i])]))
+                else:
+                    row_writes.append((row_num, False, []))
+
             xlsm_bytes = fill_legacy_mca_surgical(N2E_TEMPLATE_PATH, row_writes)
             st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
                                 file_name=f"{node_tag}_N2E_Filled.xlsm", key="n2e_dl_xlsm")
