@@ -497,24 +497,39 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     st.caption(f"Port {p['port']} \u2014 {p['slogan']} ({p['severity']})")
                 st.markdown("Classify each one below (per the confirmed N2E 6610 Alarm Cutover reporting "
                             "standard). Leave blank whichever don't apply.")
-                n2e_port_slogan_map = {p["port"]: p["slogan"] for p in locked_ports_list}
+                # Confirmed fix: build from ALL alarm ports (not just currently-locked
+                # ones), so a port that's since been unlocked still gets its slogan.
+                n2e_all_alarm_ports = controller_checks_data.get("alarm_ports", []) if controller_checks_data else []
+                n2e_port_slogan_map = {p["port"]: p["slogan"] for p in n2e_all_alarm_ports if p["slogan"]}
+
+                def _n2e_warn_missing_slogans(ports_str):
+                    missing = mcl.missing_slogan_ports(ports_str, n2e_port_slogan_map)
+                    if missing:
+                        st.markdown(f"<div style='color:#c0392b;'>\u26a0\ufe0f Port(s) {', '.join(missing)} have "
+                                    f"no detected slogan \u2014 check the number(s), a slogan is required for every "
+                                    f"reported port.</div>", unsafe_allow_html=True)
 
                 nb1 = st.text_input("\U0001F4DD 1. Pre-existing Active Alarms \u2014 port numbers", key="n2e_lp_active", placeholder="e.g. 3, 20")
+                _n2e_warn_missing_slogans(nb1)
                 t1 = n2e.n2e_locked_port_active_alarms(nb1, n2e_port_slogan_map)
                 if t1:
                     bucket_notes.append(t1)
 
                 nb2 = st.text_input("\U0001F4DD 2. Pre-Existing Loops and Bridge Clips on the 66 Block \u2014 currently locked port numbers", key="n2e_lp_loops")
+                _n2e_warn_missing_slogans(nb2)
                 nb2_loops_removed = st.text_input(
                     "\U0001F4DD Loops/clips actually removed from \u2014 port numbers (leave blank to reuse the ports above; "
                     "may include ports no longer locked)", key="n2e_lp_loops_removed", placeholder="e.g. 4, 5, 6, 7")
+                _n2e_warn_missing_slogans(nb2_loops_removed)
                 t2 = n2e.n2e_locked_port_loops_bridge_clips(nb2, n2e_port_slogan_map,
                                                               loops_removed_ports=nb2_loops_removed if nb2_loops_removed.strip() else None)
                 if t2:
                     bucket_notes.append(t2)
 
                 nb3 = st.text_input("\U0001F4DD 3. Power Plant Swap \u2014 port numbers", key="n2e_lp_power")
+                _n2e_warn_missing_slogans(nb3)
                 nb4 = st.text_input("\U0001F4DD 4. Post-Cutover Alarms Not Cleared by FE \u2014 port numbers", key="n2e_lp_notcleared")
+                _n2e_warn_missing_slogans(nb4)
 
                 # Confirmed merge: both scenarios use nearly identical wording and the
                 # same Owner, so they combine into ONE Pending line covering all ports
