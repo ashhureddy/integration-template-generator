@@ -514,16 +514,19 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     bucket_notes.append(t2)
 
                 nb3 = st.text_input("\U0001F4DD 3. Power Plant Swap \u2014 port numbers", key="n2e_lp_power")
-                t3_pending, t3_note = n2e.n2e_locked_port_power_plant_swap(nb3, n2e_port_slogan_map)
-                if t3_pending:
-                    bucket_pending.append(t3_pending)
-                if t3_note:
-                    bucket_notes.append(t3_note)
-
                 nb4 = st.text_input("\U0001F4DD 4. Post-Cutover Alarms Not Cleared by FE \u2014 port numbers", key="n2e_lp_notcleared")
-                t4 = n2e.n2e_locked_port_not_cleared_by_fe(nb4, n2e_port_slogan_map)
-                if t4:
-                    bucket_pending.append(t4)
+
+                # Confirmed merge: both scenarios use nearly identical wording and the
+                # same Owner, so they combine into ONE Pending line covering all ports
+                # from both, instead of two separate lines. The Power Plant Swap note
+                # stays independent either way.
+                merged_pending = n2e.n2e_merged_post_cutover_pending(nb3, nb4, n2e_port_slogan_map)
+                if merged_pending:
+                    bucket_pending.append(merged_pending)
+                if nb3:
+                    _t3_pending, t3_note = n2e.n2e_locked_port_power_plant_swap(nb3, n2e_port_slogan_map)
+                    if t3_note:
+                        bucket_notes.append(t3_note)
 
                 choices_pending += bucket_pending
                 for l in bucket_pending:
