@@ -154,11 +154,14 @@ def controller_cascade_fires(controller_present_and_edp_published, controller_ch
 
 def active_external_alarm_lines(controller_checks_data, controller_id):
     """Confirmed real format: 'Active external alarm on Port {N}:({SLOGAN}) :{Controller
-    ID}. (Tower Crew)' — one line per port with a real slogan, regardless of lock state
-    (unlike the locked-port buckets, this is about any port carrying a live alarm)."""
+    ID}. (Tower Crew)' — confirmed real bug fixed: this used to fire on ANY port with a
+    slogan (i.e., merely scripted/configured), which is wrong — confirmed against the
+    real PDF table that a separate 'activeExternalAlarm' column (true/false) is the
+    actual signal for a currently-firing alarm, completely independent of whether the
+    port is scripted or locked."""
     lines = []
     for p in controller_checks_data.get("alarm_ports", []):
-        if p["slogan"]:
+        if p.get("active") and p["slogan"]:
             lines.append(f"Active external alarm on Port {p['port']}:({p['slogan']}) :{controller_id}. (Tower Crew)")
     return lines
 
@@ -201,13 +204,18 @@ def n2e_locked_port_active_alarms(ports, port_slogan_map=None):
     return f"Pre\u2011existing active alarms on ports {ports_fmt} are kept locked to avoid OPS tickets.(Owner:AT&T)"
 
 
-def n2e_locked_port_loops_bridge_clips(ports, port_slogan_map=None):
+def n2e_locked_port_loops_bridge_clips(locked_ports, port_slogan_map=None, loops_removed_ports=None):
     """Pre-Existing Loops and Bridge Clips -> Note ONLY, a single combined note (loops
-    line + active-alarms line together) — confirmed real format from the N2E tab."""
-    if not ports:
+    line + active-alarms line together) — confirmed real format from the N2E tab.
+    Confirmed real fix (same as MCA): the loops-removed line and the "kept locked" line
+    can legitimately cover different port sets — removing a loop can clear the alarm and
+    let that port auto-unlock, so loops_removed_ports may include ports no longer locked
+    at all. Falls back to locked_ports if not given, for backward compatibility."""
+    if not locked_ports:
         return None
-    plain_ports_fmt = mcl.format_ports_with_slogans(ports, {})
-    ports_fmt = mcl.format_ports_with_slogans(ports, port_slogan_map or {})
+    note_ports = loops_removed_ports if loops_removed_ports else locked_ports
+    plain_ports_fmt = mcl.format_ports_with_slogans(note_ports, {})
+    ports_fmt = mcl.format_ports_with_slogans(locked_ports, port_slogan_map or {})
     return (f"Pre\u2011existing loops have been removed from alarm ports {plain_ports_fmt}.\n"
             f"Active alarms observed on ports {ports_fmt} are kept locked (Owner: AT&T).")
 
