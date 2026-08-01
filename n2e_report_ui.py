@@ -478,12 +478,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_pending.append(smm_pending)
             st.caption(smm_pending)
 
-        # Active external alarm — per-port, auto.
+        # Active external alarm — confirmed purely informational now, no longer
+        # auto-adds to Pending. The SAME ports are typically also LOCKED with a real
+        # slogan, so they'd show up in the "Locked alarm ports" classification just
+        # below too — auto-adding here as well would duplicate them in the report. The
+        # engineer decides actual placement via that classification instead.
         if controller_checks_data:
             active_alarm_lines = n2e.active_external_alarm_lines(controller_checks_data, controller_id or "")
-            choices_pending += active_alarm_lines
-            for l in active_alarm_lines:
-                st.caption(l)
+            if active_alarm_lines:
+                st.markdown("**Active external alarms detected** (informational \u2014 classify below to "
+                            "decide where these actually go in the report):")
+                for l in active_alarm_lines:
+                    st.caption(l)
 
         # Locked alarm ports — confirmed N2E-specific rules from the reference doc's
         # dedicated N2E tab, genuinely different from MCA's Legacy tab: no equivalent to
