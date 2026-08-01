@@ -1138,12 +1138,25 @@ def current_configuration_line(ciq_wb, mm_objs, postcheck_text):
 # generators (confirmed: reuse the shared buffer lines, no dedicated classification UI).
 # ============================================================
 
+def missing_slogan_ports(ports_str, port_slogan_map):
+    """Confirmed real requirement: a slogan is a MUST for every reported port, not
+    optional. Returns the list of typed port numbers that have NO matching detected
+    slogan (typo, or a port outside the detected/locked set) — used to show a clear
+    warning instead of silently generating a report line with a bare, slogan-less port."""
+    if not ports_str:
+        return []
+    port_list = [p.strip() for p in ports_str.split(",") if p.strip()]
+    return [p for p in port_list if p not in port_slogan_map]
+
+
 def format_ports_with_slogans(ports_str, port_slogan_map):
     """ports_str: the engineer's typed comma-separated port numbers (e.g. '2, 4, 10').
     port_slogan_map: {port_number_str: slogan} from the detected locked_ports_list.
     Confirmed format: 'port[SLOGAN]' per port, joined with Oxford comma + 'and' before the
     last one — e.g. '2[RBS INTRUSION], 4[RBS HEX FAIL], and 10[RBS COMMERCIAL]'. A port with
-    no matching detected slogan (typo, or a port outside the detected set) is shown bare."""
+    no matching detected slogan (typo, or a port outside the detected set) is shown bare —
+    confirmed this should be flagged via missing_slogan_ports() wherever ports are entered,
+    since a slogan is required for every port, not optional."""
     if not ports_str:
         return ""
     port_list = [p.strip() for p in ports_str.split(",") if p.strip()]
@@ -1186,7 +1199,7 @@ def locked_port_bucket_3(locked_ports, reason="", port_slogan_map=None, loops_re
     note = None
     if reason:
         note_ports = loops_removed_ports if loops_removed_ports else locked_ports
-        plain_ports_fmt = format_ports_with_slogans(note_ports, {})  # same Oxford-comma join, no slogan annotation
+        plain_ports_fmt = format_ports_with_slogans(note_ports, port_slogan_map or {})  # confirmed: slogans required for every port, not just the "kept locked" line
         note = f"[{reason}] have been removed from alarm ports {plain_ports_fmt}."
     return text, note
 
