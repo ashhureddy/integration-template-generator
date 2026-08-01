@@ -222,7 +222,10 @@ def n2e_locked_port_loops_bridge_clips(locked_ports, port_slogan_map=None, loops
 
 def n2e_locked_port_power_plant_swap(ports, port_slogan_map=None):
     """Power Plant Swap — confirmed new N2E-only scenario, produces BOTH a Pending line
-    and a Note line together. Returns (pending_text, note_text)."""
+    and a Note line together. Returns (pending_text, note_text).
+    Confirmed: the Pending line by itself is superseded by
+    n2e_merged_post_cutover_pending() when both this bucket and bucket 4 (Not Cleared by
+    FE) have ports — the Note stays independent either way."""
     if not ports:
         return None, None
     ports_fmt = mcl.format_ports_with_slogans(ports, port_slogan_map or {})
@@ -237,4 +240,32 @@ def n2e_locked_port_not_cleared_by_fe(ports, port_slogan_map=None):
     if not ports:
         return None
     ports_fmt = mcl.format_ports_with_slogans(ports, port_slogan_map or {})
+    return f"Post external alarm cutover, active alarms observed on ports {ports_fmt} have been kept locked (Owner: Tower crew)."
+
+
+def _format_ports_ampersand(ports_str, port_slogan_map):
+    """Same slogan-annotation as mcl.format_ports_with_slogans, but joins with '&' before
+    the last port instead of 'and' — confirmed exact format for the merged Power Plant
+    Swap / Not Cleared by FE line, matching the reference doc's own style."""
+    if not ports_str:
+        return ""
+    port_list = [p.strip() for p in ports_str.split(",") if p.strip()]
+    annotated = [f"{p}[{port_slogan_map[p]}]" if p in port_slogan_map else p for p in port_list]
+    if len(annotated) == 1:
+        return annotated[0]
+    if len(annotated) == 2:
+        return f"{annotated[0]} & {annotated[1]}"
+    return ", ".join(annotated[:-1]) + f" & {annotated[-1]}"
+
+
+def n2e_merged_post_cutover_pending(power_plant_ports, not_cleared_ports, port_slogan_map=None):
+    """Confirmed merge: Power Plant Swap and Post-Cutover Not Cleared by FE ports combine
+    into ONE Pending line (both use nearly identical wording and the same Owner), rather
+    than two separate lines. Confirmed exact format: 'Post external alarm cutover, active
+    alarms observed on ports 5,10 & 6 have been kept locked (Owner: Tower crew).' — '&'
+    joining, 'have been kept locked' wording, slogans included per port."""
+    all_ports = ",".join(p for p in (power_plant_ports, not_cleared_ports) if p)
+    if not all_ports:
+        return None
+    ports_fmt = _format_ports_ampersand(all_ports, port_slogan_map or {})
     return f"Post external alarm cutover, active alarms observed on ports {ports_fmt} have been kept locked (Owner: Tower crew)."
