@@ -214,7 +214,7 @@ def n2e_locked_port_loops_bridge_clips(locked_ports, port_slogan_map=None, loops
     if not locked_ports:
         return None
     note_ports = loops_removed_ports if loops_removed_ports else locked_ports
-    plain_ports_fmt = mcl.format_ports_with_slogans(note_ports, {})
+    plain_ports_fmt = mcl.format_ports_with_slogans(note_ports, port_slogan_map or {})  # confirmed: slogans required for every port
     ports_fmt = mcl.format_ports_with_slogans(locked_ports, port_slogan_map or {})
     return (f"Pre\u2011existing loops have been removed from alarm ports {plain_ports_fmt}.\n"
             f"Active alarms observed on ports {ports_fmt} are kept locked (Owner: AT&T).")
