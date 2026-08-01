@@ -605,6 +605,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_line}",
                     f"6610 Controller : {controller_id or ''}"]
     if current_config: report_lines.append(f"Current Configuration : {current_config}")
+    if len(mm_objs) > 1:
+        report_lines += ["", "IDL Connections", f"Build Type : {idl_build_type or ''}"]
+        if idle.strip(): report_lines.append(f"IDLe : {idle}")
+        if idly.strip(): report_lines.append(f"IDLy : {idly}")
+        if switch.strip(): report_lines.append(switch)
+        if slot_port.strip(): report_lines.append(slot_port)
     report_lines += ["", "Completed"] + choices_completed
     report_lines += ["", "Pending"] + choices_pending
     report_lines += ["", "Notes:"] + choices_notes
@@ -629,6 +635,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             row_writes.append((N2E_ROW_MAP["controller_6610"], bool(controller_id), [(3, controller_id)] if controller_id else []))
             row_writes.append((N2E_ROW_MAP["software_version"], bool(software_version.strip()), [(3, software_version)] if software_version.strip() else []))
             row_writes.append((N2E_ROW_MAP["gs_version"], bool(gs_version.strip()), [(3, gs_version)] if gs_version.strip() else []))
+
+            # IDL Connections — confirmed real gap: was never written to the .xlsm at all.
+            if len(mm_objs) > 1 and idl_build_type:
+                idle_rows = N2E_ROW_MAP["idle"]
+                row_writes.append((idle_rows[0], True, [(3, idl_build_type)]))
+                row_writes.append((idle_rows[1], bool(idle.strip()), [(3, idle)] if idle.strip() else []))
+            row_writes.append((N2E_ROW_MAP["idly"], bool(idly.strip()), [(3, idly)] if idly.strip() else []))
+            row_writes.append((N2E_ROW_MAP["switch"], bool(switch.strip()), [(2, switch)] if switch.strip() else []))
+            row_writes.append((N2E_ROW_MAP["slot_port"], bool(slot_port.strip()), [(2, slot_port)] if slot_port.strip() else []))
 
             def _rw(key, section, checked, value=None, col=3):
                 rows = N2E_ROW_MAP[key][section] if isinstance(N2E_ROW_MAP[key], dict) else None
