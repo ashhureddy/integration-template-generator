@@ -645,86 +645,123 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             row_writes.append((N2E_ROW_MAP["switch"], bool(switch.strip()), [(2, switch)] if switch.strip() else []))
             row_writes.append((N2E_ROW_MAP["slot_port"], bool(slot_port.strip()), [(2, slot_port)] if slot_port.strip() else []))
 
-            def _rw(key, section, checked, value=None, col=3):
-                rows = N2E_ROW_MAP[key][section] if isinstance(N2E_ROW_MAP[key], dict) else None
-                if not rows:
-                    return
-                row_writes.append((rows[0], bool(checked), [(col, value)] if checked and value else []))
-
-            def _rw_multi(key, section, lines):
-                rows = N2E_ROW_MAP[key][section] if isinstance(N2E_ROW_MAP[key], dict) else None
-                if not rows:
-                    return
-                for i, row_num in enumerate(rows):
-                    if i < len(lines):
-                        row_writes.append((row_num, True, [(3, lines[i])]))
-                    else:
-                        row_writes.append((row_num, False, []))
+            def _rw_simple(row_num, checked, value=None, col=3):
+                """Writes just the raw VALUE into its one confirmed column — never the
+                whole formatted sentence (label + value combined), which was the
+                confirmed bug: the real template already has the label in column B, so
+                writing the full sentence into C duplicated it and left the real target
+                columns untouched."""
+                row_writes.append((row_num, bool(checked), [(col, value)] if checked and value else []))
 
             # ---- Completed ----
-            _rw_multi("integration", "completed", int_lines if int_checked else [])
-            _rw("controller_integration", "completed", not cascade_fires and controller_line and ctrl_checked, controller_line)
-            _rw("dss_activation", "completed", dss_completed, dss_completed)
-            _rw("ngs_activation", "completed", ngs_completed, ngs_completed)
-            _rw("gps_installation", "completed", gps_completed_line, gps_completed_line)
-            _rw("lkf_installation", "completed", lkf_completed, lkf_completed)
-            _rw_multi("transport_sfp", "completed", sfp_completed_lines)
-            _rw("ret_configuration", "completed", False)  # always Pending, never Completed
-            _rw("external_alarm_scripting", "completed", not cascade_fires and alarm_scripting_completed, alarm_scripting_completed)
-            _rw("sau_connections", "completed", not cascade_fires and sau_completed, sau_completed)
-            _rw("sup_connections", "completed", sup_completed_lines, "|".join(sup_completed_lines))
-            _rw("xmu_installation", "completed", xmu_completed_lines, "|".join(xmu_completed_lines))
-            _rw("idl_connections", "completed", idl_completed, idl_completed)
-            _rw("smm_triggering", "completed", smm_completed, smm_completed)
-            _rw("area_test", "completed", False)  # Area Lite is always "Failed" -> always Pending
-            _rw("external_alarm_testing", "completed", not cascade_fires and testing_completed, testing_completed)
-            _rw("script_load_6673", "completed", script_6673_completed, script_6673_completed)
-            _rw("installation_manual", "completed", False)  # confirmed removed from UI, handled directly in the macro
-            _rw("sa_conversion", "completed", sa_completed_line, sa_completed_line)
+            # Integration (42,43,44): C=bands only, D=node only, per node — confirmed
+            # real column split, not the whole "Integration: bands node" sentence in one cell.
+            int_rows = N2E_ROW_MAP["integration"]["completed"]
+            int_pairs = []
+            if int_checked:
+                for node, cells in classification.get("added", {}).items():
+                    bands = sorted({app.band_label(c)[0] for c in cells if app.band_label(c)[0]})
+                    if bands:
+                        int_pairs.append(("/".join(bands), node))
+            for i, row_num in enumerate(int_rows):
+                if i < len(int_pairs):
+                    row_writes.append((row_num, True, [(3, int_pairs[i][0]), (4, int_pairs[i][1])]))
+                else:
+                    row_writes.append((row_num, False, []))
+
+            _rw_simple(N2E_ROW_MAP["controller_integration"]["completed"][0],
+                       not cascade_fires and controller_line and ctrl_checked, controller_id)
+            dss_bands = dss_line.split("DSS Activation:")[-1].strip() if dss_completed and dss_line else None
+            _rw_simple(N2E_ROW_MAP["dss_activation"]["completed"][0], dss_completed, dss_bands)
+            ngs_bands = ngs_line.split("\t")[1] if ngs_completed and ngs_line and "\t" in ngs_line else None
+            ngs_node = ngs_line.split("\t")[2] if ngs_completed and ngs_line and ngs_line.count("\t") >= 2 else None
+            ngs_row = N2E_ROW_MAP["ngs_activation"]["completed"][0]
+            row_writes.append((ngs_row, bool(ngs_completed),
+                                [(3, ngs_bands), (4, ngs_node)] if ngs_completed else []))
+            # GPS Installation (48): C=node(s), D="Version:" (literal, already in template,
+            # don't touch), E=type value only.
+            gps_row = N2E_ROW_MAP["gps_installation"]["completed"][0]
+            if gps_completed_line:
+                row_writes.append((gps_row, True, [(3, "|".join(enabled_nodes)), (5, gtype)]))
+            else:
+                row_writes.append((gps_row, False, []))
+            _rw_simple(N2E_ROW_MAP["lkf_installation"]["completed"][0], lkf_completed, lkf_completed)  # confirmed: template's C is one combined "node | controller" column
+            sfp_rows = N2E_ROW_MAP["transport_sfp"]["completed"]
+            for i, row_num in enumerate(sfp_rows):
+                if i < len(new_nodes) and i < len(sfp_completed_lines):
+                    node = new_nodes[i]
+                    m = re.search(r'on: \S+ (.+?) \(BBU End\) & (.+?) \(SIAD End\)', sfp_completed_lines[i])
+                    models = f"{m.group(1)} (BBU End) & {m.group(2)} (SIAD End)" if m else ""
+                    row_writes.append((row_num, True, [(3, node), (4, models)]))
+                else:
+                    row_writes.append((row_num, False, []))
+            _rw_simple(N2E_ROW_MAP["ret_configuration"]["completed"][0], False)
+            _rw_simple(N2E_ROW_MAP["external_alarm_scripting"]["completed"][0], not cascade_fires and alarm_scripting_completed, controller_id)
+            _rw_simple(N2E_ROW_MAP["sau_connections"]["completed"][0], not cascade_fires and sau_completed, controller_id)
+            _rw_simple(N2E_ROW_MAP["sup_connections"]["completed"][0], sup_completed_lines, "|".join(s.split(": ")[-1] for s in sup_completed_lines))
+            _rw_simple(N2E_ROW_MAP["xmu_installation"]["completed"][0], xmu_completed_lines, "|".join(s.split(": ")[-1] for s in xmu_completed_lines))
+            _rw_simple(N2E_ROW_MAP["idl_connections"]["completed"][0], idl_completed)
+            _rw_simple(N2E_ROW_MAP["smm_triggering"]["completed"][0], smm_completed)
+            _rw_simple(N2E_ROW_MAP["area_test"]["completed"][0], False)
+            _rw_simple(N2E_ROW_MAP["external_alarm_testing"]["completed"][0], not cascade_fires and testing_completed, controller_id)
+            _rw_simple(N2E_ROW_MAP["script_load_6673"]["completed"][0], script_6673_completed,
+                       sidehaul_rows[0]["switch_id"] if script_6673_completed and sidehaul_rows else None)
+            _rw_simple(N2E_ROW_MAP["installation_manual"]["completed"][0], False)
+            _rw_simple(N2E_ROW_MAP["sa_conversion"]["completed"][0], sa_completed_line, "|".join(sa_nodes) if sa_completed_line else None)
 
             # ---- Pending ----
-            _rw("on_site_nokia_cutover", "pending", True, "On Site Nokia cutover (Tower Crew)")
-            _rw("controller_integration", "pending",
-                (cascade_fires and controller_line) or (not cascade_fires and False),
-                f"{controller_line.replace(chr(9), ' ')} (MIC PM)" if cascade_fires and controller_line else None)
-            _rw("dss_activation", "pending", dss_pending, dss_pending)
-            _rw("ngs_activation", "pending", ngs_pending, ngs_pending)
-            _rw("gps_installation", "pending", gps_pending_line, gps_pending_line)
-            _rw("lkf_installation", "pending",
-                "LKF Installation. (MIC)" if cascade_fires else lkf_pending,
-                "LKF Installation. (MIC)" if cascade_fires else lkf_pending)
-            _rw("psap_speedtest", "pending", lte_bands, f"PSAP/Speed test/VoLTE voice call test on: {lte_bands}. (MIC PM)" if lte_bands else None)
-            _rw("speed_test_5g", "pending", fiveg_bands, f"Speed test on: {fiveg_bands}. (MIC PM)" if fiveg_bands else None)
-            _rw("calltest_fnet", "pending", False)  # confirmed: never built for N2E, no trigger condition defined
-            _rw_multi("transport_sfp", "pending", [])  # confirmed removed: Compatible Transport SFP no longer auto-generates
-            _rw("ret_configuration", "pending", True, ret_pending)
-            _rw("external_alarm_scripting", "pending",
-                "External alarm Scripting. (MIC)" if cascade_fires else None,
-                "External alarm Scripting. (MIC)" if cascade_fires else None)
-            _rw("sau_connections", "pending",
-                "SAU Connections. (MIC PM)" if cascade_fires else sau_pending,
-                "SAU Connections. (MIC PM)" if cascade_fires else sau_pending)
-            _rw("sup_connections", "pending", sup_pending_lines, "|".join(sup_pending_lines))
-            _rw("xmu_installation", "pending", xmu_pending_lines, "|".join(xmu_pending_lines))
-            _rw("idl_connections", "pending", idl_pending, idl_pending)
-            _rw("siad_provisioning", "pending", False)  # confirmed removed from UI
-            _rw("area_test", "pending", area_pending, area_pending)
-            _rw("external_alarm_testing", "pending",
-                "External alarm testing. (MIC PM)" if cascade_fires else testing_pending,
-                "External alarm testing. (MIC PM)" if cascade_fires else testing_pending)
-            _rw("config_6673", "pending", has_6673, f"6673 Configuration: {sidehaul_rows[0]['switch_id'] if sidehaul_rows else ''}. (AT&T)" if has_6673 else None)
-            _rw("port_config_6673_enm", "pending", has_6673, f"6673 Port Configuration in ENM: {sidehaul_rows[0]['switch_id'] if sidehaul_rows else ''}. (AT&T)" if has_6673 else None)
+            _rw_simple(N2E_ROW_MAP["on_site_nokia_cutover"]["pending"][0], True)  # no value column, just checkbox + template's own fixed "(Tower Crew)"
+            _rw_simple(N2E_ROW_MAP["controller_integration"]["pending"][0],
+                       cascade_fires and controller_line, controller_id)
+            dss_p_bands = dss_line.split("DSS Activation:")[-1].strip() if dss_pending and dss_line else None
+            _rw_simple(N2E_ROW_MAP["dss_activation"]["pending"][0], dss_pending, dss_p_bands)
+            ngs_p_bands = ngs_line.split("\t")[1] if ngs_pending and ngs_line and "\t" in ngs_line else None
+            ngs_p_node = ngs_line.split("\t")[2] if ngs_pending and ngs_line and ngs_line.count("\t") >= 2 else None
+            ngs_p_row = N2E_ROW_MAP["ngs_activation"]["pending"][0]
+            row_writes.append((ngs_p_row, bool(ngs_pending), [(3, ngs_p_bands), (4, ngs_p_node)] if ngs_pending else []))
+            # GPS Pending (82): C=node(s), D=type value directly (no "Version:" label
+            # column here, confirmed different structure from the Completed row).
+            gps_p_row = N2E_ROW_MAP["gps_installation"]["pending"][0]
+            row_writes.append((gps_p_row, bool(gps_pending_line), [(3, "|".join(disabled_nodes))] if gps_pending_line else []))
+            lkf_p_final = "LKF Installation. (MIC)" if cascade_fires else lkf_pending
+            lkf_p_value = (lkf_p_final.replace("LKF Installation:", "").replace("(MIC)", "").strip()
+                           if lkf_p_final and lkf_p_final != "LKF Installation. (MIC)" else None)
+            _rw_simple(N2E_ROW_MAP["lkf_installation"]["pending"][0], lkf_p_final, lkf_p_value)
+            _rw_simple(N2E_ROW_MAP["psap_speedtest"]["pending"][0], lte_bands, lte_bands)
+            _rw_simple(N2E_ROW_MAP["speed_test_5g"]["pending"][0], fiveg_bands, fiveg_bands)
+            _rw_simple(N2E_ROW_MAP["calltest_fnet"]["pending"][0], False)
+            _rw_multi_unused = N2E_ROW_MAP["transport_sfp"]["pending"]
+            for row_num in _rw_multi_unused:
+                row_writes.append((row_num, False, []))
+            _rw_simple(N2E_ROW_MAP["ret_configuration"]["pending"][0], True)  # no value column, template's own fixed "(Tower Crew)"
+            _rw_simple(N2E_ROW_MAP["external_alarm_scripting"]["pending"][0], cascade_fires, controller_id if cascade_fires else None)
+            _rw_simple(N2E_ROW_MAP["sau_connections"]["pending"][0], cascade_fires or sau_pending, controller_id if (cascade_fires or sau_pending) else None)
+            _rw_simple(N2E_ROW_MAP["sup_connections"]["pending"][0], sup_pending_lines, "|".join(s.split(":")[-1].replace(". (MIC PM)", "").strip() for s in sup_pending_lines))
+            _rw_simple(N2E_ROW_MAP["xmu_installation"]["pending"][0], xmu_pending_lines, "|".join(s.split(":")[-1].replace(". (MIC PM)", "").strip() for s in xmu_pending_lines))
+            _rw_simple(N2E_ROW_MAP["idl_connections"]["pending"][0], idl_pending)
+            _rw_simple(N2E_ROW_MAP["siad_provisioning"]["pending"][0], False)
+            # Area test Pending (98): C=node(s), D="Failed" (the actual Area Lite result).
+            area_p_row = N2E_ROW_MAP["area_test"]["pending"][0]
+            row_writes.append((area_p_row, bool(area_pending), [(3, "|".join(new_nodes)), (4, "Failed")] if area_pending else []))
+            _rw_simple(N2E_ROW_MAP["external_alarm_testing"]["pending"][0], cascade_fires or testing_pending, controller_id if (cascade_fires or testing_pending) else None)
+            _rw_simple(N2E_ROW_MAP["config_6673"]["pending"][0], has_6673, sidehaul_rows[0]["switch_id"] if has_6673 and sidehaul_rows else None)
+            # 6673 Port Config in ENM (101): C=Slot|Port|Node (never built, left blank), D=Switch ID.
+            _rw_simple(N2E_ROW_MAP["port_config_6673_enm"]["pending"][0], has_6673,
+                       sidehaul_rows[0]["switch_id"] if has_6673 and sidehaul_rows else None, col=4)
+            # Link failure / SFP Not Present (102/103): C=Radio(bands), D=Node ID — confirmed
+            # separate columns, not one combined sentence.
             link_rows = N2E_ROW_MAP["link_failure_or_sfp"]["pending"]
+            link_nodes = "|".join([row.get("Node to be built as") for row in mm_objs if row.get("Node to be built as")])
             if link_choice == "Link failure":
-                row_writes.append((link_rows[0], True, [(3, f"Link failure: {full_bands}. (Tower Crew)")]))
+                row_writes.append((link_rows[0], True, [(3, full_bands), (4, link_nodes)]))
                 row_writes.append((link_rows[1], False, []))
             elif link_choice == "SFP Not Present":
                 row_writes.append((link_rows[0], False, []))
-                row_writes.append((link_rows[1], True, [(3, f"SFP Not Present: {full_bands}. (Tower Crew)")]))
+                row_writes.append((link_rows[1], True, [(3, full_bands), (4, link_nodes)]))
             else:
                 row_writes.append((link_rows[0], False, []))
                 row_writes.append((link_rows[1], False, []))
-            _rw("sa_conversion", "pending", False)  # confirmed Completed-only, no Pending path built
+            _rw_simple(N2E_ROW_MAP["sa_conversion"]["pending"][0], False)
 
             # Pending buffer (105-112): the merged Power Plant Swap/Not-Cleared-by-FE
             # line + any free-text "additional pending information".
