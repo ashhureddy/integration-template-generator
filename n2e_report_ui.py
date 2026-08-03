@@ -99,7 +99,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     if sa_nodes and postcheck_text:
         warnings += n2e.sa_conversion_amf_warning(postcheck_text, sa_nodes)
 
-    if warnings and not st.session_state.get("n2e_warnings_ack"):
+    # Confirmed real fix: the flag used to be a simple persistent boolean, which stayed
+    # True across reruns even after uploading a genuinely different (or edited) CIQ with
+    # new warnings — silently skipping the gate for a site that now has real issues.
+    # Keying acknowledgment against a hash of the actual warnings content instead means
+    # ANY change to what the warnings actually are re-triggers the gate automatically.
+    warnings_fingerprint = hash(tuple(sorted(warnings)))
+    if warnings and st.session_state.get("n2e_warnings_ack_fingerprint") != warnings_fingerprint:
         with st.container(border=True):
             st.markdown(
                 f"<div style='color:#c0392b; font-size:1.3em; font-weight:700;'>"
@@ -109,7 +115,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 st.markdown(f"<div style='color:#c0392b; font-size:1.05em; padding:2px 0;'>\u2022 {w}</div>",
                             unsafe_allow_html=True)
         if st.button("Continue to Report \u2192", type="primary", key="n2e_warnings_continue"):
-            st.session_state["n2e_warnings_ack"] = True
+            st.session_state["n2e_warnings_ack_fingerprint"] = warnings_fingerprint
             st.rerun()
         return
 
