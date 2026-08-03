@@ -535,6 +535,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         locked_ports_list = [p for p in (controller_checks_data.get("alarm_ports", []) if controller_checks_data else [])
                               if p["admin"] == "LOCKED" and p["slogan"]]
         bucket_pending, bucket_notes = [], []
+        ignore_state_notes = []
         if locked_ports_list:
             with st.container(border=True):
                 st.markdown(f"**Locked alarm ports** \u2014 {len(locked_ports_list)} scripted port(s) detected LOCKED "
@@ -580,6 +581,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 nb4 = st.text_input("\U0001F4DD 4. Post-Cutover Alarms Not Cleared by FE \u2014 port numbers", key="n2e_lp_notcleared")
                 _n2e_warn_missing_slogans(nb4)
 
+                ignore_state_entries = st.text_input(
+                    "\U0001F4DD Any Pre-existing External Alarms Found in 'Ignore' State? "
+                    "Enter port(slogan), comma-separated for multiple", key="n2e_ignore_state",
+                    placeholder="e.g. 3(RBS Temp High)")
+                ignore_state_notes = n2e.ignore_state_alarm_notes(ignore_state_entries)
+                for n in ignore_state_notes:
+                    st.caption(n)
+
                 # Confirmed fix: the Note ("scripted according to new power plant
                 # configuration") is unconditional whenever ports were entered, but the
                 # Pending "kept locked" line only includes genuinely active ports —
@@ -605,6 +614,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
     with st.expander("Notes"):
         choices_notes = []
+        choices_notes += ignore_state_notes
         final_port_checked = st.checkbox("Final Port Configuration attached.", value=True, key="n2e_notes_finalport")
         if final_port_checked:
             choices_notes.append("Final Port Configuration attached.")
@@ -639,15 +649,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_notes.append("Area prechecks verification for CPRI/SFP check is completed.")
         elif cpri_choice == "Pending":
             choices_notes.append("Area prechecks verification for CPRI/SFP check is pending. (Nodes not replicating in the area tool)")
-
-        ignore_state_entries = st.text_input(
-            "\U0001F4DD Any Pre-existing External Alarms Found in 'Ignore' State? "
-            "Enter port(slogan), comma-separated for multiple", key="n2e_ignore_state",
-            placeholder="e.g. 3(RBS Temp High)")
-        ignore_state_notes = n2e.ignore_state_alarm_notes(ignore_state_entries)
-        choices_notes += ignore_state_notes
-        for n in ignore_state_notes:
-            st.caption(n)
 
         notes_manual = st.text_area("\U0001F4DD Enter Notes", key="n2e_notes_manual", height=60)
         if notes_manual.strip():
