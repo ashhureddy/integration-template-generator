@@ -280,8 +280,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.markdown("**LKF Installation** \u2014 Node and Controller are tracked "
                         "independently, required:")
             lkf_node_choices = {}
-            for row in mm_objs:
-                node = row.get("Node to be built as")
+            for node in new_nodes:
                 c1, c2 = st.columns([2, 1])
                 with c1: st.caption(node)
                 with c2:
