@@ -84,24 +84,9 @@ def gps_sync_status(mm_objs, post_sync_status):
 # (SUP-1 ... ENABLED, XMU03-1-1 ... ENABLED both present in the real Hardware Status table).
 # ============================================================
 
-def _hardware_component_state(post_text, component_prefix):
-    """Generic Hardware Status Information row parser: '{Node} {Component} {admin} {fault}
-    {steady} {oper} {description}...' — confirmed real format. Returns
-    {node: oper_state} for any component whose name starts with component_prefix
-    (e.g. 'SUP' matches 'SUP-1', 'XMU' matches 'XMU03-1-1')."""
-    import re
-    out = {}
-    text = mcl._normalize(post_text) if hasattr(mcl, "_normalize") else post_text
-    for m in re.finditer(
-            r'(\S+) (' + component_prefix + r'\S*) (UNLOCKED|LOCKED) (ON|OFF) (\S+) (ENABLED|DISABLED)', text):
-        node, _comp, _admin, _fault, _steady, oper = m.groups()
-        out[node] = oper
-    return out
-
-
 def xmu_in_ciq(post_configuration_text):
     """Confirmed trigger: XMU appears in the CIQ target (Post Configuration string)."""
-    return "XMU" in (post_configuration_text or "")
+    return mcl.xmu_in_ciq(post_configuration_text)
 
 
 def sup_connections_state(post_text, xmu_present_in_ciq):
@@ -109,7 +94,7 @@ def sup_connections_state(post_text, xmu_present_in_ciq):
     then checks Post-checks Hardware Status for SUP's own operational state."""
     if not xmu_present_in_ciq:
         return {}
-    return _hardware_component_state(post_text, "SUP")
+    return mcl._hardware_component_state(post_text, "SUP")
 
 
 def xmu_installation_state(post_text, xmu_present_in_ciq):
@@ -117,7 +102,7 @@ def xmu_installation_state(post_text, xmu_present_in_ciq):
     Post-checks Hardware Status."""
     if not xmu_present_in_ciq:
         return {}
-    return _hardware_component_state(post_text, "XMU")
+    return mcl._hardware_component_state(post_text, "XMU")
 
 
 # ============================================================
