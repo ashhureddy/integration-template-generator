@@ -144,7 +144,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         st.markdown(f"Pre Configuration : **Nokia**")
         st.markdown(f"Post Configuration : **{post_line}**")
         st.markdown(f"6610 Controller : **{controller_id or '(none detected)'}**")
-        current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs, postcheck_text) if postcheck_text else ""
+        mm_objs_no_wll = [row for row in mm_objs if row.get("Node to be built as") not in wll_detected_nodes]
+        current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs_no_wll, postcheck_text) if postcheck_text else ""
         if current_config_auto:
             current_config = st.text_input("\U0001F4DD Current Configuration \u2014 review/edit:",
                                              value=current_config_auto, key="n2e_current_config")
