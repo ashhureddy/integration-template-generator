@@ -85,20 +85,29 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     new_nodes = [row.get("Node to be built as") for row in mm_objs]  # confirmed: every node is "new" for N2E
 
     # ==================== Subject / Configuration / IDL Connections ====================
+    fa_code = ""
+    if "5G Info" in ciq_wb.sheetnames:
+        for row in app.sheet_objs(ciq_wb["5G Info"]):
+            if app.is_populated(row.get("FA Code")):
+                fa_code = row.get("FA Code")
+                break
+    site_ids = "/".join([row.get("Node to be built as") for row in mm_objs if row.get("Node to be built as")]
+                         + ([controller_id] if controller_id else []))
+
     with st.container(border=True):
-        st.markdown("**Subject** (MIC / MNS / N2E / IX-STF are constants)")
-        site_name = st.text_input("\U0001F4DD Site Name", key="n2e_site_name")
-        fa_code = ""
-        if "5G Info" in ciq_wb.sheetnames:
-            for row in app.sheet_objs(ciq_wb["5G Info"]):
-                if app.is_populated(row.get("FA Code")):
-                    fa_code = row.get("FA Code")
-                    break
-        site_ids = "/".join([row.get("Node to be built as") for row in mm_objs if row.get("Node to be built as")]
-                             + ([controller_id] if controller_id else []))
-        st.caption(f"FA Code (auto): {fa_code or '(not detected)'}")
-        st.caption(f"Site ID's (auto): {site_ids}")
-        iwm_details = st.text_input("\U0001F4DD IWM Details", key="n2e_iwm")
+        st.markdown("**Subject**")
+        c = st.columns(7)
+        with c[0]: st.markdown(f"MIC\n\n**MIC**")
+        with c[1]: st.markdown(f"Market\n\n**MNS**")
+        with c[2]: st.markdown(f"N2E\n\n**N2E**")
+        with c[3]: st.markdown(f"Status\n\n**IX-STF**")
+        with c[4]: site_name = st.text_input("\U0001F4DD Site Name", key="n2e_site_name")
+        with c[5]: st.markdown(f"FA CODE\n\n**{fa_code or '(not found)'}**")
+        with c[6]: st.markdown(f"Site ID's\n\n**{site_ids}**")
+
+    with st.container(border=True):
+        st.markdown("**IWM Details**")
+        iwm_details = st.text_input("IWM Details", key="n2e_iwm", label_visibility="collapsed")
 
     with st.container(border=True):
         st.markdown("**Configuration**")
