@@ -154,9 +154,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         c1, c2 = st.columns(2)
         with c1:
             wll_node = st.text_input("\U0001F4DD WLL node", value="|".join(wll_detected_nodes), key="n2e_wll")
-            software_version = st.text_input("\U0001F4DD Software version", key="n2e_sw")
-        with c2:
             gs_version = st.text_input("\U0001F4DD GS Version", key="n2e_gs")
+        with c2:
+            software_version = st.text_input("\U0001F4DD Software version", key="n2e_sw")
 
     xmu_present_in_ciq = n2e.xmu_in_ciq(post_line)
 
@@ -632,6 +632,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_notes.append("Area prechecks verification for CPRI/SFP check is completed.")
         elif cpri_choice == "Pending":
             choices_notes.append("Area prechecks verification for CPRI/SFP check is pending. (Nodes not replicating in the area tool)")
+
+        ignore_state_entries = st.text_input(
+            "\U0001F4DD Any Pre-existing External Alarms Found in 'Ignore' State? "
+            "Enter port(slogan), comma-separated for multiple", key="n2e_ignore_state",
+            placeholder="e.g. 3(RBS Temp High)")
+        ignore_state_notes = n2e.ignore_state_alarm_notes(ignore_state_entries)
+        choices_notes += ignore_state_notes
+        for n in ignore_state_notes:
+            st.caption(n)
 
         notes_manual = st.text_area("\U0001F4DD Enter Notes", key="n2e_notes_manual", height=60)
         if notes_manual.strip():
