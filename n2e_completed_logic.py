@@ -273,3 +273,69 @@ def ignore_state_alarm_notes(entries_str):
                      f"currently set to 'Ignore' state and will not be migrated to the "
                      f"6610.(Owner:AT&T)")
     return notes
+
+
+def n2e_transport_sfp_warnings(ciq_wb, mm_objs, post_text, transport_sfp_data):
+    """Confirmed N2E-specific check (different wording from MCA's transport_sfp_verification):
+    checks TXdBm/RXdBm against the speed-appropriate range (reusing mcl.SFP_RANGES) and
+    BER against 0/0, for every node. Confirmed exact wording:
+    'High/low RXdBm/TXdBm on Transport SFP: {node}.' and
+    'BER not reporting on the Transport port: {node}.'
+    Both fire independently (a node can trigger one, both, or neither).
+    Confirmed: both go into the Warnings tab AND get reported as Pending to MIC PM
+    (via the buffer, since there's no dedicated template row for this).
+    Returns (warning_texts: list[str], pending_lines: list[str])."""
+    warning_texts, pending_lines = [], []
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        gen = qx.get_node_generation(ciq_wb, row)
+        if not gen:
+            continue
+        port_labels = qx.PORT_BY_GEN.get(gen)
+        if not port_labels:
+            continue
+        opmode = qx.extract_transport_fiber_opmode(post_text, node, port_labels)
+        if not opmode:
+            continue
+        speed = "10G" if "10G" in opmode.upper() else ("1G" if "1G" in opmode.upper() else None)
+        if not speed:
+            continue
+        lo, hi = mcl.SFP_RANGES[speed]
+
+        reading = transport_sfp_data.get(node)
+        if not reading:
+            continue
+
+        out_of_range = (reading["txdbm"] > hi or reading["txdbm"] < lo
+                         or reading["rxdbm"] > hi or reading["rxdbm"] < lo)
+        if out_of_range:
+            text = f"High/low RXdBm/TXdBm on Transport SFP: {node}."
+            warning_texts.append(text)
+            pending_lines.append(f"{text} (MIC PM)")
+
+        ber = reading["ber"]
+        if not ber or ber.strip() == "" or ber.strip() != "0/0":
+            text = f"BER not reporting on the Transport port: {node}."
+            warning_texts.append(text)
+            pending_lines.append(f"{text} (MIC PM)")
+
+    return warning_texts, pending_lines
+
+
+def sa_conversion_amf_warning(post_text, sa_conversion_nodes_list):
+    """Confirmed check: for nodes with SA Conversion present, verify each
+    TermPointToAmf entry's admin state. Confirmed real format:
+    '{Node} GNBCUCPFunction=1,TermPointToAmf={amf_name} {UNLOCKED|LOCKED} {OpState}'.
+    If ANY TermPointToAmf entry for the node is LOCKED (not all — any single one is
+    enough), fires the warning. Confirmed exact wording:
+    'TermpointtoAmf is in locked state, please unlock.'
+    Returns list of warning texts (one per affected node, deduplicated)."""
+    if not sa_conversion_nodes_list or not post_text:
+        return []
+    pattern = re.compile(r'(\S+) GNBCUCPFunction=1,TermPointToAmf=(\S+) (UNLOCKED|LOCKED) (\w+)')
+    locked_nodes = set()
+    for m in pattern.finditer(post_text):
+        node, _amf_name, admin, _oper = m.groups()
+        if node in sa_conversion_nodes_list and admin == "LOCKED":
+            locked_nodes.add(node)
+    return [f"TermpointtoAmf is in locked state, please unlock. ({node})" for node in sorted(locked_nodes)]
