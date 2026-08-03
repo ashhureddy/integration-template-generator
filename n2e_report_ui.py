@@ -90,16 +90,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             classification["added"][node] = cells
 
     all_node_names = [row.get("Node to be built as") for row in mm_objs]
-    # Confirmed rule: a node whose alphabetic PREFIX ends in "L" (e.g. ALL00640 -> "ALL",
-    # WAL94133 -> "WAL", ECL02586 -> "ECL") is a WLL node, not a genuinely new build — it
-    # shouldn't trigger Transport SFP/Area test/etc. as if new, and its name auto-fills
-    # the WLL node field instead of being manually typed. Confirmed fix: checking the
-    # PREFIX specifically, not whether the whole node name ends in "L" (which would
-    # never match any real example — ALL00640 ends in "0", not "L").
-    def _wll_prefix_check(n):
-        m = re.match(r'^([A-Za-z]+)', str(n or ""))
-        return bool(m and m.group(1).upper().endswith("L"))
-    wll_detected_nodes = [n for n in all_node_names if n and _wll_prefix_check(n)]
+    # Confirmed rule: a node whose FULL NAME literally ends in "L" (e.g. OML00947L) is a
+    # WLL node, not a genuinely new build — it shouldn't trigger Transport SFP/Area
+    # test/etc. as if new, and its name auto-fills the WLL node field instead of being
+    # manually typed. Confirmed correction: this is about the whole node name's actual
+    # last character, NOT the alphabetic prefix (an earlier version of this checked the
+    # prefix, e.g. "ALL"/"WAL"/"FCL" ending in L — that was wrong and produced a false
+    # positive on FCL05583, a genuinely new single node whose prefix happens to end in L
+    # but whose full name ends in "3").
+    wll_detected_nodes = [n for n in all_node_names if n and str(n).strip().upper().endswith("L")]
     new_nodes = [n for n in all_node_names if n not in wll_detected_nodes]  # confirmed: every OTHER node is "new" for N2E
 
     # Confirmed correction: Post Configuration should NOT include the WLL node's hardware
