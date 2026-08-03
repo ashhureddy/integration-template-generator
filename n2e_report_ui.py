@@ -82,7 +82,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         if cells:
             classification["added"][node] = cells
 
-    new_nodes = [row.get("Node to be built as") for row in mm_objs]  # confirmed: every node is "new" for N2E
+    all_node_names = [row.get("Node to be built as") for row in mm_objs]
+    # Confirmed rule: a node whose alphabetic PREFIX ends in "L" (e.g. ALL00640 -> "ALL",
+    # WAL94133 -> "WAL", ECL02586 -> "ECL") is a WLL node, not a genuinely new build — it
+    # shouldn't trigger Transport SFP/Area test/etc. as if new, and its name auto-fills
+    # the WLL node field instead of being manually typed. Confirmed fix: checking the
+    # PREFIX specifically, not whether the whole node name ends in "L" (which would
+    # never match any real example — ALL00640 ends in "0", not "L").
+    def _wll_prefix_check(n):
+        m = re.match(r'^([A-Za-z]+)', str(n or ""))
+        return bool(m and m.group(1).upper().endswith("L"))
+    wll_detected_nodes = [n for n in all_node_names if n and _wll_prefix_check(n)]
+    new_nodes = [n for n in all_node_names if n not in wll_detected_nodes]  # confirmed: every OTHER node is "new" for N2E
 
     # ==================== Subject / Configuration / IDL Connections ====================
     fa_code = ""
@@ -122,7 +133,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             current_config = ""
         c1, c2 = st.columns(2)
         with c1:
-            wll_node = st.text_input("\U0001F4DD WLL node", key="n2e_wll")
+            wll_node = st.text_input("\U0001F4DD WLL node", value="|".join(wll_detected_nodes), key="n2e_wll")
             software_version = st.text_input("\U0001F4DD Software version", key="n2e_sw")
         with c2:
             gs_version = st.text_input("\U0001F4DD GS Version", key="n2e_gs")
