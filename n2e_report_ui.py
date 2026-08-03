@@ -567,22 +567,25 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 if b2_active_line:
                     bucket_notes.append(b2_active_line)
 
-                nb3 = st.text_input("\U0001F4DD 3. Power Plant Swap \u2014 port numbers", key="n2e_lp_power")
+                power_plant_swap_performed = st.checkbox("Power Plant Swap performed on this site", key="n2e_lp_power_performed")
+                nb3 = st.text_input("\U0001F4DD 3. Power Plant Swap \u2014 port numbers (only if any alarms are currently active; leave blank otherwise)", key="n2e_lp_power")
                 _n2e_warn_missing_slogans(nb3)
                 nb4 = st.text_input("\U0001F4DD 4. Post-Cutover Alarms Not Cleared by FE \u2014 port numbers", key="n2e_lp_notcleared")
                 _n2e_warn_missing_slogans(nb4)
 
-                # Confirmed merge: both scenarios use nearly identical wording and the
-                # same Owner, so they combine into ONE Pending line covering all ports
-                # from both, instead of two separate lines. The Power Plant Swap note
-                # stays independent either way.
-                merged_pending = n2e.n2e_merged_post_cutover_pending(nb3, nb4, n2e_port_slogan_map)
+                # Confirmed fix: the Note ("scripted according to new power plant
+                # configuration") is unconditional whenever ports were entered, but the
+                # Pending "kept locked" line only includes genuinely active ports —
+                # filtered here BEFORE merging with bucket 4 (which is inherently active
+                # by definition, since it's "Not Cleared by FE").
+                power_plant_pending, power_plant_note, power_plant_active_ports = \
+                    n2e.n2e_locked_port_power_plant_swap(power_plant_swap_performed, nb3, n2e_port_slogan_map, n2e_all_alarm_ports)
+                if power_plant_note:
+                    bucket_notes.append(power_plant_note)
+
+                merged_pending = n2e.n2e_merged_post_cutover_pending(power_plant_active_ports, nb4, n2e_port_slogan_map)
                 if merged_pending:
                     bucket_pending.append(merged_pending)
-                if nb3:
-                    _t3_pending, t3_note = n2e.n2e_locked_port_power_plant_swap(nb3, n2e_port_slogan_map)
-                    if t3_note:
-                        bucket_notes.append(t3_note)
 
                 choices_pending += bucket_pending
                 for l in bucket_pending:
