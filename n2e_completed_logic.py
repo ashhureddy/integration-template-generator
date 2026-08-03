@@ -189,22 +189,6 @@ def n2e_locked_port_active_alarms(ports, port_slogan_map=None):
     return f"Pre\u2011existing active alarms on ports {ports_fmt} are kept locked to avoid OPS tickets.(Owner:AT&T)"
 
 
-def n2e_locked_port_loops_bridge_clips(locked_ports, port_slogan_map=None, loops_removed_ports=None):
-    """Pre-Existing Loops and Bridge Clips -> Note ONLY, a single combined note (loops
-    line + active-alarms line together) — confirmed real format from the N2E tab.
-    Confirmed real fix (same as MCA): the loops-removed line and the "kept locked" line
-    can legitimately cover different port sets — removing a loop can clear the alarm and
-    let that port auto-unlock, so loops_removed_ports may include ports no longer locked
-    at all. Falls back to locked_ports if not given, for backward compatibility."""
-    if not locked_ports:
-        return None
-    note_ports = loops_removed_ports if loops_removed_ports else locked_ports
-    plain_ports_fmt = mcl.format_ports_with_slogans(note_ports, port_slogan_map or {})  # confirmed: slogans required for every port
-    ports_fmt = mcl.format_ports_with_slogans(locked_ports, port_slogan_map or {})
-    return (f"Pre\u2011existing loops have been removed from alarm ports {plain_ports_fmt}.\n"
-            f"Active alarms observed on ports {ports_fmt} are kept locked (Owner: AT&T).")
-
-
 def n2e_locked_port_power_plant_swap(ports, port_slogan_map=None):
     """Power Plant Swap — confirmed new N2E-only scenario, produces BOTH a Pending line
     and a Note line together. Returns (pending_text, note_text).
