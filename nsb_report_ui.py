@@ -137,9 +137,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         c1, c2 = st.columns(2)
         with c1:
             wll_node = st.text_input("\U0001F4DD WLL node", key="nsb_wll")
-            software_version = st.text_input("\U0001F4DD Software version", key="nsb_sw")
-        with c2:
             gs_version = st.text_input("\U0001F4DD GS Version", key="nsb_gs")
+        with c2:
+            software_version = st.text_input("\U0001F4DD Software version", key="nsb_sw")
 
     xmu_present_in_ciq = nsb.xmu_in_ciq(post_line)
 
