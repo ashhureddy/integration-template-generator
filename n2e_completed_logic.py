@@ -339,3 +339,82 @@ def sa_conversion_amf_warning(post_text, sa_conversion_nodes_list):
         if node in sa_conversion_nodes_list and admin == "LOCKED":
             locked_nodes.add(node)
     return [f"TermpointtoAmf is in locked state, please unlock. ({node})" for node in sorted(locked_nodes)]
+
+
+# ============================================================
+# LTE/5G SECTOR PARAMETER VERIFICATION — confirmed CIQ column mapping from the design
+# conversation, cross-checked against real WAL94133 data. Compares Post-checks' actual
+# on-air values against the CIQ's intended target values, per cell.
+# ============================================================
+
+_LTE_CELL_ROW_RE = re.compile(
+    r'(\S+) (LOCKED|UNLOCKED) (\d+ \S+) (BARRED|UNBARRED) (\d+) (\d+) (\d+) '
+    r'(ENABLED|DISABLED) (\d+) (true|false) (\S+) (\d+) (\d+)')
+
+
+def extract_lte_cell_status(post_text):
+    """Parses the real 'LTE FDD Cell Status Information' table. Confirmed real header:
+    'Cells adminState availabilityStatus cellBarred dlChannelBandwidth earfcndl earfcnul
+    OpState PCI PLMNStatus sectorCarrierRef tac ulChannelBandwidth' — availabilityStatus
+    is a two-token value (e.g. '3 OFF_LINE'), confirmed by column-count cross-check
+    against real data. Returns {cell: {field: value}}."""
+    out = {}
+    for m in _LTE_CELL_ROW_RE.finditer(post_text or ""):
+        (cell, _admin, _avail, _barred, dlbw, earfcndl, earfcnul,
+         _opstate, pci, _plmn, sector, tac, ulbw) = m.groups()
+        out[cell] = {
+            "dlChannelBandwidth": dlbw, "earfcndl": earfcndl, "earfcnul": earfcnul,
+            "PCI": pci, "sectorCarrierRef": sector, "tac": tac, "ulChannelBandwidth": ulbw,
+        }
+    return out
+
+
+def lte_sector_param_warnings(ciq_wb, mm_objs, post_text):
+    """Confirmed CIQ mapping (cross-checked against real data, corrected from the
+    original ask: PCI compares against CIQ's own PCI column, not cellId):
+    dlChannelBandwidth->dlChannelBandwidth, earfcndl->earfcnDl, earfcnul->earfcnUl,
+    PCI->PCI, sectorCarrierRef->sectorId, ulChannelBandwidth->ulChannelBandwidth (all in
+    'eUtran Parameters'); tac->tac (in 'eNB Info', matched via eNBId, same value for
+    every cell under that eNB). Returns list of warning texts, one per mismatched field."""
+    warnings = []
+    if not post_text or "eUtran Parameters" not in ciq_wb.sheetnames:
+        return warnings
+    post_cells = extract_lte_cell_status(post_text)
+    if not post_cells:
+        return warnings
+
+    ciq_rows = {r.get("EutranCellFDDId"): r for r in qx.sheet_objs(ciq_wb["eUtran Parameters"])
+                if r.get("EutranCellFDDId")}
+    field_map = [
+        ("dlChannelBandwidth", "dlChannelBandwidth"), ("earfcndl", "earfcnDl"),
+        ("earfcnul", "earfcnUl"), ("PCI", "PCI"), ("sectorCarrierRef", "sectorId"),
+        ("ulChannelBandwidth", "ulChannelBandwidth"),
+    ]
+    for cell, post_vals in post_cells.items():
+        ciq_row = ciq_rows.get(cell)
+        if not ciq_row:
+            continue
+        for post_key, ciq_key in field_map:
+            post_val = str(post_vals.get(post_key, "")).strip()
+            ciq_val = str(ciq_row.get(ciq_key, "")).strip()
+            if ciq_val and post_val:
+                ciq_parts = [p.strip() for p in ciq_val.split("/")]
+                if post_val not in ciq_parts:
+                    warnings.append(f"{post_key} mismatch on {cell}: Post-checks={post_val}, CIQ={ciq_val}.")
+
+    # tac — matched via eNBId, same value expected for every cell under that eNB.
+    if "eNB Info" in ciq_wb.sheetnames:
+        enb_tac = {r.get("eNBId"): r.get("tac") for r in qx.sheet_objs(ciq_wb["eNB Info"]) if r.get("eNBId")}
+        eutran_rows = qx.sheet_objs(ciq_wb["eUtran Parameters"])
+        cell_to_enbid = {r.get("EutranCellFDDId"): r.get("eNBId") for r in eutran_rows if r.get("EutranCellFDDId")}
+        checked_enbids = set()
+        for cell, post_vals in post_cells.items():
+            enbid = cell_to_enbid.get(cell)
+            if not enbid or enbid in checked_enbids:
+                continue
+            checked_enbids.add(enbid)
+            ciq_tac = str(enb_tac.get(enbid, "")).strip()
+            post_tac = str(post_vals.get("tac", "")).strip()
+            if ciq_tac and post_tac and post_tac != ciq_tac:
+                warnings.append(f"tac mismatch on eNBId {enbid}: Post-checks={post_tac}, CIQ={ciq_tac}.")
+    return warnings
