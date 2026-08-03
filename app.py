@@ -3083,6 +3083,8 @@ if st.session_state.qkx_page == "home":
         st.caption("New site build")
         if st.button("NSB", use_container_width=True, key="qkx_card_nsb"):
             _qkx_go("input", "NSB")
+        if st.button("\U0001F4CB  NSB - Generate Report", use_container_width=True, key="qkx_card_nsb_report"):
+            _qkx_go("input", "NSB", report_only=True)
 
     st.divider()
     st.subheader("Instructions")
@@ -3394,4 +3396,15 @@ elif st.session_state.qkx_page == "input":
             import n2e_report_ui
             importlib.reload(n2e_report_ui)
             n2e_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, edp_index, uid, dstr,
+                                  postcheck_text=postcheck_text, controller_checks_text=controller_checks_text)
+
+        if top_scope == "NSB" and st.session_state.get("qkx_report_only"):
+            import importlib
+            import mca_completed_logic, nsb_completed_logic, mca_xlsm_surgical
+            importlib.reload(mca_completed_logic)
+            importlib.reload(nsb_completed_logic)
+            importlib.reload(mca_xlsm_surgical)
+            import nsb_report_ui
+            importlib.reload(nsb_report_ui)
+            nsb_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, edp_index, uid, dstr,
                                   postcheck_text=postcheck_text, controller_checks_text=controller_checks_text)
