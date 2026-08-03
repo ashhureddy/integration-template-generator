@@ -501,8 +501,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_pending.append(testing_pending)
             st.caption(testing_pending)
         if testing_note:
-            choices_pending.append(testing_note)
-            st.caption(testing_note)
+            st.caption(f"Auto-added to Notes: {testing_note}")
 
         # 6673 Configuration / 6673 Port Configuration in ENM — auto, always Pending.
         if has_6673:
@@ -615,6 +614,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     with st.expander("Notes"):
         choices_notes = []
         choices_notes += ignore_state_notes
+        if testing_note:
+            choices_notes.append(testing_note)
         final_port_checked = st.checkbox("Final Port Configuration attached.", value=True, key="n2e_notes_finalport")
         if final_port_checked:
             choices_notes.append("Final Port Configuration attached.")
@@ -827,9 +828,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 row_writes.append((link_rows[1], False, []))
             _rw_simple(N2E_ROW_MAP["sa_conversion"]["pending"][0], False)
 
-            # Pending buffer (105-112): the merged Power Plant Swap/Not-Cleared-by-FE
-            # line + any free-text "additional pending information".
-            pending_buffer_lines = list(bucket_pending) + ([additional_pending] if additional_pending.strip() else [])
+            # Pending buffer (105-112): confirmed real gap found via full audit —
+            # smm_pending correctly showed in the Report Preview via choices_pending,
+            # but had NO destination in the .xlsm at all (smm_triggering has no dedicated
+            # Pending row in the real template). Now routes through this buffer alongside
+            # the merged Power Plant Swap/Not-Cleared-by-FE line and free-text "additional
+            # pending information". testing_note goes to Notes instead, not here.
+            pending_buffer_lines = (
+                ([smm_pending] if smm_pending else [])
+                + list(bucket_pending)
+                + ([additional_pending] if additional_pending.strip() else [])
+            )
             pending_buffer_rows = N2E_ROW_MAP["additional_pending"]
             for i, row_num in enumerate(pending_buffer_rows):
                 if i < len(pending_buffer_lines):
