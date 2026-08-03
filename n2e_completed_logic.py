@@ -418,3 +418,115 @@ def lte_sector_param_warnings(ciq_wb, mm_objs, post_text):
             if ciq_tac and post_tac and post_tac != ciq_tac:
                 warnings.append(f"tac mismatch on eNBId {enbid}: Post-checks={post_tac}, CIQ={ciq_tac}.")
     return warnings
+
+
+def extract_5g_cell_du_status(post_text):
+    """Parses '5G NR Cell DU Status' table. Confirmed real complication: nCI is
+    sometimes empty (variable-length row), so pure positional splitting is unreliable —
+    uses the fact that nRSectorCarrierRef always equals the cell name itself as an
+    anchor, confirmed against real data (both cellLocalId and nRPCI verified to match
+    CIQ exactly with this approach). Returns {cell: {field: value}}."""
+    out = {}
+    for line in (post_text or "").splitlines():
+        tokens = line.split()
+        if len(tokens) < 10 or tokens[1] not in ("LOCKED", "UNLOCKED"):
+            continue
+        cell = tokens[0]
+        try:
+            anchor_idx = tokens.index(cell, 1)
+        except ValueError:
+            continue
+        before = tokens[1:anchor_idx]
+        after = tokens[anchor_idx + 1:]
+        if len(before) < 7 or len(after) < 3:
+            continue
+        local_id, cell_range = before[2], before[3]
+        nrpci = before[-1]
+        nrtac = after[0]
+        out[cell] = {"cellLocalId": local_id, "cellRange": cell_range, "nRPCI": nrpci, "nRTAC": nrtac}
+    return out
+
+
+def extract_5g_sector_carrier(post_text):
+    """Parses '5G NR Sector Carrier' table. Confirmed real header:
+    'nrSectorCarrier adminState arfcnDL arfcnUL bSChannelBwDL bSChannelBwUL
+    configuredMaxTxPower opState txDirection' — fixed structure, no variable-length
+    fields. Returns {cell: {field: value}}."""
+    out = {}
+    pattern = re.compile(
+        r'(\S+) (LOCKED|UNLOCKED) (\d+) (\d+) (\d+) (\d+) (\d+) (ENABLED|DISABLED) (\S+)')
+    for m in pattern.finditer(post_text or ""):
+        cell, _admin, arfcndl, arfcnul, bwdl, bwul, maxtxpower, _opstate, _txdir = m.groups()
+        out[cell] = {
+            "arfcnDL": arfcndl, "arfcnUL": arfcnul, "bSChannelBwDL": bwdl,
+            "bSChannelBwUL": bwul, "configuredMaxTxPower": maxtxpower,
+        }
+    return out
+
+
+def extract_ssb_frequency(post_text):
+    """Parses the real 'NRCellDU={cell} ssbFrequency {value}' lines. Returns
+    {cell: ssbFrequency}."""
+    out = {}
+    for m in re.finditer(r'NRCellDU=(\S+) ssbFrequency (\d+)', post_text or ""):
+        cell, val = m.groups()
+        out[cell] = val
+    return out
+
+
+def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text):
+    """Confirmed CIQ mapping: cellLocalId, CellRange, nRPCI, arfcnDL, arfcnUL,
+    bSChannelBwDL, bSChannelBwUL, configuredMaxTxPower, ssbFrequency all compared
+    directly against '5G Info' (matched by NRCellDU); nrTAC compared against 'NR_SA'
+    (matched by node name, same value expected for every cell on that node — same
+    per-node pattern as LTE's tac/eNBId check)."""
+    warnings = []
+    if not post_text or "5G Info" not in ciq_wb.sheetnames:
+        return warnings
+
+    cell_du = extract_5g_cell_du_status(post_text)
+    sector_carrier = extract_5g_sector_carrier(post_text)
+    ssb_freq = extract_ssb_frequency(post_text)
+    if not cell_du:
+        return warnings
+
+    ciq_rows = {r.get("NRCellDU"): r for r in qx.sheet_objs(ciq_wb["5G Info"]) if r.get("NRCellDU")}
+
+    for cell, post_vals in cell_du.items():
+        ciq_row = ciq_rows.get(cell)
+        if not ciq_row:
+            continue
+        combined = dict(post_vals)
+        combined.update(sector_carrier.get(cell, {}))
+        if cell in ssb_freq:
+            combined["ssbFrequency"] = ssb_freq[cell]
+
+        field_map = [
+            ("cellLocalId", "cellLocalId"), ("cellRange", "CellRange"), ("nRPCI", "nRPCI"),
+            ("arfcnDL", "arfcnDL"), ("arfcnUL", "arfcnUL"), ("bSChannelBwDL", "bSChannelBwDL"),
+            ("bSChannelBwUL", "bSChannelBwUL"), ("configuredMaxTxPower", "configuredMaxTxPower"),
+            ("ssbFrequency", "ssbFrequency"),
+        ]
+        for post_key, ciq_key in field_map:
+            post_val = str(combined.get(post_key, "")).strip()
+            ciq_val = str(ciq_row.get(ciq_key, "")).strip()
+            if not ciq_val or not post_val:
+                continue
+            ciq_parts = [p.strip() for p in ciq_val.split("/")]
+            if post_val not in ciq_parts:
+                warnings.append(f"{post_key} mismatch on {cell}: Post-checks={post_val}, CIQ={ciq_val}.")
+
+    # nrTAC — matched via node name in NR_SA, same value expected for every cell on that node.
+    if "NR_SA" in ciq_wb.sheetnames:
+        nrsa_tac = {r.get("Node Name"): r.get("nrTAC") for r in qx.sheet_objs(ciq_wb["NR_SA"]) if r.get("Node Name")}
+        checked_nodes = set()
+        for cell, post_vals in cell_du.items():
+            node = cell.rsplit("_N", 1)[0] if "_N" in cell else None
+            if not node or node in checked_nodes:
+                continue
+            checked_nodes.add(node)
+            ciq_tac = str(nrsa_tac.get(node, "")).strip()
+            post_tac = str(post_vals.get("nRTAC", "")).strip()
+            if ciq_tac and post_tac and post_tac != ciq_tac:
+                warnings.append(f"nRTAC mismatch on node {node}: Post-checks={post_tac}, CIQ={ciq_tac}.")
+    return warnings
