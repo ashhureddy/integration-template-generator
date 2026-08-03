@@ -95,6 +95,26 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     wll_detected_nodes = [n for n in all_node_names if n and _wll_prefix_check(n)]
     new_nodes = [n for n in all_node_names if n not in wll_detected_nodes]  # confirmed: every OTHER node is "new" for N2E
 
+    # Confirmed correction: Post Configuration should NOT include the WLL node's hardware
+    # info at all — generate_n2e()'s own post_line includes every Mixed Mode Info row
+    # (including WLL nodes), so rebuild it here filtered to new_nodes only.
+    post_parts = []
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        if node in wll_detected_nodes:
+            continue
+        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        is_lte_primary = str(node).strip().upper() == str(e_name or "").strip().upper()
+        target_row = app.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) if is_lte_primary else \
+            app.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        if not target_row:
+            target_row = app.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or \
+                app.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        hw = app.hw_string(target_row) if target_row else None
+        post_parts.append(f"{node}({hw or 'NOT FOUND'})")
+    if post_parts:
+        post_line = " + ".join(post_parts)
+
     # ==================== Subject / Configuration / IDL Connections ====================
     fa_code = ""
     if "5G Info" in ciq_wb.sheetnames:
@@ -102,8 +122,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if app.is_populated(row.get("FA Code")):
                 fa_code = row.get("FA Code")
                 break
-    site_ids = "/".join([row.get("Node to be built as") for row in mm_objs if row.get("Node to be built as")]
-                         + ([controller_id] if controller_id else []))
+    site_ids = "/".join(new_nodes + ([controller_id] if controller_id else []))
 
     with st.container(border=True):
         st.markdown("**Subject**")
