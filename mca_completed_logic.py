@@ -1187,24 +1187,41 @@ def locked_port_bucket_2(ports, port_slogan_map=None):
     return f"Pre\u2011existing active alarms on ports {ports_fmt} are kept locked to avoid OPS tickets. (Owner: AT&T PM/OPS)"
 
 
-def locked_port_bucket_3(locked_ports, reason="", port_slogan_map=None, loops_removed_ports=None):
-    """Pre-existing loops/bridge clips/no equipment connections -> Pre-Existing Issues.
-    Confirmed real fix: the "kept locked" line and the "loops removed" note can legitimately
-    cover DIFFERENT port sets — removing a loop can clear the alarm and let that port
-    auto-unlock, so loops_removed_ports (the Note) may include ports no longer in
-    locked_ports (the "kept locked" line) at all. Falls back to locked_ports for the note
-    if loops_removed_ports isn't given, for backward compatibility.
-    Returns (pre_existing_text, note_text_or_None)."""
-    if not locked_ports:
-        return None, None
-    ports_fmt = format_ports_with_slogans(locked_ports, port_slogan_map or {})
-    text = f"Active alarms observed on ports {ports_fmt} are kept locked (Owner: AT&T)."
-    note = None
-    if reason:
-        note_ports = loops_removed_ports if loops_removed_ports else locked_ports
-        plain_ports_fmt = format_ports_with_slogans(note_ports, port_slogan_map or {})  # confirmed: slogans required for every port, not just the "kept locked" line
-        note = f"[{reason}] have been removed from alarm ports {plain_ports_fmt}."
-    return text, note
+def loops_bridge_clips_notes(loops_ports, bridge_clips_ports, no_equip_ports, alarm_ports_data, port_slogan_map=None):
+    """Confirmed redesign: one shared set of 3 side-by-side category inputs (Pre-existing
+    loops / Bridge clips / No equipment end connections), each generating its own Note
+    line regardless of active state. Separately, ALL ports across all 3 categories
+    combined are checked against the real activeExternalAlarm field (not admin/LOCKED —
+    confirmed that field is a static circuit flag, always ENABLED regardless of a real
+    fault) to produce ONE combined "kept locked" line covering only the genuinely active
+    ones. Slogans included everywhere.
+    alarm_ports_data: the raw controller_checks_data['alarm_ports'] list (each with
+    'port', 'slogan', 'active' keys).
+    Returns (notes_lines: list[str], active_pending_line: str or None)."""
+    port_slogan_map = port_slogan_map or {}
+    port_active_map = {p["port"]: bool(p.get("active")) for p in (alarm_ports_data or [])}
+
+    notes_lines = []
+    if loops_ports:
+        fmt = format_ports_with_slogans(loops_ports, port_slogan_map)
+        notes_lines.append(f"Pre\u2011existing loops have been removed from alarm ports {fmt}.")
+    if bridge_clips_ports:
+        fmt = format_ports_with_slogans(bridge_clips_ports, port_slogan_map)
+        notes_lines.append(f"Pre\u2011existing Bridge clips have been removed from alarm ports {fmt}.")
+    if no_equip_ports:
+        fmt = format_ports_with_slogans(no_equip_ports, port_slogan_map)
+        notes_lines.append(f"No equipment connections on port {fmt}.")
+
+    all_ports_str = ",".join(p for p in (loops_ports, bridge_clips_ports, no_equip_ports) if p)
+    all_port_list = [p.strip() for p in all_ports_str.split(",") if p.strip()]
+    active_ports = [p for p in all_port_list if port_active_map.get(p)]
+
+    active_pending_line = None
+    if active_ports:
+        fmt = format_ports_with_slogans(",".join(active_ports), port_slogan_map)
+        active_pending_line = f"Active alarms observed on ports {fmt} are kept locked (Owner: AT&T)."
+
+    return notes_lines, active_pending_line
 
 
 def locked_port_bucket_4(ports, owner, port_slogan_map=None):
