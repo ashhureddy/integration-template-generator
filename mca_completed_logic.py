@@ -246,16 +246,19 @@ def extract_controller_checks(text):
 
 # ---- Calltest market table (Calltest_sheet.xlsx, 'Legacy' tab for MCA) ----
 
-def load_calltest_table(xlsx_path):
-    """Parses Calltest_sheet.xlsx 'Legacy' tab into:
+def load_calltest_table(xlsx_path, tab_name="Legacy"):
+    """Parses Calltest_sheet.xlsx into:
         prefix_to_market: {"NC": "NCSC", "EC": "NCSC", ...}
         rules: {(market, scenario): {"PSAP": bool, "LTE Speed test": bool,
                                        "F-net with F-net SIM": bool, "5G speedtest": bool}}
     Confirmed structure: Market column only populated on the first row of each group;
-    it applies to every row until the next non-blank Market cell."""
+    it applies to every row until the next non-blank Market cell.
+    tab_name: confirmed NSB uses its own dedicated "NSB" tab in the same workbook
+    (different market-lookup rules from MCA's "Legacy" tab), not the market-based lookup
+    N2E skips entirely — pass tab_name="NSB" for NSB's Call Test logic."""
     import openpyxl
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
-    ws = wb["Legacy"]
+    ws = wb[tab_name]
     prefix_to_market, rules = {}, {}
     current_market = None
     rows = list(ws.iter_rows(min_row=2, values_only=True))
