@@ -614,6 +614,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_line}",
                     f"6610 Controller : {controller_id or ''}"]
     if current_config: report_lines.append(f"Current Configuration : {current_config}")
+    if wll_node.strip(): report_lines.append(f"WLL node : {wll_node}")
+    if software_version.strip(): report_lines.append(f"Software version : {software_version}")
+    if gs_version.strip(): report_lines.append(f"GS Version : {gs_version}")
     if len(mm_objs) > 1:
         report_lines += ["", "IDL Connections", f"Build Type : {idl_build_type or ''}"]
         if idle.strip(): report_lines.append(f"IDLe : {idle}")
