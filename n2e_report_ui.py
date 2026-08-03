@@ -41,14 +41,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     st.markdown("""
         <style>
         div[data-testid="stTextInput"] input, div[data-testid="stTextArea"] textarea {
-            border: 3px solid #1565C0 !important; background-color: #E3F2FD !important;
-            color: #0D1B2A !important; font-weight: 600 !important;
+            border: 3px solid #002D62 !important; background-color: #007FFF !important;
+            color: #FFFFFF !important; font-weight: 600 !important;
         }
         div[data-testid="stSelectbox"] > div > div {
-            border: 3px solid #1565C0 !important; background-color: #E3F2FD !important;
+            border: 3px solid #002D62 !important; background-color: #007FFF !important;
         }
         div[data-testid="stSelectbox"] * {
-            color: #0D1B2A !important; font-weight: 600 !important;
+            color: #FFFFFF !important; font-weight: 600 !important;
         }
         </style>
     """, unsafe_allow_html=True)
