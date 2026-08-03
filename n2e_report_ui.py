@@ -90,6 +90,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         warnings += sfp_warning_texts
         n2e_pending_from_warnings += sfp_pending_lines
 
+        warnings += n2e.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
+        warnings += n2e.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
+
     # SA Conversion — moved earlier (previously computed later, inside the Completed
     # expander) since the AMF warning check below needs it before the gate.
     sa_nodes = n2e.sa_conversion_nodes(ciq_wb, mm_objs)
