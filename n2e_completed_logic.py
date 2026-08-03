@@ -7,6 +7,7 @@ format_ports_with_slogans, controller-checks parsing, Sidehaul Info) directly wh
 the underlying mechanism is confirmed identical.
 """
 
+import re
 import mca_completed_logic as mcl
 
 qx = None
@@ -247,3 +248,28 @@ def n2e_merged_post_cutover_pending(power_plant_ports, not_cleared_ports, port_s
         return None
     ports_fmt = _format_ports_ampersand(all_ports, port_slogan_map or {})
     return f"Post external alarm cutover, active alarms observed on ports {ports_fmt} have been kept locked (Owner: Tower crew)."
+
+
+def ignore_state_alarm_notes(entries_str):
+    """New N2E category: pre-existing external alarms found in 'Ignore' state.
+    Confirmed manual entry — port + slogan typed directly by the engineer (e.g.
+    '3(RBS Temp High)'), since Ignore-state ports aren't necessarily captured by the
+    standard activeExternalAlarm/LOCKED detection at all. Supports multiple entries,
+    comma-separated (e.g. '3(RBS Temp High), 7(RBS INTRUSION)'), one Note line each.
+    Confirmed exact format: 'Pre - existing Port {N} ({slogan}) is configured in SMM but
+    is currently set to 'Ignore' state and will not be migrated to the 6610.(Owner:AT&T)'"""
+    if not entries_str:
+        return []
+    notes = []
+    for entry in entries_str.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        m = re.match(r'(\d+)\s*\((.+?)\)', entry)
+        if not m:
+            continue
+        port, slogan = m.groups()
+        notes.append(f"Pre - existing Port {port} ({slogan}) is configured in SMM but is "
+                     f"currently set to 'Ignore' state and will not be migrated to the "
+                     f"6610.(Owner:AT&T)")
+    return notes
