@@ -554,16 +554,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 if t1:
                     bucket_notes.append(t1)
 
-                nb2 = st.text_input("\U0001F4DD 2. Pre-Existing Loops and Bridge Clips on the 66 Block \u2014 currently locked port numbers", key="n2e_lp_loops")
-                _n2e_warn_missing_slogans(nb2)
-                nb2_loops_removed = st.text_input(
-                    "\U0001F4DD Loops/clips actually removed from \u2014 port numbers (leave blank to reuse the ports above; "
-                    "may include ports no longer locked)", key="n2e_lp_loops_removed", placeholder="e.g. 4, 5, 6, 7")
-                _n2e_warn_missing_slogans(nb2_loops_removed)
-                t2 = n2e.n2e_locked_port_loops_bridge_clips(nb2, n2e_port_slogan_map,
-                                                              loops_removed_ports=nb2_loops_removed if nb2_loops_removed.strip() else None)
-                if t2:
-                    bucket_notes.append(t2)
+                st.markdown("\U0001F4DD 2. Pre-Existing Loops and Bridge Clips \u2014 port numbers per category:")
+                bc1, bc2, bc3 = st.columns(3)
+                with bc1: nb2_loops = st.text_input("Pre existing loops", key="n2e_lp_loops", placeholder="e.g. 1")
+                with bc2: nb2_clips = st.text_input("Bridge clips", key="n2e_lp_clips", placeholder="e.g. 2")
+                with bc3: nb2_noequip = st.text_input("No equipment end connections", key="n2e_lp_noequip", placeholder="e.g. 3")
+                for f in (nb2_loops, nb2_clips, nb2_noequip):
+                    _n2e_warn_missing_slogans(f)
+                b2_notes, b2_active_line = mcl.loops_bridge_clips_notes(nb2_loops, nb2_clips, nb2_noequip,
+                                                                          n2e_all_alarm_ports, n2e_port_slogan_map)
+                bucket_notes += b2_notes
+                if b2_active_line:
+                    bucket_notes.append(b2_active_line)
 
                 nb3 = st.text_input("\U0001F4DD 3. Power Plant Swap \u2014 port numbers", key="n2e_lp_power")
                 _n2e_warn_missing_slogans(nb3)
