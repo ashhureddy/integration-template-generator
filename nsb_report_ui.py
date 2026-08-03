@@ -216,12 +216,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     if dss_sh != "\u2014 Select \u2014":
                         dss_pending = f"DSS Activation: {dss_bands} ({dss_sh})"
 
+        _ngs_summary, ngs_scope_lines = app.generate_ngs_checks(ciq_wb, mm_objs, _log)
+        ngs_line = next((l for l in ngs_scope_lines if l.startswith("NGS Activation")), None)
         ngs_completed, ngs_pending, ngs_bands, ngs_node = None, None, None, None
-        with st.container(border=True):
-            st.markdown("**NGS activation**")
-            ngs_bands = st.text_input("\U0001F4DD Sectors (bands)", key="nsb_ngs_bands", placeholder="e.g. AWS_1 & PCS_1")
-            ngs_node = st.text_input("\U0001F4DD Node ID", key="nsb_ngs_node")
-            if ngs_bands.strip():
+        if ngs_line:
+            parts = ngs_line.split("\t")
+            ngs_bands = parts[1] if len(parts) > 1 else ""
+            ngs_node = parts[2] if len(parts) > 2 else ""
+            with st.container(border=True):
+                st.markdown(f"**NGS activation** \u2014 detected: {ngs_bands} {ngs_node}")
                 ngs_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"], key="nsb_ngs")
                 if ngs_choice == "Completed":
                     ngs_completed = f"NGS activation: {ngs_bands} {ngs_node}"
