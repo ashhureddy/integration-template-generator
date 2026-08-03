@@ -646,16 +646,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                         "standard). Leave blank whichever don't apply.")
             b1 = st.text_input("\U0001F4DD 1. Pre-existing locked \u2014 port numbers", key="lp_b1", placeholder="e.g. 1, 5, 25")
             b2 = st.text_input("\U0001F4DD 2. Pre-existing active alarm \u2014 port numbers", key="lp_b2", placeholder="e.g. 3, 6, 20")
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                b3 = st.text_input("\U0001F4DD 3. Pre-existing loops/bridge clips/no equipment connections \u2014 currently locked port numbers", key="lp_b3")
-            with c2:
-                b3_reason = st.selectbox("Reason", ["\u2014 Select \u2014", "Pre-existing loops", "Bridge Clips", "No equipment end connections"],
-                                           key="lp_b3_reason", label_visibility="collapsed")
-            b3_loops_removed = st.text_input(
-                "\U0001F4DD Loops/clips actually removed from \u2014 port numbers (leave blank to reuse the ports above; "
-                "may include ports no longer locked, e.g. if removing the loop cleared the alarm)",
-                key="lp_b3_loops_removed", placeholder="e.g. 4, 5, 6, 7")
+            st.markdown("\U0001F4DD 3. Pre-Existing Loops and Bridge Clips \u2014 port numbers per category:")
+            bc1, bc2, bc3 = st.columns(3)
+            with bc1: b3_loops = st.text_input("Pre existing loops", key="lp_b3_loops", placeholder="e.g. 1")
+            with bc2: b3_clips = st.text_input("Bridge clips", key="lp_b3_clips", placeholder="e.g. 2")
+            with bc3: b3_noequip = st.text_input("No equipment end connections", key="lp_b3_noequip", placeholder="e.g. 3")
             c1, c2 = st.columns([2, 1])
             with c1:
                 b4 = st.text_input("\U0001F4DD 4. Post-cutover, FE couldn't clear \u2014 port numbers", key="lp_b4")
@@ -673,19 +668,19 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 b6_dest = st.selectbox("Goes to", ["Pre-Existing Issues", "Pending"], key="lp_b6_dest", label_visibility="collapsed")
 
             # Confirmed fix: build from ALL alarm ports (not just currently-locked ones),
-            # so a port that's since been unlocked (e.g. loops_removed_ports including a
-            # port whose alarm cleared) still gets its slogan looked up correctly.
+            # so a port that's since been unlocked still gets its slogan looked up correctly.
             all_alarm_ports = controller_checks_data.get("alarm_ports", []) if controller_checks_data else []
             port_slogan_map = {p["port"]: p["slogan"] for p in all_alarm_ports if p["slogan"]}
             t1 = mcl.locked_port_bucket_1(b1, port_slogan_map)
             t2 = mcl.locked_port_bucket_2(b2, port_slogan_map)
-            t3, t3_note = mcl.locked_port_bucket_3(b3, b3_reason if b3_reason != "\u2014 Select \u2014" else "", port_slogan_map,
-                                                     loops_removed_ports=b3_loops_removed if b3_loops_removed.strip() else None)
+            b3_notes, t3_active_line = mcl.loops_bridge_clips_notes(b3_loops, b3_clips, b3_noequip, all_alarm_ports, port_slogan_map)
             t4 = mcl.locked_port_bucket_4(b4, b4_owner, port_slogan_map)
-            for t in (t1, t2, t3):
+            for t in (t1, t2):
                 if t:
                     bucket_pre_existing.append(t)
-            bucket_notes = [t3_note] if t3_note else []
+            if t3_active_line:
+                bucket_pre_existing.append(t3_active_line)
+            bucket_notes = list(b3_notes)
             if t4:
                 bucket_pending.append(t4)
             if b5:
@@ -906,8 +901,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             row_writes.append((46, False, []))
 
         # DSS Activation (completed=59, pending=122) — restored toggle, confirmed real gap.
-        row_writes.append((59, bool(dss_completed_line), [(3, dss_completed_line)] if dss_completed_line else []))
-        row_writes.append((122, bool(dss_pending_line), [(3, dss_pending_line)] if dss_pending_line else []))
+        dss_c_bands = dss_completed_line.split("DSS Activation:")[-1].strip() if dss_completed_line else None
+        dss_p_bands = dss_pending_line.split("DSS Activation:")[-1].replace("(AT&T)", "").replace("(MIC)", "").strip() if dss_pending_line else None
+        row_writes.append((59, bool(dss_completed_line), [(3, dss_c_bands)] if dss_c_bands else []))
+        row_writes.append((122, bool(dss_pending_line), [(3, dss_p_bands)] if dss_p_bands else []))
 
         # ---- Notes section (confirmed real gap — none of this was ever written to the
         # .xlsm before). Rows 181/182/183 are the only genuinely dedicated Notes rows in
