@@ -189,18 +189,27 @@ def n2e_locked_port_active_alarms(ports, port_slogan_map=None):
     return f"Pre\u2011existing active alarms on ports {ports_fmt} are kept locked to avoid OPS tickets.(Owner:AT&T)"
 
 
-def n2e_locked_port_power_plant_swap(ports, port_slogan_map=None):
+def n2e_locked_port_power_plant_swap(swap_performed, ports="", port_slogan_map=None, alarm_ports_data=None):
     """Power Plant Swap — confirmed new N2E-only scenario, produces BOTH a Pending line
-    and a Note line together. Returns (pending_text, note_text).
-    Confirmed: the Pending line by itself is superseded by
-    n2e_merged_post_cutover_pending() when both this bucket and bucket 4 (Not Cleared by
-    FE) have ports — the Note stays independent either way."""
-    if not ports:
-        return None, None
-    ports_fmt = mcl.format_ports_with_slogans(ports, port_slogan_map or {})
-    pending = f"Post external alarm cutover, active alarms observed on ports {ports_fmt} are kept locked (Owner: Tower crew)."
+    and a Note line together. Returns (pending_text, note_text, active_ports_str).
+    Confirmed real fix: swap_performed is now an INDEPENDENT signal (a checkbox, not
+    tied to typing port numbers) — if there are no active alarms at all, the engineer
+    would have nothing to type in the port field, but the Note must still fire whenever
+    a Power Plant Swap genuinely happened. The Pending line still only includes ports
+    genuinely marked activeExternalAlarm=true, and only appears if any exist."""
+    if not swap_performed:
+        return None, None, None
+    port_active_map = {p["port"]: bool(p.get("active")) for p in (alarm_ports_data or [])}
+    port_list = [p.strip() for p in (ports or "").split(",") if p.strip()]
+    active_ports = [p for p in port_list if port_active_map.get(p)]
+    active_ports_str = ",".join(active_ports) if active_ports else None
+
+    pending = None
+    if active_ports_str:
+        ports_fmt = mcl.format_ports_with_slogans(active_ports_str, port_slogan_map or {})
+        pending = f"Post external alarm cutover, active alarms observed on ports {ports_fmt} are kept locked (Owner: Tower crew)."
     note = "External alarms have been scripted according to the new power plant configuration."
-    return pending, note
+    return pending, note, active_ports_str
 
 
 def n2e_locked_port_not_cleared_by_fe(ports, port_slogan_map=None):
