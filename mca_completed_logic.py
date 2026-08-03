@@ -1393,3 +1393,29 @@ def florida_cells_to_rows(cells, capacity=12):
     rows = cells[:capacity - 1]
     rows.append("|".join(cells[capacity - 1:]))
     return rows
+
+
+
+# ============================================================
+# SUP / XMU shared helpers — confirmed real logic, verified against real ALL00640
+# Post-checks data (SUP-1 ... ENABLED, XMU03-1-1 ... ENABLED both present in the real
+# Hardware Status table). Shared between N2E and NSB, which both use the same mechanism.
+# ============================================================
+
+def _hardware_component_state(post_text, component_prefix):
+    """Generic Hardware Status Information row parser: '{Node} {Component} {admin} {fault}
+    {steady} {oper} {description}...' — confirmed real format. Returns
+    {node: oper_state} for any component whose name starts with component_prefix
+    (e.g. 'SUP' matches 'SUP-1', 'XMU' matches 'XMU03-1-1')."""
+    out = {}
+    text = _normalize(post_text) if post_text else ""
+    for m in re.finditer(
+            r'(\S+) (' + component_prefix + r'\S*) (UNLOCKED|LOCKED) (ON|OFF) (\S+) (ENABLED|DISABLED)', text):
+        node, _comp, _admin, _fault, _steady, oper = m.groups()
+        out[node] = oper
+    return out
+
+
+def xmu_in_ciq(post_configuration_text):
+    """Confirmed trigger: XMU appears in the CIQ target (Post Configuration string)."""
+    return "XMU" in (post_configuration_text or "")
