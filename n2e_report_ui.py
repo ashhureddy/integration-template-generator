@@ -162,7 +162,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
     idl_build_type = None
     idle = idly = switch = slot_port = ""
-    if len(mm_objs) > 1:
+    if len(new_nodes) > 1:
         with st.container(border=True):
             idl_build_type = app.derive_idl_build_type_label(ciq_wb, mm_objs)
             st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type or '(not detected)'}**")
@@ -361,7 +361,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         # IDL connections — 2+ nodes trigger, manual Completed/Pending.
         idl_completed, idl_pending = None, None
-        if len(mm_objs) > 1:
+        if len(new_nodes) > 1:
             idl_choice = st.selectbox("IDL connections status", ["\u2014 Select \u2014", "Completed", "Pending"], key="n2e_idlconn")
             if idl_choice == "Completed":
                 idl_completed = "IDL connections"
@@ -648,7 +648,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     if wll_node.strip(): report_lines.append(f"WLL node : {wll_node}")
     if software_version.strip(): report_lines.append(f"Software version : {software_version}")
     if gs_version.strip(): report_lines.append(f"GS Version : {gs_version}")
-    if len(mm_objs) > 1:
+    if len(new_nodes) > 1:
         report_lines += ["", "IDL Connections", f"Build Type : {idl_build_type or ''}"]
         if idle.strip(): report_lines.append(f"IDLe : {idle}")
         if idly.strip(): report_lines.append(f"IDLy : {idly}")
@@ -680,7 +680,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             row_writes.append((N2E_ROW_MAP["gs_version"], bool(gs_version.strip()), [(3, gs_version)] if gs_version.strip() else []))
 
             # IDL Connections — confirmed real gap: was never written to the .xlsm at all.
-            if len(mm_objs) > 1 and idl_build_type:
+            if len(new_nodes) > 1 and idl_build_type:
                 idle_rows = N2E_ROW_MAP["idle"]
                 row_writes.append((idle_rows[0], True, [(3, idl_build_type)]))
                 row_writes.append((idle_rows[1], bool(idle.strip()), [(3, idle)] if idle.strip() else []))
