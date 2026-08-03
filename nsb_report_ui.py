@@ -201,16 +201,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if ctrl_checked:
                 choices_completed.append(ctrl_line)
 
+        _dss_outputs, _dss_summary, dss_activation_labels = app.generate_dss(ciq_wb, mm_objs, user_id, date_str, _log)
         dss_completed, dss_pending, dss_bands = None, None, None
-        if int_pairs:
+        if dss_activation_labels:
+            dss_bands = "/".join(dss_activation_labels)
             with st.container(border=True):
-                st.markdown("**DSS Activation**")
-                dss_bands = st.text_input("\U0001F4DD Sectors (bands)", key="nsb_dss_bands", placeholder="e.g. LTE_700/AWS_1")
+                st.markdown(f"**DSS Activation** \u2014 detected: {dss_bands}")
                 dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"], key="nsb_dss")
-                if dss_choice == "Completed" and dss_bands.strip():
+                if dss_choice == "Completed":
                     dss_completed = f"DSS Activation: {dss_bands}"
                     choices_completed.append(dss_completed)
-                elif dss_choice == "Pending" and dss_bands.strip():
+                elif dss_choice == "Pending":
                     dss_sh = st.selectbox("Stakeholder", ["\u2014 Select \u2014", "MIC", "AT&T"], key="nsb_dss_sh")
                     if dss_sh != "\u2014 Select \u2014":
                         dss_pending = f"DSS Activation: {dss_bands} ({dss_sh})"
