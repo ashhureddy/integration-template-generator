@@ -69,6 +69,47 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             break
     controller_in_edp = bool(controller_id)
 
+    # Moved earlier (previously computed later, inside the Completed expander) since the
+    # Warnings gate below needs this data before any of the rest of the UI renders.
+    controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
+    cascade_fires = n2e.controller_cascade_fires(controller_in_edp, bool(controller_checks_text))
+
+    # ==================== Warnings gate ====================
+    # Confirmed 2-step flow: if there are any warnings, show ONLY the warnings plus a
+    # "Continue to Report" button first — none of the rest of the UI (Subject,
+    # Completed, Pending, Notes, Generate Report) renders until the user clicks through.
+    # If there are no warnings at all, skip straight to the normal report UI. The actual
+    # warning-generating checks get added here as they're defined.
+    warnings = []
+    n2e_pending_from_warnings = []
+
+    if postcheck_text:
+        transport_sfp_data = mcl.extract_transport_sfp(postcheck_text)
+        sfp_warning_texts, sfp_pending_lines = n2e.n2e_transport_sfp_warnings(
+            ciq_wb, mm_objs, postcheck_text, transport_sfp_data)
+        warnings += sfp_warning_texts
+        n2e_pending_from_warnings += sfp_pending_lines
+
+    # SA Conversion — moved earlier (previously computed later, inside the Completed
+    # expander) since the AMF warning check below needs it before the gate.
+    sa_nodes = n2e.sa_conversion_nodes(ciq_wb, mm_objs)
+    if sa_nodes and postcheck_text:
+        warnings += n2e.sa_conversion_amf_warning(postcheck_text, sa_nodes)
+
+    if warnings and not st.session_state.get("n2e_warnings_ack"):
+        with st.container(border=True):
+            st.markdown(
+                f"<div style='color:#c0392b; font-size:1.3em; font-weight:700;'>"
+                f"\u26a0\ufe0f {len(warnings)} Warning{'s' if len(warnings) != 1 else ''}</div>",
+                unsafe_allow_html=True)
+            for w in warnings:
+                st.markdown(f"<div style='color:#c0392b; font-size:1.05em; padding:2px 0;'>\u2022 {w}</div>",
+                            unsafe_allow_html=True)
+        if st.button("Continue to Report \u2192", type="primary", key="n2e_warnings_continue"):
+            st.session_state["n2e_warnings_ack"] = True
+            st.rerun()
+        return
+
     # ---- Classification, needed for Integration band/node extraction and PSAP/Speedtest
     # band filtering (confirmed: every CIQ cell = addition, no Pre-checks). ----
     classification = {"added": {}}
@@ -202,7 +243,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     # ==================== Completed / Pending items ====================
     st.markdown("### Which of these apply?")
     choices_completed, choices_pending, stakeholders = [], [], {}
-    warnings = []
 
     with st.expander("Completed", expanded=True):
         # Integration — from generate_n2e's own scope_lines. Confirmed bug: was using
@@ -214,8 +254,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_completed += int_lines
 
         # 6610 Controller Integration + cascade.
-        controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
-        cascade_fires = n2e.controller_cascade_fires(controller_in_edp, bool(controller_checks_text))
         controller_line = next((l for l in scope_lines if l.startswith("6610 Controller Integration") or l.startswith("EDP Publish")), None)
         if cascade_fires:
             st.caption("\u26a0\ufe0f Controller-checks file not uploaded \u2014 6610 Controller Integration, SAU Connections, "
@@ -416,7 +454,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         # SA Conversion — CIQ NR_SA tab presence, Completed only. Confirmed same
         # silent-append bug as the others — now uses the visible checkbox pattern.
-        sa_nodes = n2e.sa_conversion_nodes(ciq_wb, mm_objs)
         sa_completed_line = None
         if sa_nodes:
             candidate_sa_line = f"SA conversion.: {'|'.join(sa_nodes)}"
@@ -428,6 +465,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.caption("SA Conversion: not detected (no node found in CIQ's NR_SA tab).")
 
     with st.expander("Pending", expanded=True):
+        # Transport SFP threshold/BER warnings — reported here too since there's no
+        # dedicated template row for this (goes through the buffer for the .xlsm).
+        choices_pending += n2e_pending_from_warnings
+        for l in n2e_pending_from_warnings:
+            st.caption(l)
+
         # Row order below matches the real template exactly: 78 On Site Nokia cutover,
         # 79 6610, 80 DSS, 81 NGS, 82 GPS, 83 LKF, 84 PSAP/Speedtest, 85 Speed test,
         # 86 F-NET, 87-89 Compatible SFP, 90 RET, 91 Scripting, 92 SAU, 93 SUP, 94 XMU,
@@ -762,7 +805,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             # the merged Power Plant Swap/Not-Cleared-by-FE line and free-text "additional
             # pending information". testing_note goes to Notes instead, not here.
             pending_buffer_lines = (
-                ([smm_pending] if smm_pending else [])
+                list(n2e_pending_from_warnings)
+                + ([smm_pending] if smm_pending else [])
                 + list(bucket_pending)
                 + ([additional_pending] if additional_pending.strip() else [])
             )
