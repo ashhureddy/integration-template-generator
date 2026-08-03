@@ -732,9 +732,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw_simple(N2E_ROW_MAP["xmu_installation"]["pending"][0], xmu_pending_lines, "|".join(s.split(":")[-1].replace(". (MIC PM)", "").strip() for s in xmu_pending_lines))
             _rw_simple(N2E_ROW_MAP["idl_connections"]["pending"][0], idl_pending)
             _rw_simple(N2E_ROW_MAP["siad_provisioning"]["pending"][0], False)
-            # Area test Pending (98): C=node(s), D="Failed" (the actual Area Lite result).
+            # Area test Pending (98): C=node(s) [+ controller when all locked], D="Failed".
             area_p_row = N2E_ROW_MAP["area_test"]["pending"][0]
-            row_writes.append((area_p_row, bool(area_pending), [(3, "|".join(new_nodes)), (4, "Failed")] if area_pending else []))
+            row_writes.append((area_p_row, bool(area_pending), [(3, "|".join(area_targets)), (4, "Failed")] if area_pending else []))
             _rw_simple(N2E_ROW_MAP["external_alarm_testing"]["pending"][0], cascade_fires or testing_pending, controller_id if (cascade_fires or testing_pending) else None)
             _rw_simple(N2E_ROW_MAP["config_6673"]["pending"][0], has_6673, sidehaul_rows[0]["switch_id"] if has_6673 and sidehaul_rows else None)
             # 6673 Port Config in ENM (101): C=Slot|Port|Node (never built, left blank), D=Switch ID.
