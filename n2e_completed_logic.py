@@ -475,6 +475,26 @@ def extract_ssb_frequency(post_text):
     return out
 
 
+def extract_5g_cell_cu_status(post_text):
+    """Parses '5G NR Cell CU Status' table — confirmed genuinely separate real table
+    from '5G NR Cell DU Status', with its own cellLocalId that should independently
+    match the CIQ (both CU and DU are checked, since either could diverge on its own).
+    Confirmed real header: 'MO cellLocalId cellState nCI serviceState' — cellState and
+    serviceState are confirmed blank in the real data, so bounded extraction between the
+    section's own header and the next section header ('5G NR Sector Carrier') is used
+    for safety, rather than a generic file-wide regex. Returns {cell: cellLocalId}."""
+    out = {}
+    section_match = re.search(
+        r'5G NR Cell CU Status\nMO cellLocalId cellState nCI serviceState\n(.*?)\n5G NR Sector Carrier',
+        post_text or "", re.DOTALL)
+    if not section_match:
+        return out
+    for m in re.finditer(r'(\S+) (\d+) (\d+)', section_match.group(1)):
+        cell, local_id, _nci = m.groups()
+        out[cell] = local_id
+    return out
+
+
 def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text):
     """Confirmed CIQ mapping: cellLocalId, CellRange, nRPCI, arfcnDL, arfcnUL,
     bSChannelBwDL, bSChannelBwUL, configuredMaxTxPower, ssbFrequency all compared
@@ -486,12 +506,23 @@ def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text):
         return warnings
 
     cell_du = extract_5g_cell_du_status(post_text)
+    cell_cu = extract_5g_cell_cu_status(post_text)
     sector_carrier = extract_5g_sector_carrier(post_text)
     ssb_freq = extract_ssb_frequency(post_text)
     if not cell_du:
         return warnings
 
     ciq_rows = {r.get("NRCellDU"): r for r in qx.sheet_objs(ciq_wb["5G Info"]) if r.get("NRCellDU")}
+
+    # cellLocalId — confirmed checked independently from BOTH the CU Status and DU
+    # Status tables, since either could diverge from the CIQ on its own.
+    for cell, cu_local_id in cell_cu.items():
+        ciq_row = ciq_rows.get(cell)
+        if not ciq_row:
+            continue
+        ciq_val = str(ciq_row.get("cellLocalId", "")).strip()
+        if ciq_val and cu_local_id.strip() not in [p.strip() for p in ciq_val.split("/")]:
+            warnings.append(f"cellLocalId mismatch on {cell} (5G NR Cell CU Status): Post-checks={cu_local_id}, CIQ={ciq_val}.")
 
     for cell, post_vals in cell_du.items():
         ciq_row = ciq_rows.get(cell)
@@ -515,7 +546,8 @@ def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text):
                 continue
             ciq_parts = [p.strip() for p in ciq_val.split("/")]
             if post_val not in ciq_parts:
-                warnings.append(f"{post_key} mismatch on {cell}: Post-checks={post_val}, CIQ={ciq_val}.")
+                source_label = " (5G NR Cell DU Status)" if post_key == "cellLocalId" else ""
+                warnings.append(f"{post_key} mismatch on {cell}{source_label}: Post-checks={post_val}, CIQ={ciq_val}.")
 
     # nrTAC — matched via node name in NR_SA, same value expected for every cell on that node.
     if "NR_SA" in ciq_wb.sheetnames:
@@ -546,4 +578,42 @@ def sctp_status_warnings(post_text):
         _node, endpoint, state = m.groups()
         if state == "DISABLED":
             warnings.append(f"Transport=1,SctpEndpoint={endpoint} SCTP is disabled.")
+    return warnings
+
+
+def digital_tilt_warnings(ciq_wb, mm_objs, post_text, classification):
+    """Confirmed check: DigitalTilt in Post-checks (the 'usedDigitalTilt' value — the
+    'digitalTilt' field itself is confirmed blank/not printed in the real data) must
+    match CIQ's 'Electrical Tilt' column, for CBAND/DOD sectors only. Confirmed real
+    format: 'NRSectorCarrier={sector},CommonBeamforming={n} {usedDigitalTilt}'. Matched
+    to CIQ via the NRSectorCarrier column. Only checks sectors whose band is CBAND or
+    DOD/DOD_BWE (confirmed via classification['added'] + band_label)."""
+    warnings = []
+    if not post_text or "5G Info" not in ciq_wb.sheetnames:
+        return warnings
+
+    # Confirmed real Cband/DOD sectors on this site, from classification (already band-labeled).
+    cband_dod_cells = set()
+    for cells in classification.get("added", {}).values():
+        for c in cells:
+            label, _sector = qx.band_label(c)
+            if label in ("CBAND", "DOD", "DOD_BWE"):
+                cband_dod_cells.add(c)
+    if not cband_dod_cells:
+        return warnings
+
+    post_tilt = {}
+    for m in re.finditer(r'NRSectorCarrier=(\S+?),CommonBeamforming=\d+ (\d+)', post_text):
+        sector, used_tilt = m.groups()
+        post_tilt[sector] = used_tilt
+
+    ciq_rows = {r.get("NRSectorCarrier"): r for r in qx.sheet_objs(ciq_wb["5G Info"]) if r.get("NRSectorCarrier")}
+
+    for sector in cband_dod_cells:
+        if sector not in post_tilt or sector not in ciq_rows:
+            continue
+        post_val = post_tilt[sector].strip()
+        ciq_val = str(ciq_rows[sector].get("Electrical Tilt", "")).strip()
+        if ciq_val and post_val != ciq_val:
+            warnings.append(f"DigitalTilt mismatch on {sector}: Post-checks={post_val}, CIQ={ciq_val}.")
     return warnings
