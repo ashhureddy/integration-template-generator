@@ -74,6 +74,26 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
     cascade_fires = n2e.controller_cascade_fires(controller_in_edp, bool(controller_checks_text))
 
+    # Classification — moved earlier (previously computed after the Warnings gate) since
+    # the DigitalTilt warning check needs it before the gate.
+    classification = {"added": {}}
+    eutran_objs = app.sheet_objs(ciq_wb["eUtran Parameters"]) if "eUtran Parameters" in ciq_wb.sheetnames else []
+    fiveg_objs = app.sheet_objs(ciq_wb["5G Info"]) if "5G Info" in ciq_wb.sheetnames else []
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        cells = []
+        for r in eutran_objs:
+            c = r.get("EutranCellFDDId")
+            if c and e_name and str(c).startswith(str(e_name)):
+                cells.append(c)
+        for r in fiveg_objs:
+            c = r.get("NRCellDU")
+            if c and g_name and str(c).startswith(str(g_name)):
+                cells.append(c)
+        if cells:
+            classification["added"][node] = cells
+
     # ==================== Warnings gate ====================
     # Confirmed 2-step flow: if there are any warnings, show ONLY the warnings plus a
     # "Continue to Report" button first — none of the rest of the UI (Subject,
@@ -93,6 +113,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         warnings += n2e.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
         warnings += n2e.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
         warnings += n2e.sctp_status_warnings(postcheck_text)
+        warnings += n2e.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification)
 
     # SA Conversion — moved earlier (previously computed later, inside the Completed
     # expander) since the AMF warning check below needs it before the gate.
@@ -119,26 +140,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.session_state["n2e_warnings_ack_fingerprint"] = warnings_fingerprint
             st.rerun()
         return
-
-    # ---- Classification, needed for Integration band/node extraction and PSAP/Speedtest
-    # band filtering (confirmed: every CIQ cell = addition, no Pre-checks). ----
-    classification = {"added": {}}
-    eutran_objs = app.sheet_objs(ciq_wb["eUtran Parameters"]) if "eUtran Parameters" in ciq_wb.sheetnames else []
-    fiveg_objs = app.sheet_objs(ciq_wb["5G Info"]) if "5G Info" in ciq_wb.sheetnames else []
-    for row in mm_objs:
-        node = row.get("Node to be built as")
-        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
-        cells = []
-        for r in eutran_objs:
-            c = r.get("EutranCellFDDId")
-            if c and e_name and str(c).startswith(str(e_name)):
-                cells.append(c)
-        for r in fiveg_objs:
-            c = r.get("NRCellDU")
-            if c and g_name and str(c).startswith(str(g_name)):
-                cells.append(c)
-        if cells:
-            classification["added"][node] = cells
 
     all_node_names = [row.get("Node to be built as") for row in mm_objs]
     # Confirmed rule: a node whose FULL NAME literally ends in "L" (e.g. OML00947L) is a
