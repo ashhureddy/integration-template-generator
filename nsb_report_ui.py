@@ -537,10 +537,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     with st.expander("Notes"):
         # SAU enabled on Node/Controller — same as N2E, moved to the top.
         sau_auto_target = controller_id if sau_completed else None
-        sau_notes_checked = st.checkbox("SAU enabled on the: Node or Controller", value=True, key="nsb_sau_notes")
+        sau_label = f"SAU enabled on the: {sau_auto_target}" if sau_auto_target else "SAU enabled on the: Node or Controller"
+        sau_notes_checked = st.checkbox(sau_label, value=True, key="nsb_sau_notes")
         if sau_notes_checked:
             if sau_auto_target:
-                st.caption(f"SAU enabled on the: {sau_auto_target}")
                 choices_notes.append(f"SAU enabled on the: {sau_auto_target}")
             else:
                 sau_manual_target = st.text_input("\U0001F4DD Node ID or Controller ID", key="nsb_sau_manual")
