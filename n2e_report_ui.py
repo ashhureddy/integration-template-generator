@@ -317,7 +317,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     gps_completed_line = candidate_line
                     choices_completed.append(gps_completed_line)
             if disabled_nodes:
-                gps_pending_line = f"GPS Installation: {'|'.join(disabled_nodes)} (MIC PM)"
+                gps_pending_line = f"GPS Installation: {'|'.join(disabled_nodes)} (Tower Crew)"
             if not enabled_nodes and not disabled_nodes:
                 st.caption(f"GPS Installation: no TimeSyncIO state found in Post-checks for "
                            f"{'|'.join(row.get('Node to be built as') for row in mm_objs)} \u2014 check Post-checks parsing.")
