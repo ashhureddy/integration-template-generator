@@ -35,7 +35,7 @@ def integration_bands_and_nodes(classification):
             label, _sector = qx.band_label(cell)
             if label:
                 all_bands.add(label)
-    return "/".join(sorted(all_bands)), "|".join(all_nodes)
+    return "/".join(mcl.sort_bands_lte_first(all_bands)), "|".join(all_nodes)
 
 
 def integration_bands_by_tech(classification):
