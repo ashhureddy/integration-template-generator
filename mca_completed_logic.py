@@ -854,7 +854,12 @@ def call_test_lines(classification, market, rules, moved_lte_bands, added_bands_
         fiveg_all = set(added_bands_by_tech.get("5g", set())) | set(added_bands_by_tech.get("cband_dod", set())) \
             | set(moved_bands_by_tech.get("5g", set())) | set(moved_bands_by_tech.get("cband_dod", set()))
         lines.append(f"Speed test:\t5G Sectors: {', '.join(sorted(fiveg_all))}")
-    if required["F-net with F-net SIM"]:
+    # Confirmed real fix: F-net with F-net SIM should only fire if FNET sectors are
+    # genuinely present on the site, even if the CT sheet says Y for this market/scenario
+    # — the CT sheet flag alone isn't enough, since a site with no FNET at all has
+    # nothing to test.
+    fnet_present = "FNET" in added_bands_by_tech.get("lte", set()) or "FNET" in moved_bands_by_tech.get("lte", set())
+    if required["F-net with F-net SIM"] and fnet_present:
         lines.append("Calltest with F-NET SIM:\tF-NET Sectors")
 
     return lines
