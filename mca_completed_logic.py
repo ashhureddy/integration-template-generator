@@ -845,9 +845,17 @@ def call_test_lines(classification, market, rules, moved_lte_bands, added_bands_
     psap_from_moved_lte = bool(moved_lte_bands)
 
     if required["PSAP"] or psap_from_moved_lte:
-        moved_str = ", ".join(sorted(moved_lte_bands)) if moved_lte_bands else ""
-        lines.append(f"PSAP test/Speedtest/VoLTE voice calltest:\tMoved LTE Sectors: {moved_str}"
-                     f"\tPSAP Schedule ID:\t")
+        if moved_lte_bands:
+            moved_str = ", ".join(sorted(moved_lte_bands))
+            lines.append(f"PSAP test/Speedtest/VoLTE voice calltest:\tMoved LTE Sectors: {moved_str}"
+                         f"\tPSAP Schedule ID:\t")
+        else:
+            # Confirmed fix: PSAP firing with no genuinely moved bands (e.g. NSB, which
+            # never has moved sectors, or MCA firing purely from a newly-added-LTE
+            # scenario) — no "Moved LTE Sectors:" label at all, just the bands directly.
+            new_str = ", ".join(sorted(added_bands_by_tech.get("lte", [])))
+            lines.append(f"PSAP test/Speedtest/VoLTE voice calltest:\t{new_str}"
+                         f"\tPSAP Schedule ID:\t")
     if required["LTE Speed test"]:
         lines.append(f"Speedtest/VoLTE voice calltest:\tLTE Sectors: {', '.join(sorted(added_bands_by_tech.get('lte', [])))}")
     if required["5G speedtest"]:
