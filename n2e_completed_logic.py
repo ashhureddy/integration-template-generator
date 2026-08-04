@@ -531,3 +531,19 @@ def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text):
             if ciq_tac and post_tac and post_tac != ciq_tac:
                 warnings.append(f"nRTAC mismatch on node {node}: Post-checks={post_tac}, CIQ={ciq_tac}.")
     return warnings
+
+
+def sctp_status_warnings(post_text):
+    """Confirmed check: every SCTP endpoint should be ENABLED. Confirmed real format:
+    '{Node} Transport=1,SctpEndpoint={endpoint} {ENABLED|DISABLED}'. Fires one warning
+    per disabled endpoint. Confirmed exact wording:
+    'Transport=1,SctpEndpoint={endpoint} SCTP is disabled.'"""
+    warnings = []
+    if not post_text:
+        return warnings
+    pattern = re.compile(r'(\S+) Transport=1,SctpEndpoint=(\S+) (ENABLED|DISABLED)')
+    for m in pattern.finditer(post_text):
+        _node, endpoint, state = m.groups()
+        if state == "DISABLED":
+            warnings.append(f"Transport=1,SctpEndpoint={endpoint} SCTP is disabled.")
+    return warnings
