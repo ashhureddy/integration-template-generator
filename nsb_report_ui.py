@@ -104,7 +104,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             target_row = app.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or \
                 app.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
         hw = app.hw_string(target_row) if target_row else None
-        post_parts.append(f"{node}({hw or 'NOT FOUND'})")
+        # Confirmed fix: was missing the dual-identity case entirely (a node with BOTH an
+        # eNodeB Name and gNodeB Name populated — i.e. co-located LTE+5G) — ported from
+        # app.py's generate_n2e(), which correctly shows the secondary ID and BBU Mode.
+        if app.is_populated(e_name) and app.is_populated(g_name):
+            secondary = g_name if is_lte_primary else e_name
+            bbu_mode = row.get("BBU Mode")
+            post_parts.append(f"{node}(P)/{secondary}(S)({bbu_mode})({hw or 'NOT FOUND'})")
+        else:
+            post_parts.append(f"{node}({hw or 'NOT FOUND'})")
     post_line = " + ".join(post_parts)
 
     # Moved earlier (previously computed later, well after the Subject UI had already
