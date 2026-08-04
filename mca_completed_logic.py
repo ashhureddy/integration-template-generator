@@ -1463,3 +1463,357 @@ def sa_conversion_note(sa_nodes):
     if not sa_nodes:
         return None
     return "Termpointtoamf is in unlocked state."
+
+
+# ============================================================
+# WARNING CHECKS (Transport SFP, LTE/5G sector params, SCTP, DigitalTilt, AMF) —
+# confirmed genuinely generic (Post-checks vs CIQ comparisons, no scope-specific
+# assumptions baked in), moved here from n2e_completed_logic.py so both N2E and NSB
+# can share the exact same tested implementation instead of duplicating it.
+# ============================================================
+def transport_sfp_threshold_warnings(ciq_wb, mm_objs, post_text, transport_sfp_data):
+    """Confirmed N2E-specific check (different wording from MCA's transport_sfp_verification):
+    checks TXdBm/RXdBm against the speed-appropriate range (reusing SFP_RANGES) and
+    BER against 0/0, for every node. Confirmed exact wording:
+    'High/low RXdBm/TXdBm on Transport SFP: {node}.',
+    'BER not reporting on the Transport port: {node}.' (BER empty), and
+    'BER NZ reporting on the Transport port: {node}.' (BER present but non-zero).
+    All fire independently (a node can trigger any combination, or none).
+    Confirmed: all go into the Warnings tab AND get reported as Pending to MIC PM
+    (via the buffer, since there's no dedicated template row for this).
+    Returns (warning_texts: list[str], pending_lines: list[str])."""
+    warning_texts, pending_lines = [], []
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        gen = qx.get_node_generation(ciq_wb, row)
+        if not gen:
+            continue
+        port_labels = qx.PORT_BY_GEN.get(gen)
+        if not port_labels:
+            continue
+        opmode = qx.extract_transport_fiber_opmode(post_text, node, port_labels)
+        if not opmode:
+            continue
+        speed = "10G" if "10G" in opmode.upper() else ("1G" if "1G" in opmode.upper() else None)
+        if not speed:
+            continue
+        lo, hi = SFP_RANGES[speed]
+
+        reading = transport_sfp_data.get(node)
+        if not reading:
+            continue
+
+        out_of_range = (reading["txdbm"] > hi or reading["txdbm"] < lo
+                         or reading["rxdbm"] > hi or reading["rxdbm"] < lo)
+        if out_of_range:
+            text = f"High/low RXdBm/TXdBm on Transport SFP: {node}."
+            warning_texts.append(text)
+            pending_lines.append(f"{text} (MIC PM)")
+
+        ber = reading["ber"]
+        if not ber or ber.strip() == "":
+            text = f"BER not reporting on the Transport port: {node}."
+            warning_texts.append(text)
+            pending_lines.append(f"{text} (MIC PM)")
+        elif ber.strip() != "0/0":
+            text = f"BER NZ reporting on the Transport port: {node}."
+            warning_texts.append(text)
+            pending_lines.append(f"{text} (MIC PM)")
+
+    return warning_texts, pending_lines
+
+
+def sa_conversion_amf_warning(post_text, sa_conversion_nodes_list):
+    """Confirmed check: for nodes with SA Conversion present, verify each
+    TermPointToAmf entry's admin state. Confirmed real format:
+    '{Node} GNBCUCPFunction=1,TermPointToAmf={amf_name} {UNLOCKED|LOCKED} {OpState}'.
+    If ANY TermPointToAmf entry for the node is LOCKED (not all — any single one is
+    enough), fires the warning. Confirmed exact wording:
+    'TermpointtoAmf is in locked state on {node}, please unlock.'
+    Returns list of warning texts (one per affected node, deduplicated)."""
+    if not sa_conversion_nodes_list or not post_text:
+        return []
+    pattern = re.compile(r'(\S+) GNBCUCPFunction=1,TermPointToAmf=(\S+) (UNLOCKED|LOCKED) (\w+)')
+    locked_nodes = set()
+    for m in pattern.finditer(post_text):
+        node, _amf_name, admin, _oper = m.groups()
+        if node in sa_conversion_nodes_list and admin == "LOCKED":
+            locked_nodes.add(node)
+    return [f"TermpointtoAmf is in locked state on {node}, please unlock." for node in sorted(locked_nodes)]
+
+
+# ============================================================
+# LTE/5G SECTOR PARAMETER VERIFICATION — confirmed CIQ column mapping from the design
+# conversation, cross-checked against real WAL94133 data. Compares Post-checks' actual
+# on-air values against the CIQ's intended target values, per cell.
+# ============================================================
+
+_LTE_CELL_ROW_RE = re.compile(
+    r'(\S+) (LOCKED|UNLOCKED) (\d+ \S+) (BARRED|UNBARRED) (\d+) (\d+) (\d+) '
+    r'(ENABLED|DISABLED) (\d+) (true|false) (\S+) (\d+) (\d+)')
+
+
+def extract_lte_cell_status(post_text):
+    """Parses the real 'LTE FDD Cell Status Information' table. Confirmed real header:
+    'Cells adminState availabilityStatus cellBarred dlChannelBandwidth earfcndl earfcnul
+    OpState PCI PLMNStatus sectorCarrierRef tac ulChannelBandwidth' — availabilityStatus
+    is a two-token value (e.g. '3 OFF_LINE'), confirmed by column-count cross-check
+    against real data. Returns {cell: {field: value}}."""
+    out = {}
+    for m in _LTE_CELL_ROW_RE.finditer(post_text or ""):
+        (cell, _admin, _avail, _barred, dlbw, earfcndl, earfcnul,
+         _opstate, pci, _plmn, sector, tac, ulbw) = m.groups()
+        out[cell] = {
+            "dlChannelBandwidth": dlbw, "earfcndl": earfcndl, "earfcnul": earfcnul,
+            "PCI": pci, "sectorCarrierRef": sector, "tac": tac, "ulChannelBandwidth": ulbw,
+        }
+    return out
+
+
+def lte_sector_param_warnings(ciq_wb, mm_objs, post_text):
+    """Confirmed CIQ mapping (cross-checked against real data, corrected from the
+    original ask: PCI compares against CIQ's own PCI column, not cellId):
+    dlChannelBandwidth->dlChannelBandwidth, earfcndl->earfcnDl, earfcnul->earfcnUl,
+    PCI->PCI, sectorCarrierRef->sectorId, ulChannelBandwidth->ulChannelBandwidth (all in
+    'eUtran Parameters'); tac->tac (in 'eNB Info', matched via eNBId, same value for
+    every cell under that eNB). Returns list of warning texts, one per mismatched field."""
+    warnings = []
+    if not post_text or "eUtran Parameters" not in ciq_wb.sheetnames:
+        return warnings
+    post_cells = extract_lte_cell_status(post_text)
+    if not post_cells:
+        return warnings
+
+    ciq_rows = {r.get("EutranCellFDDId"): r for r in qx.sheet_objs(ciq_wb["eUtran Parameters"])
+                if r.get("EutranCellFDDId")}
+    field_map = [
+        ("dlChannelBandwidth", "dlChannelBandwidth"), ("earfcndl", "earfcnDl"),
+        ("earfcnul", "earfcnUl"), ("PCI", "PCI"), ("sectorCarrierRef", "sectorId"),
+        ("ulChannelBandwidth", "ulChannelBandwidth"),
+    ]
+    for cell, post_vals in post_cells.items():
+        ciq_row = ciq_rows.get(cell)
+        if not ciq_row:
+            continue
+        for post_key, ciq_key in field_map:
+            post_val = str(post_vals.get(post_key, "")).strip()
+            ciq_val = str(ciq_row.get(ciq_key, "")).strip()
+            if ciq_val and post_val:
+                ciq_parts = [p.strip() for p in ciq_val.split("/")]
+                if post_val not in ciq_parts:
+                    warnings.append(f"{post_key} mismatch on {cell}: Post-checks={post_val}, CIQ={ciq_val}.")
+
+    # tac — matched via eNBId, same value expected for every cell under that eNB.
+    if "eNB Info" in ciq_wb.sheetnames:
+        enb_tac = {r.get("eNBId"): r.get("tac") for r in qx.sheet_objs(ciq_wb["eNB Info"]) if r.get("eNBId")}
+        eutran_rows = qx.sheet_objs(ciq_wb["eUtran Parameters"])
+        cell_to_enbid = {r.get("EutranCellFDDId"): r.get("eNBId") for r in eutran_rows if r.get("EutranCellFDDId")}
+        checked_enbids = set()
+        for cell, post_vals in post_cells.items():
+            enbid = cell_to_enbid.get(cell)
+            if not enbid or enbid in checked_enbids:
+                continue
+            checked_enbids.add(enbid)
+            ciq_tac = str(enb_tac.get(enbid, "")).strip()
+            post_tac = str(post_vals.get("tac", "")).strip()
+            if ciq_tac and post_tac and post_tac != ciq_tac:
+                warnings.append(f"tac mismatch on eNBId {enbid}: Post-checks={post_tac}, CIQ={ciq_tac}.")
+    return warnings
+
+
+def extract_5g_cell_du_status(post_text):
+    """Parses '5G NR Cell DU Status' table. Confirmed real complication: nCI is
+    sometimes empty (variable-length row), so pure positional splitting is unreliable —
+    uses the fact that nRSectorCarrierRef always equals the cell name itself as an
+    anchor, confirmed against real data (both cellLocalId and nRPCI verified to match
+    CIQ exactly with this approach). Returns {cell: {field: value}}."""
+    out = {}
+    for line in (post_text or "").splitlines():
+        tokens = line.split()
+        if len(tokens) < 10 or tokens[1] not in ("LOCKED", "UNLOCKED"):
+            continue
+        cell = tokens[0]
+        try:
+            anchor_idx = tokens.index(cell, 1)
+        except ValueError:
+            continue
+        before = tokens[1:anchor_idx]
+        after = tokens[anchor_idx + 1:]
+        if len(before) < 7 or len(after) < 3:
+            continue
+        local_id, cell_range = before[2], before[3]
+        nrpci = before[-1]
+        nrtac = after[0]
+        out[cell] = {"cellLocalId": local_id, "cellRange": cell_range, "nRPCI": nrpci, "nRTAC": nrtac}
+    return out
+
+
+def extract_5g_sector_carrier(post_text):
+    """Parses '5G NR Sector Carrier' table. Confirmed real header:
+    'nrSectorCarrier adminState arfcnDL arfcnUL bSChannelBwDL bSChannelBwUL
+    configuredMaxTxPower opState txDirection' — fixed structure, no variable-length
+    fields. Returns {cell: {field: value}}."""
+    out = {}
+    pattern = re.compile(
+        r'(\S+) (LOCKED|UNLOCKED) (\d+) (\d+) (\d+) (\d+) (\d+) (ENABLED|DISABLED) (\S+)')
+    for m in pattern.finditer(post_text or ""):
+        cell, _admin, arfcndl, arfcnul, bwdl, bwul, maxtxpower, _opstate, _txdir = m.groups()
+        out[cell] = {
+            "arfcnDL": arfcndl, "arfcnUL": arfcnul, "bSChannelBwDL": bwdl,
+            "bSChannelBwUL": bwul, "configuredMaxTxPower": maxtxpower,
+        }
+    return out
+
+
+def extract_ssb_frequency(post_text):
+    """Parses the real 'NRCellDU={cell} ssbFrequency {value}' lines. Returns
+    {cell: ssbFrequency}."""
+    out = {}
+    for m in re.finditer(r'NRCellDU=(\S+) ssbFrequency (\d+)', post_text or ""):
+        cell, val = m.groups()
+        out[cell] = val
+    return out
+
+
+def extract_5g_cell_cu_status(post_text):
+    """Parses '5G NR Cell CU Status' table — confirmed genuinely separate real table
+    from '5G NR Cell DU Status', with its own cellLocalId that should independently
+    match the CIQ (both CU and DU are checked, since either could diverge on its own).
+    Confirmed real header: 'MO cellLocalId cellState nCI serviceState' — cellState and
+    serviceState are confirmed blank in the real data, so bounded extraction between the
+    section's own header and the next section header ('5G NR Sector Carrier') is used
+    for safety, rather than a generic file-wide regex. Returns {cell: cellLocalId}."""
+    out = {}
+    section_match = re.search(
+        r'5G NR Cell CU Status\nMO cellLocalId cellState nCI serviceState\n(.*?)\n5G NR Sector Carrier',
+        post_text or "", re.DOTALL)
+    if not section_match:
+        return out
+    for m in re.finditer(r'(\S+) (\d+) (\d+)', section_match.group(1)):
+        cell, local_id, _nci = m.groups()
+        out[cell] = local_id
+    return out
+
+
+def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text):
+    """Confirmed CIQ mapping: cellLocalId, CellRange, nRPCI, arfcnDL, arfcnUL,
+    bSChannelBwDL, bSChannelBwUL, configuredMaxTxPower, ssbFrequency all compared
+    directly against '5G Info' (matched by NRCellDU); nrTAC compared against 'NR_SA'
+    (matched by node name, same value expected for every cell on that node — same
+    per-node pattern as LTE's tac/eNBId check)."""
+    warnings = []
+    if not post_text or "5G Info" not in ciq_wb.sheetnames:
+        return warnings
+
+    cell_du = extract_5g_cell_du_status(post_text)
+    cell_cu = extract_5g_cell_cu_status(post_text)
+    sector_carrier = extract_5g_sector_carrier(post_text)
+    ssb_freq = extract_ssb_frequency(post_text)
+    if not cell_du:
+        return warnings
+
+    ciq_rows = {r.get("NRCellDU"): r for r in qx.sheet_objs(ciq_wb["5G Info"]) if r.get("NRCellDU")}
+
+    # cellLocalId — confirmed checked independently from BOTH the CU Status and DU
+    # Status tables, since either could diverge from the CIQ on its own.
+    for cell, cu_local_id in cell_cu.items():
+        ciq_row = ciq_rows.get(cell)
+        if not ciq_row:
+            continue
+        ciq_val = str(ciq_row.get("cellLocalId", "")).strip()
+        if ciq_val and cu_local_id.strip() not in [p.strip() for p in ciq_val.split("/")]:
+            warnings.append(f"cellLocalId mismatch on {cell} (5G NR Cell CU Status): Post-checks={cu_local_id}, CIQ={ciq_val}.")
+
+    for cell, post_vals in cell_du.items():
+        ciq_row = ciq_rows.get(cell)
+        if not ciq_row:
+            continue
+        combined = dict(post_vals)
+        combined.update(sector_carrier.get(cell, {}))
+        if cell in ssb_freq:
+            combined["ssbFrequency"] = ssb_freq[cell]
+
+        field_map = [
+            ("cellLocalId", "cellLocalId"), ("cellRange", "CellRange"), ("nRPCI", "nRPCI"),
+            ("arfcnDL", "arfcnDL"), ("arfcnUL", "arfcnUL"), ("bSChannelBwDL", "bSChannelBwDL"),
+            ("bSChannelBwUL", "bSChannelBwUL"), ("configuredMaxTxPower", "configuredMaxTxPower"),
+            ("ssbFrequency", "ssbFrequency"),
+        ]
+        for post_key, ciq_key in field_map:
+            post_val = str(combined.get(post_key, "")).strip()
+            ciq_val = str(ciq_row.get(ciq_key, "")).strip()
+            if not ciq_val or not post_val:
+                continue
+            ciq_parts = [p.strip() for p in ciq_val.split("/")]
+            if post_val not in ciq_parts:
+                source_label = " (5G NR Cell DU Status)" if post_key == "cellLocalId" else ""
+                warnings.append(f"{post_key} mismatch on {cell}{source_label}: Post-checks={post_val}, CIQ={ciq_val}.")
+
+    # nrTAC — matched via node name in NR_SA, same value expected for every cell on that node.
+    if "NR_SA" in ciq_wb.sheetnames:
+        nrsa_tac = {r.get("Node Name"): r.get("nrTAC") for r in qx.sheet_objs(ciq_wb["NR_SA"]) if r.get("Node Name")}
+        checked_nodes = set()
+        for cell, post_vals in cell_du.items():
+            node = cell.rsplit("_N", 1)[0] if "_N" in cell else None
+            if not node or node in checked_nodes:
+                continue
+            checked_nodes.add(node)
+            ciq_tac = str(nrsa_tac.get(node, "")).strip()
+            post_tac = str(post_vals.get("nRTAC", "")).strip()
+            if ciq_tac and post_tac and post_tac != ciq_tac:
+                warnings.append(f"nRTAC mismatch on node {node}: Post-checks={post_tac}, CIQ={ciq_tac}.")
+    return warnings
+
+
+def sctp_status_warnings(post_text):
+    """Confirmed check: every SCTP endpoint should be ENABLED. Confirmed real format:
+    '{Node} Transport=1,SctpEndpoint={endpoint} {ENABLED|DISABLED}'. Fires one warning
+    per disabled endpoint. Confirmed exact wording:
+    'Transport=1,SctpEndpoint={endpoint} SCTP is disabled.'"""
+    warnings = []
+    if not post_text:
+        return warnings
+    pattern = re.compile(r'(\S+) Transport=1,SctpEndpoint=(\S+) (ENABLED|DISABLED)')
+    for m in pattern.finditer(post_text):
+        _node, endpoint, state = m.groups()
+        if state == "DISABLED":
+            warnings.append(f"Transport=1,SctpEndpoint={endpoint} SCTP is disabled.")
+    return warnings
+
+
+def digital_tilt_warnings(ciq_wb, mm_objs, post_text, classification):
+    """Confirmed check: DigitalTilt in Post-checks (the 'usedDigitalTilt' value — the
+    'digitalTilt' field itself is confirmed blank/not printed in the real data) must
+    match CIQ's 'Electrical Tilt' column, for CBAND/DOD sectors only. Confirmed real
+    format: 'NRSectorCarrier={sector},CommonBeamforming={n} {usedDigitalTilt}'. Matched
+    to CIQ via the NRSectorCarrier column. Only checks sectors whose band is CBAND or
+    DOD/DOD_BWE (confirmed via classification['added'] + band_label)."""
+    warnings = []
+    if not post_text or "5G Info" not in ciq_wb.sheetnames:
+        return warnings
+
+    # Confirmed real Cband/DOD sectors on this site, from classification (already band-labeled).
+    cband_dod_cells = set()
+    for cells in classification.get("added", {}).values():
+        for c in cells:
+            label, _sector = qx.band_label(c)
+            if label in ("CBAND", "DOD", "DOD_BWE"):
+                cband_dod_cells.add(c)
+    if not cband_dod_cells:
+        return warnings
+
+    post_tilt = {}
+    for m in re.finditer(r'NRSectorCarrier=(\S+?),CommonBeamforming=\d+ (\d+)', post_text):
+        sector, used_tilt = m.groups()
+        post_tilt[sector] = used_tilt
+
+    ciq_rows = {r.get("NRSectorCarrier"): r for r in qx.sheet_objs(ciq_wb["5G Info"]) if r.get("NRSectorCarrier")}
+
+    for sector in cband_dod_cells:
+        if sector not in post_tilt or sector not in ciq_rows:
+            continue
+        post_val = post_tilt[sector].strip()
+        ciq_val = str(ciq_rows[sector].get("Electrical Tilt", "")).strip()
+        if ciq_val and post_val != ciq_val:
+            warnings.append(f"DigitalTilt mismatch on {sector}: Post-checks={post_val}, CIQ={ciq_val}.")
+    return warnings
