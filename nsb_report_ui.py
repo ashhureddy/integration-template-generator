@@ -321,6 +321,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             psap_sched_id = st.text_input("\U0001F4DD PSAP Schedule ID (if PSAP applies)", key="nsb_psap_sched")
             if lte_bands_all:
                 psap_line = f"PSAP test/Speedtest/VoLTE voice calltest: {'/'.join(lte_bands_all)}"
+                if psap_sched_id.strip():
+                    psap_line += f" (PSAP Schedule ID: {psap_sched_id.strip()})"
                 speed_lte_line = f"Speedtest/VoLTE voice calltest: {'/'.join(lte_bands_all)}"
             if fiveg_bands_all:
                 speed_5g_line = f"Speed test: {'/'.join(fiveg_bands_all)}"
@@ -665,7 +667,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw(NSB_ROW_MAP["gps_installation"]["completed"][0], gps_completed_line,
                 [(3, "|".join(enabled_nodes)), (5, gtype)] if gps_completed_line else None)
             _rw(NSB_ROW_MAP["lkf_installation"]["completed"][0], lkf_completed, [(3, lkf_completed)] if lkf_completed else None)
-            _rw(NSB_ROW_MAP["psap_speedtest"]["completed"][0], psap_line, [(3, "/".join(lte_bands_all))] if psap_line else None)
+            _rw(NSB_ROW_MAP["psap_speedtest"]["completed"][0], psap_line,
+                [(3, "/".join(lte_bands_all))] + ([(4, psap_sched_id.strip())] if psap_sched_id.strip() else []) if psap_line else None)
             _rw(NSB_ROW_MAP["speedtest_lte"]["completed"][0], speed_lte_line, [(3, "/".join(lte_bands_all))] if speed_lte_line else None)
             _rw(NSB_ROW_MAP["speed_test_5g"]["completed"][0], speed_5g_line, [(3, "/".join(fiveg_bands_all))] if speed_5g_line else None)
             _rw(NSB_ROW_MAP["calltest_fnet"]["completed"][0], False)
