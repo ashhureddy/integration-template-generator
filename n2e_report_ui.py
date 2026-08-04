@@ -283,7 +283,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         dss_completed, dss_pending = None, None
         dss_pending_bands_combined = set()  # confirmed fix: tracked directly, not parsed back out of display text later
         if dss_line:
-            dss_all_bands = set(dss_line.split("\t")[1].split("/")) if "\t" in dss_line else set()
+            dss_all_bands = set(dss_line.split("\t")[1].split(" & ")) if "\t" in dss_line else set()
             n2e_scripted_locked = mcl.scripted_locked_bands(ciq_wb)
             n2e_dss_calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
             n2e_dss_regional_market = None
@@ -297,13 +297,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 with st.container(border=True):
                     st.markdown("**DSS Activation**")
                     if auto_pending_bands:
-                        auto_bands_fmt = "/".join(mcl.sort_bands_lte_first(auto_pending_bands))
+                        auto_bands_fmt = " & ".join(mcl.sort_bands_lte_first(auto_pending_bands))
                         dss_pending_auto = f"DSS Activation: {auto_bands_fmt} (AT&T)"
                         st.caption(f"\u26a0\ufe0f Scripted/locked \u2014 goes directly to Pending: {dss_pending_auto}")
                         dss_pending = dss_pending_auto
                         dss_pending_bands_combined |= auto_pending_bands
                     if user_choice_bands:
-                        user_bands_fmt = "/".join(mcl.sort_bands_lte_first(user_choice_bands))
+                        user_bands_fmt = " & ".join(mcl.sort_bands_lte_first(user_choice_bands))
                         st.caption(f"Remaining band(s) \u2014 pick Completed or Pending: {user_bands_fmt}")
                         dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"], key="n2e_dss")
                         if dss_choice == "Completed":
@@ -807,7 +807,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw_simple(N2E_ROW_MAP["on_site_nokia_cutover"]["pending"][0], True)  # no value column, just checkbox + template's own fixed "(Tower Crew)"
             _rw_simple(N2E_ROW_MAP["controller_integration"]["pending"][0],
                        cascade_fires and controller_line, controller_id)
-            dss_p_bands = "/".join(mcl.sort_bands_lte_first(dss_pending_bands_combined)) if dss_pending_bands_combined else None
+            dss_p_bands = " & ".join(mcl.sort_bands_lte_first(dss_pending_bands_combined)) if dss_pending_bands_combined else None
             _rw_simple(N2E_ROW_MAP["dss_activation"]["pending"][0], dss_pending, dss_p_bands)
             ngs_p_bands = ngs_line.split("\t")[1] if ngs_pending and ngs_line and "\t" in ngs_line else None
             ngs_p_node = ngs_line.split("\t")[2] if ngs_pending and ngs_line and ngs_line.count("\t") >= 2 else None
