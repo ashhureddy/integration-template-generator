@@ -1862,15 +1862,27 @@ def scripted_locked_bands_note(ciq_wb):
 def split_dss_bands_by_scripted_locked(dss_bands, scripted_locked_bands, market):
     """Confirmed rule, applies across MCA/N2E/NSB: DSS bands that are ALSO scripted and
     locked (configuredMaxTxPower=5) go DIRECTLY to Pending with stakeholder AT&T,
-    bypassing the normal Completed/Pending user choice — EXCEPT in NTX market, where
-    those overlapping bands aren't reported for DSS at all. Any DSS bands that DON'T
-    overlap with the scripted/locked set still go through the normal user choice.
-    Confirmed real example: DSS on 5G_AWS|5G_PCS|5G_850, with 5G_AWS|5G_PCS scripted and
-    locked -> those two go straight to Pending/AT&T (or excluded in NTX), while 5G_850
-    stays as a user choice.
-    Returns (auto_pending_bands: set, user_choice_bands: set)."""
-    overlap = set(dss_bands) & set(scripted_locked_bands)
-    remainder = set(dss_bands) - overlap
+    bypassing the normal Completed/Pending user choice. Any DSS bands that DON'T overlap
+    with the scripted/locked set still go through the normal user choice.
+    Confirmed NTX rule: DSS is excluded from the report ENTIRELY in NTX market —
+    regardless of scripted/locked status, nothing gets reported at all (not just the
+    overlapping portion).
+    Confirmed real bug fix: each entry in dss_bands is actually a 5G|LTE PAIR (e.g.
+    '5G_PCS_1|PCS_1', confirmed via app.py's generate_dss docstring and
+    dss_activation_labels.append(f"{nr_label}|{lte_label}")), not a single band — so the
+    overlap check must look at whether EITHER band inside the pair is scripted/locked,
+    not compare the whole pair-string directly (which could never match a set of
+    individual band names). The pair itself stays intact in the returned sets, since DSS
+    is always reported as a pair, never split apart.
+    Returns (auto_pending_bands: set, user_choice_bands: set) — each still containing
+    whole pair-strings like '5G_PCS_1|PCS_1'."""
     if market == "NTX":
-        return set(), remainder
+        return set(), set()
+    overlap, remainder = set(), set()
+    for pair in dss_bands:
+        constituent_bands = set(pair.split("|"))
+        if constituent_bands & set(scripted_locked_bands):
+            overlap.add(pair)
+        else:
+            remainder.add(pair)
     return overlap, remainder
