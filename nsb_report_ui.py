@@ -118,13 +118,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
     with st.container(border=True):
         st.markdown("**Subject**")
-        c = st.columns(6)
+        c = st.columns(7)
         with c[0]: st.markdown(f"MIC\n\n**MIC**")
         with c[1]: market = st.text_input("\U0001F4DD Market", key="nsb_market", placeholder="MNS/TILLMAN/AT&T")
         with c[2]: status = st.text_input("\U0001F4DD Status", key="nsb_status", placeholder="IX-STF/IX-ATP")
         with c[3]: site_name = st.text_input("\U0001F4DD Site Name", key="nsb_site_name")
         with c[4]: st.markdown(f"FA CODE\n\n**{fa_code or '(not found)'}**")
         with c[5]: st.markdown(f"Site ID's\n\n**{site_ids}**")
+        with c[6]: st.markdown(f"NSB\n\n**NSB**")
 
     with st.container(border=True):
         st.markdown("**IWM Details**")
@@ -552,7 +553,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.caption(f"Auto-added: {alarm_notes_line}")
 
     # ==================== Report text + xlsm ====================
-    report_lines = ["Subject", f"MIC | {market} | {status} | {site_name} | {fa_code} | {site_ids}",
+    report_lines = ["Subject", f"MIC | {market} | {status} | {site_name} | {fa_code} | {site_ids} | NSB",
                     "", "IWM Details", iwm_details,
                     "", "Configuration", "Pre Configuration : N/A", f"Post Configuration : {post_line}",
                     f"6610 Controller : {controller_id or ''}"]
@@ -583,7 +584,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.warning(f"NSB template not found at {NSB_TEMPLATE_PATH}")
         else:
             row_writes = []
-            row_writes.append((NSB_ROW_MAP["subject"], True, [(2, "MIC"), (3, market), (4, status), (5, site_name), (6, fa_code), (7, site_ids)]))
+            row_writes.append((NSB_ROW_MAP["subject"], True, [(2, "MIC"), (3, market), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, "NSB")]))
             row_writes.append((NSB_ROW_MAP["iwm_details"], bool(iwm_details.strip()), [(3, iwm_details)]))
             row_writes.append((NSB_ROW_MAP["pre_configuration"], True, [(3, "N/A")]))
             row_writes.append((NSB_ROW_MAP["current_configuration"], bool(current_config.strip()), [(3, current_config)] if current_config.strip() else []))
