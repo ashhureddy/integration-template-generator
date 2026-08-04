@@ -484,20 +484,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_pending.append(idl_pending)
             st.caption(idl_pending)
 
-        # SFP Installation — manual, split by BBU end / Radio end.
-        sfp_bbu_manual = st.text_area("\U0001F4DD SFP Installation \u2014 BBU end (manual: SFP Type, Sector Details)", key="nsb_sfp_bbu_manual", height=60)
-        if sfp_bbu_manual.strip():
-            choices_pending.append(f"SFP Installation: {sfp_bbu_manual} (BBU end) (MIC PM)")
-        sfp_radio_manual = st.text_area("\U0001F4DD SFP Installation \u2014 Radio end (manual: SFP Type, Sector Details)", key="nsb_sfp_radio_manual", height=60)
-        if sfp_radio_manual.strip():
-            choices_pending.append(f"SFP Installation: {sfp_radio_manual} (Radio end) (Tower Crew)")
-
-        rilinks_manual = st.text_input("\U0001F4DD Rilinks Scripting (Node ID, manual)", key="nsb_rilinks")
-        if rilinks_manual.strip():
-            choices_pending.append(f"Rilinks Scripting: {rilinks_manual} (MIC PM)")
-        siad_manual = st.text_input("\U0001F4DD SIAD provisioning (Node ID, manual)", key="nsb_siad")
-        if siad_manual.strip():
-            choices_pending.append(f"SIAD provisioning: {siad_manual} (AT&T)")
+        # Confirmed removed entirely: SFP Installation (BBU/Radio end), Rilinks
+        # Scripting, SIAD provisioning, Link failure, SFP Not Present, Mo Inconsistent
+        # configuration alarm, Fiberloss (Data Link_1/2), High/Low RSSI, High/Low VSWR,
+        # VSWR overthreshold — all purely manual with no auto-detection at all, so the
+        # engineer fills these in directly in the downloaded macro instead of duplicating
+        # entry here.
 
         if has_6673:
             switch_id = sidehaul_rows[0]["switch_id"] if sidehaul_rows else ""
@@ -505,39 +497,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             l2 = f"6673 Port Configuration in ENM: {switch_id} (AT&T)"
             choices_pending += [l1, l2]
             st.caption(l1); st.caption(l2)
-
-        link_manual = st.text_input("\U0001F4DD Link failure (Radio/Node ID, manual)", key="nsb_link_failure")
-        if link_manual.strip():
-            choices_pending.append(f"Link failure: {link_manual} (Tower Crew)")
-        sfp_np_manual = st.text_input("\U0001F4DD SFP Not Present (Radio/Node ID, manual)", key="nsb_sfp_np")
-        if sfp_np_manual.strip():
-            choices_pending.append(f"SFP Not Present: {sfp_np_manual} (Tower Crew)")
-
-        # Confirmed manual-only, Pending-only alarm/link items — no auto-detection.
-        mo_inc_manual = st.text_input("\U0001F4DD Mo Inconsistent configuration alarm (manual)", key="nsb_mo_inc")
-        if mo_inc_manual.strip():
-            choices_pending.append(f"Mo Inconsistent configuration alarm: {mo_inc_manual} (Tower Crew)")
-        fiberloss1_manual = st.text_input("\U0001F4DD Fiberloss \u2014 Data Link_1 (manual)", key="nsb_fiberloss1")
-        if fiberloss1_manual.strip():
-            choices_pending.append(f"Fiberloss: {fiberloss1_manual} (Data Link_1) (Tower Crew)")
-        fiberloss2_manual = st.text_input("\U0001F4DD Fiberloss \u2014 Data Link_2 (manual)", key="nsb_fiberloss2")
-        if fiberloss2_manual.strip():
-            choices_pending.append(f"Fiberloss: {fiberloss2_manual} (Data Link_2) (Tower Crew)")
-        high_rssi_manual = st.text_input("\U0001F4DD High RSSI (manual)", key="nsb_high_rssi")
-        if high_rssi_manual.strip():
-            choices_pending.append(f"High RSSI: {high_rssi_manual} (Tower Crew)")
-        low_rssi_manual = st.text_input("\U0001F4DD Low RSSI (manual)", key="nsb_low_rssi")
-        if low_rssi_manual.strip():
-            choices_pending.append(f"Low RSSI: {low_rssi_manual} (Tower Crew)")
-        high_vswr_manual = st.text_input("\U0001F4DD High VSWR (manual)", key="nsb_high_vswr")
-        if high_vswr_manual.strip():
-            choices_pending.append(f"High VSWR: {high_vswr_manual} (Tower Crew)")
-        low_vswr_manual = st.text_input("\U0001F4DD Low VSWR (manual)", key="nsb_low_vswr")
-        if low_vswr_manual.strip():
-            choices_pending.append(f"Low VSWR: {low_vswr_manual} (Tower Crew)")
-        vswr_over_manual = st.text_input("\U0001F4DD VSWR overthreshold alarm on (manual)", key="nsb_vswr_over")
-        if vswr_over_manual.strip():
-            choices_pending.append(f"VSWR overthreshold alarm on: {vswr_over_manual} (Tower Crew)")
 
         additional_pending = st.text_area("\U0001F4DD Enter any additional pending information",
                                            key="nsb_add_pending", height=80)
@@ -728,8 +687,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw(NSB_ROW_MAP["speedtest_lte"]["pending"][0], False)
             _rw(NSB_ROW_MAP["speed_test_5g"]["pending"][0], False)
             _rw(NSB_ROW_MAP["calltest_fnet"]["pending"][0], False)
-            _rw(NSB_ROW_MAP["sfp_installation_bbu"]["pending"][0], sfp_bbu_manual.strip(), [(3, sfp_bbu_manual)] if sfp_bbu_manual.strip() else None)
-            _rw(NSB_ROW_MAP["sfp_installation_radio"]["pending"][0], sfp_radio_manual.strip(), [(3, sfp_radio_manual)] if sfp_radio_manual.strip() else None)
+            # Confirmed removed: SFP Installation, Rilinks Scripting, SIAD provisioning,
+            # Link failure, SFP Not Present, Mo Inconsistent config alarm, Fiberloss,
+            # High/Low RSSI, High/Low VSWR, VSWR overthreshold — all purely manual, no
+            # auto-detection, left unchecked here for the engineer to fill in directly
+            # in the downloaded macro.
+            _rw(NSB_ROW_MAP["sfp_installation_bbu"]["pending"][0], False)
+            _rw(NSB_ROW_MAP["sfp_installation_radio"]["pending"][0], False)
             for row_num in NSB_ROW_MAP["transport_sfp"]["pending"]:
                 _rw(row_num, False)
             _rw(NSB_ROW_MAP["ret_configuration"]["pending"][0], ret_pending)
@@ -738,26 +702,26 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw(NSB_ROW_MAP["sau_connections"]["pending"][0], cascade_fires or sau_pending, [(3, controller_id)] if (cascade_fires or sau_pending) else None)
             _rw(NSB_ROW_MAP["sup_connections"]["pending"][0], sup_pending_lines, [(3, "|".join(s.split(":")[-1].strip() for s in sup_pending_lines))] if sup_pending_lines else None)
             _rw(NSB_ROW_MAP["xmu_installation"]["pending"][0], xmu_pending_lines, [(3, "|".join(s.split(":")[-1].strip() for s in xmu_pending_lines))] if xmu_pending_lines else None)
-            _rw(NSB_ROW_MAP["rilinks_scripting"]["pending"][0], rilinks_manual.strip(), [(3, rilinks_manual)] if rilinks_manual.strip() else None)
+            _rw(NSB_ROW_MAP["rilinks_scripting"]["pending"][0], False)
             _rw(NSB_ROW_MAP["idl_connections"]["pending"][0], idl_pending)
             _rw(NSB_ROW_MAP["script_load_6673"]["pending"][0], False)
-            _rw(NSB_ROW_MAP["siad_provisioning"]["pending"][0], siad_manual.strip(), [(3, siad_manual)] if siad_manual.strip() else None)
+            _rw(NSB_ROW_MAP["siad_provisioning"]["pending"][0], False)
             _rw(NSB_ROW_MAP["area_test"]["pending"][0], cascade_fires or area_pending,
                 [(3, "|".join(new_nodes)), (4, "Failed")] if area_pending else None)
             _rw(NSB_ROW_MAP["external_alarm_testing"]["pending"][0], cascade_fires or testing_pending, [(3, controller_id)] if (cascade_fires or testing_pending) else None)
             _rw(NSB_ROW_MAP["config_6673"]["pending"][0], has_6673, [(3, sidehaul_rows[0]["switch_id"])] if has_6673 and sidehaul_rows else None)
             _rw(NSB_ROW_MAP["port_config_6673_enm"]["pending"][0], has_6673, [(4, sidehaul_rows[0]["switch_id"])] if has_6673 and sidehaul_rows else None)
-            _rw(NSB_ROW_MAP["link_failure"]["pending"][0], link_manual.strip(), [(3, link_manual)] if link_manual.strip() else None)
-            _rw(NSB_ROW_MAP["sfp_not_present"]["pending"][0], sfp_np_manual.strip(), [(3, sfp_np_manual)] if sfp_np_manual.strip() else None)
-            _rw(NSB_ROW_MAP["mo_inconsistent_config_alarm"]["pending"][0], mo_inc_manual.strip(), [(3, mo_inc_manual)] if mo_inc_manual.strip() else None)
+            _rw(NSB_ROW_MAP["link_failure"]["pending"][0], False)
+            _rw(NSB_ROW_MAP["sfp_not_present"]["pending"][0], False)
+            _rw(NSB_ROW_MAP["mo_inconsistent_config_alarm"]["pending"][0], False)
             fiberloss_rows = NSB_ROW_MAP["fiberloss"]["pending"]
-            _rw(fiberloss_rows[0], fiberloss1_manual.strip(), [(3, fiberloss1_manual)] if fiberloss1_manual.strip() else None)
-            _rw(fiberloss_rows[1], fiberloss2_manual.strip(), [(3, fiberloss2_manual)] if fiberloss2_manual.strip() else None)
-            _rw(NSB_ROW_MAP["high_rssi"]["pending"][0], high_rssi_manual.strip(), [(3, high_rssi_manual)] if high_rssi_manual.strip() else None)
-            _rw(NSB_ROW_MAP["low_rssi"]["pending"][0], low_rssi_manual.strip(), [(3, low_rssi_manual)] if low_rssi_manual.strip() else None)
-            _rw(NSB_ROW_MAP["high_vswr"]["pending"][0], high_vswr_manual.strip(), [(3, high_vswr_manual)] if high_vswr_manual.strip() else None)
-            _rw(NSB_ROW_MAP["low_vswr"]["pending"][0], low_vswr_manual.strip(), [(3, low_vswr_manual)] if low_vswr_manual.strip() else None)
-            _rw(NSB_ROW_MAP["vswr_overthreshold"]["pending"][0], vswr_over_manual.strip(), [(3, vswr_over_manual)] if vswr_over_manual.strip() else None)
+            _rw(fiberloss_rows[0], False)
+            _rw(fiberloss_rows[1], False)
+            _rw(NSB_ROW_MAP["high_rssi"]["pending"][0], False)
+            _rw(NSB_ROW_MAP["low_rssi"]["pending"][0], False)
+            _rw(NSB_ROW_MAP["high_vswr"]["pending"][0], False)
+            _rw(NSB_ROW_MAP["low_vswr"]["pending"][0], False)
+            _rw(NSB_ROW_MAP["vswr_overthreshold"]["pending"][0], False)
 
             pending_buffer_lines = [additional_pending] if additional_pending.strip() else []
             for i, row_num in enumerate(NSB_ROW_MAP["additional_pending"]):
