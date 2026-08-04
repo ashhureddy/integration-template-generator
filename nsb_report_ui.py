@@ -133,7 +133,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
     with st.container(border=True):
         st.markdown("**Configuration**")
-        st.markdown(f"Pre Configuration : **N/A**")
+        st.markdown(f"Pre Configuration : **NSB**")
         st.markdown(f"Post Configuration : **{post_line}**")
         st.markdown(f"6610 Controller : **{controller_id or '(none detected)'}**")
         current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs, postcheck_text) if postcheck_text else ""
@@ -555,7 +555,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     # ==================== Report text + xlsm ====================
     report_lines = ["Subject", f"MIC | {market} | {status} | {site_name} | {fa_code} | {site_ids} | NSB",
                     "", "IWM Details", iwm_details,
-                    "", "Configuration", "Pre Configuration : N/A", f"Post Configuration : {post_line}",
+                    "", "Configuration", "Pre Configuration : NSB", f"Post Configuration : {post_line}",
                     f"6610 Controller : {controller_id or ''}"]
     if current_config: report_lines.append(f"Current Configuration : {current_config}")
     if wll_node.strip(): report_lines.append(f"WLL node : {wll_node}")
@@ -586,7 +586,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             row_writes = []
             row_writes.append((NSB_ROW_MAP["subject"], True, [(2, "MIC"), (3, market), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, "NSB")]))
             row_writes.append((NSB_ROW_MAP["iwm_details"], bool(iwm_details.strip()), [(3, iwm_details)]))
-            row_writes.append((NSB_ROW_MAP["pre_configuration"], True, [(3, "N/A")]))
+            row_writes.append((NSB_ROW_MAP["pre_configuration"], True, [(3, "NSB")]))
             row_writes.append((NSB_ROW_MAP["current_configuration"], bool(current_config.strip()), [(3, current_config)] if current_config.strip() else []))
             row_writes.append((NSB_ROW_MAP["post_configuration"], True, [(3, post_line)]))
             row_writes.append((NSB_ROW_MAP["wll_node"], bool(wll_node.strip()), [(3, wll_node)] if wll_node.strip() else []))
