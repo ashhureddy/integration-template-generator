@@ -305,32 +305,55 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if lkf_lines_by_section.get("Pending"):
                 lkf_pending = lkf_lines_by_section["Pending"]
 
-        # Call Test — same market-lookup mechanism as MCA, using NSB's own tab.
+        # Call Test — confirmed real fix: previously just dumped every detected band into
+        # PSAP/Speedtest/Speed test unconditionally, never actually consulting the CT
+        # sheet's rules table (which market/scenario combination actually requires which
+        # test). Now reuses mcl.call_test_lines(), the same real function MCA uses.
         calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
         psap_line = speed_lte_line = speed_5g_line = fnet_line = None
-        lte_bands_all, fiveg_bands_all = [], []
         market_val = market
         if calltest_path.exists() and market_val:
             prefix_to_market, calltest_rules = mcl.load_calltest_table(calltest_path, tab_name="NSB")
-            lte_bands_all = sorted({app.band_label(c)[0] for cells in classification.get("added", {}).values()
-                                      for c in cells if app.band_label(c)[0] and not app.band_label(c)[0].startswith("5G_")
-                                      and app.band_label(c)[0] not in ("CBAND", "DOD", "DOD_BWE")})
-            fiveg_bands_all = sorted({app.band_label(c)[0] for cells in classification.get("added", {}).values()
-                                        for c in cells if app.band_label(c)[0] and (app.band_label(c)[0].startswith("5G_")
-                                        or app.band_label(c)[0] in ("CBAND", "DOD", "DOD_BWE"))})
+
+            # NSB confirmed: every cell is "newly added" (no "moved" concept, same as
+            # N2E) — split by tech into the three categories call_test_lines() needs.
+            added_bands_by_tech = {"lte": set(), "5g": set(), "cband_dod": set()}
+            for cells in classification.get("added", {}).values():
+                for c in cells:
+                    label, _sector = app.band_label(c)
+                    if not label:
+                        continue
+                    if label in ("CBAND", "DOD", "DOD_BWE"):
+                        added_bands_by_tech["cband_dod"].add(label)
+                    elif label.startswith("5G_"):
+                        added_bands_by_tech["5g"].add(label)
+                    else:
+                        added_bands_by_tech["lte"].add(label)
+
             psap_sched_id = st.text_input("\U0001F4DD PSAP Schedule ID (if PSAP applies)", key="nsb_psap_sched")
-            if lte_bands_all:
-                psap_line = f"PSAP test/Speedtest/VoLTE voice calltest: {'/'.join(lte_bands_all)}"
-                if psap_sched_id.strip():
-                    psap_line += f" (PSAP Schedule ID: {psap_sched_id.strip()})"
-                speed_lte_line = f"Speedtest/VoLTE voice calltest: {'/'.join(lte_bands_all)}"
-            if fiveg_bands_all:
-                speed_5g_line = f"Speed test: {'/'.join(fiveg_bands_all)}"
-            calltest_checked, _ = _checked_group("Call Test items", [l for l in (psap_line, speed_lte_line, speed_5g_line) if l], "nsb_calltest")
+            ct_lines = mcl.call_test_lines(classification, market_val, calltest_rules,
+                                             set(), added_bands_by_tech, {"lte": set(), "5g": set(), "cband_dod": set()})
+            for l in ct_lines:
+                l_display = l.replace("\t", " ")
+                if l.startswith("PSAP test/Speedtest/VoLTE voice calltest"):
+                    if psap_sched_id.strip():
+                        l_display = l_display.replace("PSAP Schedule ID: ", f"PSAP Schedule ID: {psap_sched_id.strip()}")
+                    psap_line = l_display
+                elif l.startswith("Speedtest/VoLTE voice calltest"):
+                    speed_lte_line = l_display
+                elif l.startswith("Speed test"):
+                    speed_5g_line = l_display
+                elif l.startswith("Calltest with F-NET SIM"):
+                    fnet_line = l_display
+
+            calltest_checked, _ = _checked_group("Call Test items", [l for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line) if l], "nsb_calltest")
+            lte_bands_all = sorted(added_bands_by_tech["lte"])
+            fiveg_bands_all = sorted(added_bands_by_tech["5g"] | added_bands_by_tech["cband_dod"])
             if calltest_checked:
                 if psap_line: choices_completed.append(psap_line)
                 if speed_lte_line: choices_completed.append(speed_lte_line)
                 if speed_5g_line: choices_completed.append(speed_5g_line)
+                if fnet_line: choices_completed.append(fnet_line)
 
         sfp_completed_lines = []
         if new_nodes:
