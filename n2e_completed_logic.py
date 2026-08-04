@@ -112,15 +112,11 @@ def xmu_installation_state(post_text, xmu_present_in_ciq):
 # ============================================================
 
 def sa_conversion_nodes(ciq_wb, mm_objs):
-    return [row.get("Node to be built as") for row in mm_objs
-            if qx.check_sa_conversion(ciq_wb, row.get("Node to be built as"))]
+    return mcl.sa_conversion_nodes(ciq_wb, mm_objs)
 
 
 def sa_conversion_note(sa_nodes):
-    """Confirmed Notes addition when SA Conversion is detected."""
-    if not sa_nodes:
-        return None
-    return "Termpointtoamf is in unlocked state."
+    return mcl.sa_conversion_note(sa_nodes)
 
 
 # ============================================================
