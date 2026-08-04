@@ -444,22 +444,42 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     # ---- DSS Activation: Completed/Pending choice, stakeholder (AT&T/MIC) prompt only if
     # Pending — confirmed real gap, restoring the original spec exactly. No default —
-    # same "require an active pick" pattern used elsewhere. ----
+    # same "require an active pick" pattern used elsewhere. Confirmed new rule: DSS bands
+    # that are ALSO scripted/locked (configuredMaxTxPower=5) go DIRECTLY to Pending with
+    # stakeholder AT&T, bypassing the choice — except in NTX market, where those bands
+    # aren't reported for DSS at all. Remaining bands still go through the normal choice.
     dss_raw_lines = [l for l in scope_lines if l.startswith("DSS Activation")]
     dss_completed_line, dss_pending_line = None, None
+    dss_pending_bands_combined = set()  # confirmed fix: tracked directly, not parsed back out of display text later
     if dss_raw_lines:
+        dss_line = dss_raw_lines[0].replace("\t", " ")
+        dss_all_bands = set(dss_raw_lines[0].split("\t")[1].split("/")) if "\t" in dss_raw_lines[0] else set()
+        mca_scripted_locked = mcl.scripted_locked_bands(ciq_wb)
+        auto_pending_bands, user_choice_bands = mcl.split_dss_bands_by_scripted_locked(
+            dss_all_bands, mca_scripted_locked, market)
+
         with st.container(border=True):
             st.markdown(f"**DSS Activation** \u2014 detected. Pick a status (required):")
-            dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
-                                        key="dss_status", label_visibility="collapsed")
-            dss_line = dss_raw_lines[0].replace("\t", " ")
-            if dss_choice == "Completed":
-                dss_completed_line = dss_line
-            elif dss_choice == "Pending":
-                dss_stakeholder = st.selectbox("Stakeholder", ["\u2014 Select \u2014", "AT&T", "MIC"],
-                                                 key="dss_stakeholder")
-                if dss_stakeholder != "\u2014 Select \u2014":
-                    dss_pending_line = f"{dss_line} ({dss_stakeholder})"
+            if auto_pending_bands:
+                auto_bands_fmt = "/".join(mcl.sort_bands_lte_first(auto_pending_bands))
+                dss_pending_auto = f"DSS Activation: {auto_bands_fmt} (AT&T)"
+                st.caption(f"\u26a0\ufe0f Scripted/locked \u2014 goes directly to Pending: {dss_pending_auto}")
+                dss_pending_line = dss_pending_auto
+                dss_pending_bands_combined |= auto_pending_bands
+            if user_choice_bands:
+                user_bands_fmt = "/".join(mcl.sort_bands_lte_first(user_choice_bands))
+                st.caption(f"Remaining band(s) \u2014 pick Completed or Pending: {user_bands_fmt}")
+                dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                            key="dss_status", label_visibility="collapsed")
+                if dss_choice == "Completed":
+                    dss_completed_line = f"DSS Activation: {user_bands_fmt}"
+                elif dss_choice == "Pending":
+                    dss_stakeholder = st.selectbox("Stakeholder", ["\u2014 Select \u2014", "AT&T", "MIC"],
+                                                     key="dss_stakeholder")
+                    if dss_stakeholder != "\u2014 Select \u2014":
+                        user_pending_line = f"DSS Activation: {user_bands_fmt} ({dss_stakeholder})"
+                        dss_pending_line = (dss_pending_line + " | " + user_pending_line) if dss_pending_line else user_pending_line
+                        dss_pending_bands_combined |= user_choice_bands
 
     # ---- NGS activation: per-pair 3-way choice (Completed/Pending/Pre-Existing), confirmed
     # change from the old auto-Completed-only behavior. No default — same "require an active
@@ -916,7 +936,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
         # DSS Activation (completed=59, pending=122) — restored toggle, confirmed real gap.
         dss_c_bands = dss_completed_line.split("DSS Activation:")[-1].strip() if dss_completed_line else None
-        dss_p_bands = dss_pending_line.split("DSS Activation:")[-1].replace("(AT&T)", "").replace("(MIC)", "").strip() if dss_pending_line else None
+        dss_p_bands = "/".join(mcl.sort_bands_lte_first(dss_pending_bands_combined)) if dss_pending_bands_combined else None
         row_writes.append((59, bool(dss_completed_line), [(3, dss_c_bands)] if dss_c_bands else []))
         row_writes.append((122, bool(dss_pending_line), [(3, dss_p_bands)] if dss_p_bands else []))
 
