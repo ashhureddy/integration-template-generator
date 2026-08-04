@@ -52,7 +52,7 @@ cmedit get ##Site_ID_1##  FeatureState=CXC4012015 featureState
 ** freqDeviationThreshold is aligned with GS for nodes with MSMM
 
 cmedit get ##Site_ID_1##  RadioEquipmentClock.freqDeviationThreshold
-cmedit set ##Site_ID_1##  RadioEquipmentClock freqDeviationThreshold=600
+cmedit set ##Site_ID_1##  RadioEquipmentClock freqDeviationThreshold=5000
 cmedit get ##Site_ID_1##  RadioEquipmentClock.freqDeviationThreshold
 
 ** Ensure that the parameter isSharedWithExternalMe is set to true for all MSMM radios
@@ -71,14 +71,14 @@ cmedit get ##Site_ID_1##  SectorCarrier.configuredMaxTxPower -t
 **Create the MO for NodeGroupSyncMember and its attributes in the Radio Node #1: ##Site_ID_1## 
 ** (For Radios on XMU, use the RiPort which is corresponding to the Splitting group port on BB)
 
-cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_1##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site1##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1## ,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site1##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1## ,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport3_site1##"]
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=NODE_PRIORITY;syncNodePriority=##Priority_Site_1##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site1##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1## ,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site1##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1## ,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport3_site1##"]
 
 
 WHen Only Port 1 link is used: 
-cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_1##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site1##"]
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=NODE_PRIORITY;syncNodePriority=##Priority_Site_1##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site1##"]
 
 WHen Only Port 2 link is used: 
-cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_1##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site1##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1## ,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site1##"]
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=NODE_PRIORITY;syncNodePriority=##Priority_Site_1##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site1##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_1##,ManagedElement=##Site_ID_1## ,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site1##"]
 
 
 ** Deblock the NGS MO after creating it on all the BBs
@@ -152,7 +152,7 @@ cmedit get ##Site_ID_2##  FeatureState=CXC4012015 featureState
 ** freqDeviationThreshold is aligned with GS for nodes with MSMM
 
 cmedit get ##Site_ID_2##  RadioEquipmentClock.freqDeviationThreshold
-cmedit set ##Site_ID_2##  RadioEquipmentClock freqDeviationThreshold=600
+cmedit set ##Site_ID_2##  RadioEquipmentClock freqDeviationThreshold=5000
 cmedit get ##Site_ID_2##  RadioEquipmentClock.freqDeviationThreshold
 
 ** Ensure that the parameter isSharedWithExternalMe is set to true for all MSMM radios
@@ -170,14 +170,14 @@ cmedit get ##Site_ID_2##  SectorCarrier.configuredMaxTxPower -t
 **Create the MO for NodeGroupSyncMember and its attributes in the Radio Node #1: ##Site_ID_2# 
 ** (For Radios on XMU, use the RiPort which is corresponding to the Splitting group port on BB)
 
-cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_2##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2## ,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site2##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site2##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport3_site2##"]
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=NODE_PRIORITY;syncNodePriority=##Priority_Site_2##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2## ,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site2##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site2##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport3_site2##"]
 
 
 WHen Only Port 1 link is used: 
-cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_2##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2## ,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site2##"]
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=NODE_PRIORITY;syncNodePriority=##Priority_Site_2##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2## ,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site2##"]
 
 WHen Only Port 2 link is used: 
-cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=REFERENCE_AND_NODE_PRIORITY;syncNodePriority=##Priority_Site_2##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2## ,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site2##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site2##"]
+cmedit create SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Transport=1,Synchronization=1,RadioEquipmentClock=1,NodeGroupSyncMember=1 NodeGroupSyncMemberid=1;selectionMode=NODE_PRIORITY;syncNodePriority=##Priority_Site_2##;syncRiPortCandidate=["SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2## ,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport1_site2##","SubNetwork=ONRM_ROOT_MO,MeContext=##Site_ID_2##,ManagedElement=##Site_ID_2##,Equipment=1,FieldReplaceableUnit=1,RiPort=##Riport2_site2##"]
 
 
 
