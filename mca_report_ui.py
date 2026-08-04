@@ -260,7 +260,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         post_sync = mcl.extract_sync_status_2(postcheck_text)
         gps_sync_line = mcl.gps_sync_disabled_check(mm_objs, post_sync)
         if gps_sync_line:
-            gps_extra_pending.append(gps_sync_line)
+            gps_extra_pending.append(f"{gps_sync_line} ({mcl.gps_pending_stakeholder(market)})")
 
     # ---- EDP Publish fallback: 6610 present in CIQ but NOT published in EDP -> this
     # replaces the old generic message entirely; 6610 Controller Integration does NOT
