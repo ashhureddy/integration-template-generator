@@ -630,6 +630,21 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         elif cpri_choice == "Pending":
             choices_notes.append("Area prechecks verification for CPRI/SFP check is pending. (Nodes not replicating in the area tool)")
 
+        # SAU enabled on Node/Controller — confirmed universal requirement (every site),
+        # checkbox in Notes. Auto-fills from the existing SAU Connections detection when
+        # available (controller_id, since that detection is controller-based); otherwise
+        # falls back to manual node ID entry.
+        sau_auto_target = controller_id if sau_completed else None
+        sau_notes_checked = st.checkbox("SAU enabled on the: Node or Controller", value=True, key="n2e_sau_notes")
+        if sau_notes_checked:
+            if sau_auto_target:
+                st.caption(f"SAU enabled on the: {sau_auto_target}")
+                choices_notes.append(f"SAU enabled on the: {sau_auto_target}")
+            else:
+                sau_manual_target = st.text_input("\U0001F4DD Node ID or Controller ID", key="n2e_sau_manual")
+                if sau_manual_target.strip():
+                    choices_notes.append(f"SAU enabled on the: {sau_manual_target}")
+
         notes_manual = st.text_area("\U0001F4DD Enter Notes", key="n2e_notes_manual", height=60)
         if notes_manual.strip():
             choices_notes.append(notes_manual)
