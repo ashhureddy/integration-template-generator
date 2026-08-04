@@ -1828,3 +1828,49 @@ def sort_bands_lte_first(bands):
     lte = sorted(b for b in bands if not (b.startswith("5G_") or b in ("CBAND", "DOD", "DOD_BWE")))
     fiveg = sorted(b for b in bands if b.startswith("5G_") or b in ("CBAND", "DOD", "DOD_BWE"))
     return lte + fiveg
+
+
+def scripted_locked_bands(ciq_wb):
+    """Confirmed check: any 5G cell with configuredMaxTxPower=5 in the CIQ means that
+    band is scripted and locked. Returns the raw set of band labels (deduplicated),
+    or an empty set if none match. Used both for the Notes line itself and for the
+    DSS-splitting rule (bands that are scripted/locked go straight to Pending/AT&T)."""
+    if "5G Info" not in ciq_wb.sheetnames:
+        return set()
+    bands = set()
+    for row in qx.sheet_objs(ciq_wb["5G Info"]):
+        if str(row.get("configuredMaxTxPower", "")).strip() == "5":
+            cell = row.get("NRCellDU")
+            if cell:
+                label, _sector = qx.band_label(cell)
+                if label:
+                    bands.add(label)
+    return bands
+
+
+def scripted_locked_bands_note(ciq_wb):
+    """Confirmed exact format: '{Band1} & {Band2} is scripted and Locked.' — band names
+    (deduplicated), not cell names, joined with '&'. Returns the note text, or None if
+    no cells match."""
+    bands = scripted_locked_bands(ciq_wb)
+    if not bands:
+        return None
+    sorted_bands = sort_bands_lte_first(bands)
+    return f"{' & '.join(sorted_bands)} is scripted and Locked."
+
+
+def split_dss_bands_by_scripted_locked(dss_bands, scripted_locked_bands, market):
+    """Confirmed rule, applies across MCA/N2E/NSB: DSS bands that are ALSO scripted and
+    locked (configuredMaxTxPower=5) go DIRECTLY to Pending with stakeholder AT&T,
+    bypassing the normal Completed/Pending user choice — EXCEPT in NTX market, where
+    those overlapping bands aren't reported for DSS at all. Any DSS bands that DON'T
+    overlap with the scripted/locked set still go through the normal user choice.
+    Confirmed real example: DSS on 5G_AWS|5G_PCS|5G_850, with 5G_AWS|5G_PCS scripted and
+    locked -> those two go straight to Pending/AT&T (or excluded in NTX), while 5G_850
+    stays as a user choice.
+    Returns (auto_pending_bands: set, user_choice_bands: set)."""
+    overlap = set(dss_bands) & set(scripted_locked_bands)
+    remainder = set(dss_bands) - overlap
+    if market == "NTX":
+        return set(), remainder
+    return overlap, remainder
