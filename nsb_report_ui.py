@@ -238,7 +238,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         int_pairs = []
         int_lines_display = []
         for node, cells in classification.get("added", {}).items():
-            bands = sorted({app.band_label(c)[0] for c in cells if app.band_label(c)[0]})
+            bands = mcl.sort_bands_lte_first({app.band_label(c)[0] for c in cells if app.band_label(c)[0]})
             if bands:
                 int_pairs.append(("/".join(bands), node))
                 int_lines_display.append(f"Integration: {'/'.join(bands)} {node}")
