@@ -801,8 +801,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             st.caption("Auto-added (Locked-port classification, bucket 3):")
             for l in bucket_notes:
                 st.caption(l)
+        scripted_locked_note = mcl.scripted_locked_bands_note(ciq_wb)
+        scripted_locked_lines = []
+        if scripted_locked_note:
+            scripted_locked_checked = st.checkbox(scripted_locked_note, value=True, key="chk_scripted_locked")
+            if scripted_locked_checked:
+                scripted_locked_lines = [scripted_locked_note]
         choices["notes_generic_text"] = "\n".join(
-            [notes_generic or ""] + emergency_unlock_lines + ngs_notes_lines + bucket_notes).strip()
+            [notes_generic or ""] + emergency_unlock_lines + ngs_notes_lines + bucket_notes + scripted_locked_lines).strip()
 
     st.markdown("---")
     node_tag = mm_objs[0].get("Node to be built as", "site") if mm_objs else "site"
@@ -935,7 +941,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if n_not_mon:
             notes_buffer_lines.append(f"{'|'.join(new_nodes)} is in not monitored state.")
         notes_buffer_lines += [l for l in (notes_generic or "").split("\n") if l.strip()]
-        notes_buffer_lines += emergency_unlock_lines + ngs_notes_lines + bucket_notes
+        notes_buffer_lines += emergency_unlock_lines + ngs_notes_lines + bucket_notes + scripted_locked_lines
 
         notes_buffer_rows = list(range(184, 192))
         for i, row_num in enumerate(notes_buffer_rows):
