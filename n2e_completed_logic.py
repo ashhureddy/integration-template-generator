@@ -275,10 +275,11 @@ def n2e_transport_sfp_warnings(ciq_wb, mm_objs, post_text, transport_sfp_data):
     """Confirmed N2E-specific check (different wording from MCA's transport_sfp_verification):
     checks TXdBm/RXdBm against the speed-appropriate range (reusing mcl.SFP_RANGES) and
     BER against 0/0, for every node. Confirmed exact wording:
-    'High/low RXdBm/TXdBm on Transport SFP: {node}.' and
-    'BER not reporting on the Transport port: {node}.'
-    Both fire independently (a node can trigger one, both, or neither).
-    Confirmed: both go into the Warnings tab AND get reported as Pending to MIC PM
+    'High/low RXdBm/TXdBm on Transport SFP: {node}.',
+    'BER not reporting on the Transport port: {node}.' (BER empty), and
+    'BER NZ reporting on the Transport port: {node}.' (BER present but non-zero).
+    All fire independently (a node can trigger any combination, or none).
+    Confirmed: all go into the Warnings tab AND get reported as Pending to MIC PM
     (via the buffer, since there's no dedicated template row for this).
     Returns (warning_texts: list[str], pending_lines: list[str])."""
     warning_texts, pending_lines = [], []
@@ -310,8 +311,12 @@ def n2e_transport_sfp_warnings(ciq_wb, mm_objs, post_text, transport_sfp_data):
             pending_lines.append(f"{text} (MIC PM)")
 
         ber = reading["ber"]
-        if not ber or ber.strip() == "" or ber.strip() != "0/0":
+        if not ber or ber.strip() == "":
             text = f"BER not reporting on the Transport port: {node}."
+            warning_texts.append(text)
+            pending_lines.append(f"{text} (MIC PM)")
+        elif ber.strip() != "0/0":
+            text = f"BER NZ reporting on the Transport port: {node}."
             warning_texts.append(text)
             pending_lines.append(f"{text} (MIC PM)")
 
