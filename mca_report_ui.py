@@ -386,7 +386,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         st.markdown("**Subject**")
         c = st.columns(7)
         with c[0]: st.markdown(f"MIC\n\n**MIC**")
-        with c[1]: market = st.text_input("\U0001F4DD Market", key="rpt_market", placeholder="MNS/TILLMAN/AT&T")
+        with c[1]: market_subject_input = st.text_input("\U0001F4DD Market", key="rpt_market", placeholder="MNS/TILLMAN/AT&T")
         with c[2]: status = st.text_input("\U0001F4DD Status", value=default_status, key="rpt_status")
         with c[3]: site_name = st.text_input("\U0001F4DD Site Name", key="rpt_site_name")
         with c[4]: st.markdown(f"FA CODE\n\n**{fa_code or '(not found)'}**")
@@ -821,7 +821,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                                 unsafe_allow_html=True)
 
         header_fields = {
-            "mic": "MIC", "market": market, "status": status, "site_name": site_name,
+            "mic": "MIC", "market": market_subject_input, "status": status, "site_name": site_name,
             "fa_code": fa_code, "site_ids": site_ids, "sow": sow, "iwm_details": iwm_details,
             "pre_configuration": pre_line, "current_configuration": current_config,
             "post_configuration": post_line, "wll_node": wll_node, "controller_id": controller_id,
@@ -834,7 +834,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         st.download_button("Download report (.txt)", report_text, file_name=f"{node_tag}_Integration_Report.txt", key="rpt_dl_txt")
 
         row_writes = mca_glue.build_xlsm_row_writes(results, choices, ROW_MAP)
-        row_writes.append((3, True, [(2, "MIC"), (3, market), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, sow)]))
+        row_writes.append((3, True, [(2, "MIC"), (3, market_subject_input), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, sow)]))
         row_writes.append((6, True, [(3, iwm_details)]))
         row_writes.append((10, True, [(3, pre_line)]))
         row_writes.append((11, bool(current_config.strip()), [(3, current_config)]))
