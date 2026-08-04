@@ -514,7 +514,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_pending.append(additional_pending)
 
     # Florida newly added cells — same as MCA.
-    florida_cells = mcl.florida_newly_added_cells(market, classification)
+    florida_cells = mcl.florida_newly_added_cells(regional_market, classification)
     florida_rows = mcl.florida_cells_to_rows(florida_cells)
     florida_checked = False
     with st.expander("Florida (newly added CBAND/DOD)"):
