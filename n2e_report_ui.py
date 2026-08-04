@@ -274,19 +274,45 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if ctrl_checked:
                 choices_completed += ctrl_lines
 
-        # DSS Activation — manual 2-way, AT&T/MIC if Pending.
+        # DSS Activation — confirmed new rule: DSS bands that are ALSO scripted/locked
+        # (configuredMaxTxPower=5) go DIRECTLY to Pending with stakeholder AT&T,
+        # bypassing the normal choice — except in NTX market, where those bands aren't
+        # reported for DSS at all. Remaining (non-overlapping) bands still go through
+        # the normal Completed/Pending user choice.
         dss_line = next((l for l in scope_lines if l.startswith("DSS Activation")), None)
         dss_completed, dss_pending = None, None
+        dss_pending_bands_combined = set()  # confirmed fix: tracked directly, not parsed back out of display text later
         if dss_line:
+            dss_all_bands = set(dss_line.split("\t")[1].split("/")) if "\t" in dss_line else set()
+            n2e_scripted_locked = mcl.scripted_locked_bands(ciq_wb)
+            n2e_dss_calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
+            n2e_dss_regional_market = None
+            if n2e_dss_calltest_path.exists() and mm_objs:
+                _ntx_prefix_map, _ntx_rules = mcl.load_calltest_table(n2e_dss_calltest_path, tab_name="Legacy")
+                n2e_dss_regional_market = mcl.determine_market(mm_objs[0].get("Node to be built as"), _ntx_prefix_map)
+            auto_pending_bands, user_choice_bands = mcl.split_dss_bands_by_scripted_locked(
+                dss_all_bands, n2e_scripted_locked, n2e_dss_regional_market)
+
             with st.container(border=True):
                 st.markdown("**DSS Activation**")
-                dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"], key="n2e_dss")
-                if dss_choice == "Completed":
-                    dss_completed = dss_line.replace("\t", " ")
-                elif dss_choice == "Pending":
-                    dss_sh = st.selectbox("Stakeholder", ["\u2014 Select \u2014", "AT&T", "MIC"], key="n2e_dss_sh")
-                    if dss_sh != "\u2014 Select \u2014":
-                        dss_pending = f"{dss_line.replace(chr(9), ' ')} ({dss_sh})"
+                if auto_pending_bands:
+                    auto_bands_fmt = "/".join(mcl.sort_bands_lte_first(auto_pending_bands))
+                    dss_pending_auto = f"DSS Activation: {auto_bands_fmt} (AT&T)"
+                    st.caption(f"\u26a0\ufe0f Scripted/locked \u2014 goes directly to Pending: {dss_pending_auto}")
+                    dss_pending = dss_pending_auto
+                    dss_pending_bands_combined |= auto_pending_bands
+                if user_choice_bands:
+                    user_bands_fmt = "/".join(mcl.sort_bands_lte_first(user_choice_bands))
+                    st.caption(f"Remaining band(s) \u2014 pick Completed or Pending: {user_bands_fmt}")
+                    dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"], key="n2e_dss")
+                    if dss_choice == "Completed":
+                        dss_completed = f"DSS Activation: {user_bands_fmt}"
+                    elif dss_choice == "Pending":
+                        dss_sh = st.selectbox("Stakeholder", ["\u2014 Select \u2014", "AT&T", "MIC"], key="n2e_dss_sh")
+                        if dss_sh != "\u2014 Select \u2014":
+                            user_pending_line = f"DSS Activation: {user_bands_fmt} ({dss_sh})"
+                            dss_pending = (dss_pending + " | " + user_pending_line) if dss_pending else user_pending_line
+                            dss_pending_bands_combined |= user_choice_bands
             if dss_completed:
                 choices_completed.append(dss_completed)
 
@@ -611,6 +637,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     choices_notes.append(f"SAU enabled on the: {sau_manual_target}")
 
         choices_notes += ignore_state_notes
+        scripted_locked_note = mcl.scripted_locked_bands_note(ciq_wb)
+        if scripted_locked_note:
+            scripted_locked_checked = st.checkbox(scripted_locked_note, value=True, key="n2e_scripted_locked")
+            if scripted_locked_checked:
+                choices_notes.append(scripted_locked_note)
         if testing_note:
             choices_notes.append(testing_note)
         final_port_checked = st.checkbox("Final Port Configuration attached.", value=True, key="n2e_notes_finalport")
@@ -733,7 +764,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
             _rw_simple(N2E_ROW_MAP["controller_integration"]["completed"][0],
                        not cascade_fires and controller_line and ctrl_checked, controller_id)
-            dss_bands = dss_line.split("DSS Activation:")[-1].strip() if dss_completed and dss_line else None
+            dss_bands = dss_completed.split("DSS Activation:")[-1].strip() if dss_completed else None
             _rw_simple(N2E_ROW_MAP["dss_activation"]["completed"][0], dss_completed, dss_bands)
             ngs_bands = ngs_line.split("\t")[1] if ngs_completed and ngs_line and "\t" in ngs_line else None
             ngs_node = ngs_line.split("\t")[2] if ngs_completed and ngs_line and ngs_line.count("\t") >= 2 else None
@@ -775,7 +806,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw_simple(N2E_ROW_MAP["on_site_nokia_cutover"]["pending"][0], True)  # no value column, just checkbox + template's own fixed "(Tower Crew)"
             _rw_simple(N2E_ROW_MAP["controller_integration"]["pending"][0],
                        cascade_fires and controller_line, controller_id)
-            dss_p_bands = dss_line.split("DSS Activation:")[-1].strip() if dss_pending and dss_line else None
+            dss_p_bands = "/".join(mcl.sort_bands_lte_first(dss_pending_bands_combined)) if dss_pending_bands_combined else None
             _rw_simple(N2E_ROW_MAP["dss_activation"]["pending"][0], dss_pending, dss_p_bands)
             ngs_p_bands = ngs_line.split("\t")[1] if ngs_pending and ngs_line and "\t" in ngs_line else None
             ngs_p_node = ngs_line.split("\t")[2] if ngs_pending and ngs_line and ngs_line.count("\t") >= 2 else None
