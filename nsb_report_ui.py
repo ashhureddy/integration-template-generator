@@ -264,6 +264,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.caption("GPS Installation: Post-checks not uploaded \u2014 can't determine sync status.")
 
         lkf_completed, lkf_pending = None, None
+        emergency_unlock_notes = []
         with st.container(border=True):
             st.markdown("**LKF Installation** \u2014 Node and Controller tracked independently, required:")
             lkf_node_choices = {}
@@ -276,6 +277,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                                           key=f"nsb_lkf_{node}", label_visibility="collapsed")
                     if pick != "\u2014 Select \u2014":
                         lkf_node_choices[node] = pick
+                if pick == "Pending":
+                    eu = st.selectbox(f"Emergency unlock activated on {node}? LKF is pending.",
+                                        ["\u2014 Select \u2014", "No", "Yes"], key=f"nsb_lkf_eu_{node}")
+                    if eu == "Yes":
+                        emergency_unlock_notes.append(node)
             lkf_controller_choice = None
             if controller_id:
                 c1, c2 = st.columns([2, 1])
@@ -534,6 +540,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         notes_manual = st.text_area("\U0001F4DD Enter Notes", key="nsb_notes_manual", height=60)
         if notes_manual.strip():
             choices_notes.append(notes_manual)
+
+        emergency_unlock_lines = [f"Emergency unlock activated on the node {n}." for n in emergency_unlock_notes]
+        if emergency_unlock_lines:
+            st.caption("Auto-added (Emergency unlock confirmed):")
+            for l in emergency_unlock_lines:
+                st.caption(l)
+            choices_notes += emergency_unlock_lines
+
         if alarm_notes_line:
             st.caption(f"Auto-added: {alarm_notes_line}")
 
