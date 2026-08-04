@@ -1443,3 +1443,18 @@ def gps_pending_stakeholder(market):
     always uses Tower Crew regardless): GPS Installation Pending's stakeholder is
     'MIC PM' specifically in NCSC, 'Tower Crew' in every other market."""
     return "MIC PM" if market == "NCSC" else "Tower Crew"
+
+
+def sa_conversion_nodes(ciq_wb, mm_objs):
+    """Confirmed generic (not scope-specific — shared between N2E and NSB): checks CIQ's
+    NR_SA tab presence per node."""
+    return [row.get("Node to be built as") for row in mm_objs
+            if qx.check_sa_conversion(ciq_wb, row.get("Node to be built as"))]
+
+
+def sa_conversion_note(sa_nodes):
+    """Confirmed Notes addition when SA Conversion is detected — fires only if the CIQ's
+    NR_SA tab is present AND SA Conversion is detected for at least one node."""
+    if not sa_nodes:
+        return None
+    return "Termpointtoamf is in unlocked state."
