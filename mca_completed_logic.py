@@ -845,23 +845,18 @@ def call_test_lines(classification, market, rules, moved_lte_bands, added_bands_
     psap_from_moved_lte = bool(moved_lte_bands)
 
     if required["PSAP"] or psap_from_moved_lte:
-        if moved_lte_bands:
-            moved_str = ", ".join(sorted(moved_lte_bands))
-            lines.append(f"PSAP test/Speedtest/VoLTE voice calltest:\tMoved LTE Sectors: {moved_str}"
-                         f"\tPSAP Schedule ID:\t")
-        else:
-            # Confirmed fix: PSAP firing with no genuinely moved bands (e.g. NSB, which
-            # never has moved sectors, or MCA firing purely from a newly-added-LTE
-            # scenario) — no "Moved LTE Sectors:" label at all, just the bands directly.
-            new_str = ", ".join(sorted(added_bands_by_tech.get("lte", [])))
-            lines.append(f"PSAP test/Speedtest/VoLTE voice calltest:\t{new_str}"
-                         f"\tPSAP Schedule ID:\t")
+        # Confirmed: no descriptive label at all ("Moved LTE Sectors:", etc.) — just the
+        # bands directly, regardless of whether they're genuinely moved or newly added.
+        psap_bands = moved_lte_bands if moved_lte_bands else added_bands_by_tech.get("lte", set())
+        psap_str = ", ".join(sorted(psap_bands))
+        lines.append(f"PSAP test/Speedtest/VoLTE voice calltest:\t{psap_str}"
+                     f"\tPSAP Schedule ID:\t")
     if required["LTE Speed test"]:
-        lines.append(f"Speedtest/VoLTE voice calltest:\tLTE Sectors: {', '.join(sorted(added_bands_by_tech.get('lte', [])))}")
+        lines.append(f"Speedtest/VoLTE voice calltest:\t{', '.join(sorted(added_bands_by_tech.get('lte', [])))}")
     if required["5G speedtest"]:
         fiveg_all = set(added_bands_by_tech.get("5g", set())) | set(added_bands_by_tech.get("cband_dod", set())) \
             | set(moved_bands_by_tech.get("5g", set())) | set(moved_bands_by_tech.get("cband_dod", set()))
-        lines.append(f"Speed test:\t5G Sectors: {', '.join(sorted(fiveg_all))}")
+        lines.append(f"Speed test:\t{', '.join(sorted(fiveg_all))}")
     # Confirmed real fix: F-net with F-net SIM should only fire if FNET sectors are
     # genuinely present on the site, even if the CT sheet says Y for this market/scenario
     # — the CT sheet flag alone isn't enough, since a site with no FNET at all has
