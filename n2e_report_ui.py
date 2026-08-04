@@ -293,26 +293,27 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             auto_pending_bands, user_choice_bands = mcl.split_dss_bands_by_scripted_locked(
                 dss_all_bands, n2e_scripted_locked, n2e_dss_regional_market)
 
-            with st.container(border=True):
-                st.markdown("**DSS Activation**")
-                if auto_pending_bands:
-                    auto_bands_fmt = "/".join(mcl.sort_bands_lte_first(auto_pending_bands))
-                    dss_pending_auto = f"DSS Activation: {auto_bands_fmt} (AT&T)"
-                    st.caption(f"\u26a0\ufe0f Scripted/locked \u2014 goes directly to Pending: {dss_pending_auto}")
-                    dss_pending = dss_pending_auto
-                    dss_pending_bands_combined |= auto_pending_bands
-                if user_choice_bands:
-                    user_bands_fmt = "/".join(mcl.sort_bands_lte_first(user_choice_bands))
-                    st.caption(f"Remaining band(s) \u2014 pick Completed or Pending: {user_bands_fmt}")
-                    dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"], key="n2e_dss")
-                    if dss_choice == "Completed":
-                        dss_completed = f"DSS Activation: {user_bands_fmt}"
-                    elif dss_choice == "Pending":
-                        dss_sh = st.selectbox("Stakeholder", ["\u2014 Select \u2014", "AT&T", "MIC"], key="n2e_dss_sh")
-                        if dss_sh != "\u2014 Select \u2014":
-                            user_pending_line = f"DSS Activation: {user_bands_fmt} ({dss_sh})"
-                            dss_pending = (dss_pending + " | " + user_pending_line) if dss_pending else user_pending_line
-                            dss_pending_bands_combined |= user_choice_bands
+            if auto_pending_bands or user_choice_bands:
+                with st.container(border=True):
+                    st.markdown("**DSS Activation**")
+                    if auto_pending_bands:
+                        auto_bands_fmt = "/".join(mcl.sort_bands_lte_first(auto_pending_bands))
+                        dss_pending_auto = f"DSS Activation: {auto_bands_fmt} (AT&T)"
+                        st.caption(f"\u26a0\ufe0f Scripted/locked \u2014 goes directly to Pending: {dss_pending_auto}")
+                        dss_pending = dss_pending_auto
+                        dss_pending_bands_combined |= auto_pending_bands
+                    if user_choice_bands:
+                        user_bands_fmt = "/".join(mcl.sort_bands_lte_first(user_choice_bands))
+                        st.caption(f"Remaining band(s) \u2014 pick Completed or Pending: {user_bands_fmt}")
+                        dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"], key="n2e_dss")
+                        if dss_choice == "Completed":
+                            dss_completed = f"DSS Activation: {user_bands_fmt}"
+                        elif dss_choice == "Pending":
+                            dss_sh = st.selectbox("Stakeholder", ["\u2014 Select \u2014", "AT&T", "MIC"], key="n2e_dss_sh")
+                            if dss_sh != "\u2014 Select \u2014":
+                                user_pending_line = f"DSS Activation: {user_bands_fmt} ({dss_sh})"
+                                dss_pending = (dss_pending + " | " + user_pending_line) if dss_pending else user_pending_line
+                                dss_pending_bands_combined |= user_choice_bands
             if dss_completed:
                 choices_completed.append(dss_completed)
 
