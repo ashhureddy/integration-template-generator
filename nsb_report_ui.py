@@ -258,18 +258,38 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         _dss_outputs, _dss_summary, dss_activation_labels = app.generate_dss(ciq_wb, mm_objs, user_id, date_str, _log)
         dss_completed, dss_pending, dss_bands = None, None, None
+        dss_pending_bands_combined = set()  # confirmed fix: tracked directly, since dss_bands alone only ever holds the user-choice portion
         if dss_activation_labels:
-            dss_bands = "/".join(dss_activation_labels)
+            nsb_dss_calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
+            nsb_dss_regional_market = None
+            if nsb_dss_calltest_path.exists() and mm_objs:
+                _dss_prefix_map, _dss_rules = mcl.load_calltest_table(nsb_dss_calltest_path, tab_name="NSB")
+                nsb_dss_regional_market = mcl.determine_market(mm_objs[0].get("Node to be built as"), _dss_prefix_map)
+            nsb_scripted_locked_bands = mcl.scripted_locked_bands(ciq_wb)
+            auto_pending_bands, user_choice_bands = mcl.split_dss_bands_by_scripted_locked(
+                set(dss_activation_labels), nsb_scripted_locked_bands, nsb_dss_regional_market)
+
             with st.container(border=True):
-                st.markdown(f"**DSS Activation** \u2014 detected: {dss_bands}")
-                dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"], key="nsb_dss")
-                if dss_choice == "Completed":
-                    dss_completed = f"DSS Activation: {dss_bands}"
-                    choices_completed.append(dss_completed)
-                elif dss_choice == "Pending":
-                    dss_sh = st.selectbox("Stakeholder", ["\u2014 Select \u2014", "MIC", "AT&T"], key="nsb_dss_sh")
-                    if dss_sh != "\u2014 Select \u2014":
-                        dss_pending = f"DSS Activation: {dss_bands} ({dss_sh})"
+                st.markdown(f"**DSS Activation** \u2014 detected: {'/'.join(dss_activation_labels)}")
+                if auto_pending_bands:
+                    auto_bands_fmt = "/".join(mcl.sort_bands_lte_first(auto_pending_bands))
+                    dss_pending_auto = f"DSS Activation: {auto_bands_fmt} (AT&T)"
+                    st.caption(f"\u26a0\ufe0f Scripted/locked \u2014 goes directly to Pending: {dss_pending_auto}")
+                    dss_pending = dss_pending_auto
+                    dss_pending_bands_combined |= auto_pending_bands
+                if user_choice_bands:
+                    dss_bands = "/".join(mcl.sort_bands_lte_first(user_choice_bands))
+                    st.caption(f"Remaining band(s) \u2014 pick Completed or Pending: {dss_bands}")
+                    dss_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"], key="nsb_dss")
+                    if dss_choice == "Completed":
+                        dss_completed = f"DSS Activation: {dss_bands}"
+                        choices_completed.append(dss_completed)
+                    elif dss_choice == "Pending":
+                        dss_sh = st.selectbox("Stakeholder", ["\u2014 Select \u2014", "MIC", "AT&T"], key="nsb_dss_sh")
+                        if dss_sh != "\u2014 Select \u2014":
+                            user_pending_line = f"DSS Activation: {dss_bands} ({dss_sh})"
+                            dss_pending = (dss_pending + " | " + user_pending_line) if dss_pending else user_pending_line
+                            dss_pending_bands_combined |= user_choice_bands
 
         _ngs_summary, ngs_scope_lines = app.generate_ngs_checks(ciq_wb, mm_objs, _log)
         ngs_line = next((l for l in ngs_scope_lines if l.startswith("NGS Activation")), None)
@@ -592,6 +612,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 if sau_manual_target.strip():
                     choices_notes.append(f"SAU enabled on the: {sau_manual_target}")
 
+        nsb_scripted_locked_note = mcl.scripted_locked_bands_note(ciq_wb)
+        if nsb_scripted_locked_note:
+            nsb_scripted_locked_checked = st.checkbox(nsb_scripted_locked_note, value=True, key="nsb_scripted_locked")
+            if nsb_scripted_locked_checked:
+                choices_notes.append(nsb_scripted_locked_note)
+
         has_5g = any(app.is_populated(row.get("gNBId")) for row in mm_objs)
         final_port_checked = st.checkbox("Final Port Configuration attached.", value=True, key="nsb_notes_finalport")
         if final_port_checked:
@@ -739,7 +765,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             for row_num in p_int_rows:
                 _rw(row_num, False)
             _rw(NSB_ROW_MAP["controller_integration"]["pending"][0], cascade_fires, [(3, controller_id)] if cascade_fires else None)
-            _rw(NSB_ROW_MAP["dss_activation"]["pending"][0], dss_pending, [(3, dss_bands)] if dss_pending else None)
+            _rw(NSB_ROW_MAP["dss_activation"]["pending"][0], dss_pending,
+                [(3, "/".join(mcl.sort_bands_lte_first(dss_pending_bands_combined)))] if dss_pending_bands_combined else None)
             _rw(NSB_ROW_MAP["ngs_activation"]["pending"][0], ngs_pending, [(3, ngs_bands), (4, ngs_node)] if ngs_pending else None)
             _rw(NSB_ROW_MAP["gps_installation"]["pending"][0], gps_pending_line, [(3, "|".join(disabled_nodes))] if gps_pending_line else None)
             _rw(NSB_ROW_MAP["lkf_installation"]["pending"][0], cascade_fires or lkf_pending, None)
