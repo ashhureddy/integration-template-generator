@@ -517,15 +517,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     florida_cells = mcl.florida_newly_added_cells(regional_market, classification)
     florida_rows = mcl.florida_cells_to_rows(florida_cells)
     florida_checked = False
-    with st.expander("Florida (newly added CBAND/DOD)"):
-        if florida_rows:
+    if florida_rows:
+        with st.expander("Florida (newly added CBAND/DOD)"):
             florida_checked = st.checkbox(f"Newly added Cells (Florida market) \u2014 {len(florida_cells)} cell(s)",
                                             value=True, key="nsb_chk_florida")
             if florida_checked:
                 for r in florida_rows:
                     st.caption(r)
-        else:
-            st.caption("Not applicable (not Florida market, or no CBAND/DOD/DOD_BWE additions detected).")
     florida_active_rows = florida_rows if florida_checked else []
 
     with st.expander("Notes"):
