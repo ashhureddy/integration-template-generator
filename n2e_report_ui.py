@@ -105,21 +105,21 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
     if postcheck_text:
         transport_sfp_data = mcl.extract_transport_sfp(postcheck_text)
-        sfp_warning_texts, sfp_pending_lines = n2e.n2e_transport_sfp_warnings(
+        sfp_warning_texts, sfp_pending_lines = mcl.transport_sfp_threshold_warnings(
             ciq_wb, mm_objs, postcheck_text, transport_sfp_data)
         warnings += sfp_warning_texts
         n2e_pending_from_warnings += sfp_pending_lines
 
-        warnings += n2e.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
-        warnings += n2e.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
-        warnings += n2e.sctp_status_warnings(postcheck_text)
-        warnings += n2e.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification)
+        warnings += mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
+        warnings += mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
+        warnings += mcl.sctp_status_warnings(postcheck_text)
+        warnings += mcl.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification)
 
     # SA Conversion — moved earlier (previously computed later, inside the Completed
     # expander) since the AMF warning check below needs it before the gate.
     sa_nodes = n2e.sa_conversion_nodes(ciq_wb, mm_objs)
     if sa_nodes and postcheck_text:
-        warnings += n2e.sa_conversion_amf_warning(postcheck_text, sa_nodes)
+        warnings += mcl.sa_conversion_amf_warning(postcheck_text, sa_nodes)
 
     # Confirmed real fix: the flag used to be a simple persistent boolean, which stayed
     # True across reruns even after uploading a genuinely different (or edited) CIQ with
