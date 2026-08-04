@@ -107,6 +107,55 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         post_parts.append(f"{node}({hw or 'NOT FOUND'})")
     post_line = " + ".join(post_parts)
 
+    # Moved earlier (previously computed later, well after the Subject UI had already
+    # started rendering) since the Warnings gate below needs this data before anything
+    # else renders.
+    controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
+    cascade_fires = nsb.controller_cascade_fires(controller_in_edp, bool(controller_checks_text))
+
+    # SA Conversion — moved earlier (previously computed later, inside Notes) since the
+    # AMF warning check below needs it before the gate.
+    nsb_sa_nodes = mcl.sa_conversion_nodes(ciq_wb, mm_objs)
+
+    # ==================== Warnings gate ====================
+    # Same confirmed 2-step flow as N2E: if there are any warnings, show ONLY the
+    # warnings plus a "Continue to Report" button first — none of the rest of the UI
+    # renders until the user clicks through. Acknowledgment is keyed against the actual
+    # warnings content (not a plain persistent flag), so a genuinely different set of
+    # warnings on a later site in the same session always re-triggers the gate.
+    warnings = []
+    nsb_pending_from_warnings = []
+
+    if postcheck_text:
+        transport_sfp_data = mcl.extract_transport_sfp(postcheck_text)
+        sfp_warning_texts, sfp_pending_lines = mcl.transport_sfp_threshold_warnings(
+            ciq_wb, mm_objs, postcheck_text, transport_sfp_data)
+        warnings += sfp_warning_texts
+        nsb_pending_from_warnings += sfp_pending_lines
+
+        warnings += mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
+        warnings += mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
+        warnings += mcl.sctp_status_warnings(postcheck_text)
+        warnings += mcl.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification)
+
+    if nsb_sa_nodes and postcheck_text:
+        warnings += mcl.sa_conversion_amf_warning(postcheck_text, nsb_sa_nodes)
+
+    warnings_fingerprint = hash(tuple(sorted(warnings)))
+    if warnings and st.session_state.get("nsb_warnings_ack_fingerprint") != warnings_fingerprint:
+        with st.container(border=True):
+            st.markdown(
+                f"<div style='color:#c0392b; font-size:1.3em; font-weight:700;'>"
+                f"\u26a0\ufe0f {len(warnings)} Warning{'s' if len(warnings) != 1 else ''}</div>",
+                unsafe_allow_html=True)
+            for w in warnings:
+                st.markdown(f"<div style='color:#c0392b; font-size:1.05em; padding:2px 0;'>\u2022 {w}</div>",
+                            unsafe_allow_html=True)
+        if st.button("Continue to Report \u2192", type="primary", key="nsb_warnings_continue"):
+            st.session_state["nsb_warnings_ack_fingerprint"] = warnings_fingerprint
+            st.rerun()
+        return
+
     # ==================== Subject / Configuration / IDL Connections ====================
     fa_code = ""
     if "5G Info" in ciq_wb.sheetnames:
@@ -184,8 +233,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     # ==================== Completed / Pending ====================
     st.markdown("### Which of these apply?")
     choices_completed, choices_pending, choices_notes = [], [], []
-    controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
-    cascade_fires = nsb.controller_cascade_fires(controller_in_edp, bool(controller_checks_text))
 
     with st.expander("Completed", expanded=True):
         int_pairs = []
@@ -453,6 +500,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # duplicated in the UI.
 
     with st.expander("Pending", expanded=True):
+        # Transport SFP threshold/BER warnings — reported here too since there's no
+        # dedicated template row for this (goes through the buffer for the .xlsm).
+        choices_pending += nsb_pending_from_warnings
+        for l in nsb_pending_from_warnings:
+            st.caption(l)
+
         for line in (dss_pending, ngs_pending, gps_pending_line, lkf_pending):
             if line:
                 choices_pending.append(line)
@@ -562,7 +615,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         # SA Conversion / TermPointToAmf note — same as N2E, fires only if the CIQ's
         # NR_SA tab is present AND SA Conversion is detected for at least one node.
-        nsb_sa_nodes = mcl.sa_conversion_nodes(ciq_wb, mm_objs)
         nsb_sa_note = mcl.sa_conversion_note(nsb_sa_nodes)
         if nsb_sa_note:
             sa_note_checked = st.checkbox(nsb_sa_note, value=True, key="nsb_notes_sa")
@@ -731,7 +783,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw(NSB_ROW_MAP["low_vswr"]["pending"][0], False)
             _rw(NSB_ROW_MAP["vswr_overthreshold"]["pending"][0], False)
 
-            pending_buffer_lines = [additional_pending] if additional_pending.strip() else []
+            pending_buffer_lines = list(nsb_pending_from_warnings) + ([additional_pending] if additional_pending.strip() else [])
             for i, row_num in enumerate(NSB_ROW_MAP["additional_pending"]):
                 if i < len(pending_buffer_lines):
                     row_writes.append((row_num, True, [(2, pending_buffer_lines[i])]))
