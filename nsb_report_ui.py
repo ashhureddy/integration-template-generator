@@ -535,6 +535,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     florida_active_rows = florida_rows if florida_checked else []
 
     with st.expander("Notes"):
+        # SAU enabled on Node/Controller — same as N2E, moved to the top.
+        sau_auto_target = controller_id if sau_completed else None
+        sau_notes_checked = st.checkbox("SAU enabled on the: Node or Controller", value=True, key="nsb_sau_notes")
+        if sau_notes_checked:
+            if sau_auto_target:
+                st.caption(f"SAU enabled on the: {sau_auto_target}")
+                choices_notes.append(f"SAU enabled on the: {sau_auto_target}")
+            else:
+                sau_manual_target = st.text_input("\U0001F4DD Node ID or Controller ID", key="nsb_sau_manual")
+                if sau_manual_target.strip():
+                    choices_notes.append(f"SAU enabled on the: {sau_manual_target}")
+
         has_5g = any(app.is_populated(row.get("gNBId")) for row in mm_objs)
         final_port_checked = st.checkbox("Final Port Configuration attached.", value=True, key="nsb_notes_finalport")
         if final_port_checked:
@@ -543,6 +555,36 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             nr_checked = st.checkbox("NR configuration has been verified.", value=True, key="nsb_notes_nr")
             if nr_checked:
                 choices_notes.append("NR configuration has been verified.")
+
+        # Nodes/controller monitored state — same as N2E.
+        if new_nodes:
+            mon_checked = st.checkbox(f"{'|'.join(new_nodes)} nodes is in Not monitored state.", value=True, key="nsb_notes_mon")
+            if mon_checked:
+                choices_notes.append(f"{'|'.join(new_nodes)} nodes is in Not monitored state.")
+        if controller_id:
+            ctrl_mon_choice = st.selectbox(f"{controller_id} monitored state", ["\u2014 Select \u2014", "Monitored", "Not monitored"], key="nsb_ctrl_mon")
+            if ctrl_mon_choice == "Monitored":
+                choices_notes.append(f"{controller_id} is in monitored state.")
+            elif ctrl_mon_choice == "Not monitored":
+                choices_notes.append(f"{controller_id} is in not monitored state.")
+
+        # SA Conversion / TermPointToAmf note — same as N2E, fires only if the CIQ's
+        # NR_SA tab is present AND SA Conversion is detected for at least one node.
+        nsb_sa_nodes = mcl.sa_conversion_nodes(ciq_wb, mm_objs)
+        nsb_sa_note = mcl.sa_conversion_note(nsb_sa_nodes)
+        if nsb_sa_note:
+            sa_note_checked = st.checkbox(nsb_sa_note, value=True, key="nsb_notes_sa")
+            if sa_note_checked:
+                choices_notes.append(nsb_sa_note)
+
+        # Area prechecks verification for CPRI/SFP check — same as N2E.
+        cpri_choice = st.selectbox("Area prechecks verification for CPRI/SFP check", ["\u2014 Select \u2014", "Completed", "Pending"], key="nsb_cpri") \
+            if new_nodes else "\u2014 Select \u2014"
+        if cpri_choice == "Completed":
+            choices_notes.append("Area prechecks verification for CPRI/SFP check is completed.")
+        elif cpri_choice == "Pending":
+            choices_notes.append("Area prechecks verification for CPRI/SFP check is pending. (Nodes not replicating in the area tool)")
+
         notes_manual = st.text_area("\U0001F4DD Enter Notes", key="nsb_notes_manual", height=60)
         if notes_manual.strip():
             choices_notes.append(notes_manual)
