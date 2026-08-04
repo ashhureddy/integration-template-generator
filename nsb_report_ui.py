@@ -260,7 +260,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     gps_completed_line = candidate_line
                     choices_completed.append(gps_completed_line)
             if disabled_nodes:
-                gps_pending_line = f"GPS Installation: {'|'.join(disabled_nodes)} (MIC PM)"
+                nsb_calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
+                regional_market = None
+                if nsb_calltest_path.exists() and mm_objs:
+                    nsb_prefix_to_market, _ = mcl.load_calltest_table(nsb_calltest_path, tab_name="NSB")
+                    regional_market = mcl.determine_market(mm_objs[0].get("Node to be built as"), nsb_prefix_to_market)
+                gps_pending_line = f"GPS Installation: {'|'.join(disabled_nodes)} ({mcl.gps_pending_stakeholder(regional_market)})"
         else:
             st.caption("GPS Installation: Post-checks not uploaded \u2014 can't determine sync status.")
 
