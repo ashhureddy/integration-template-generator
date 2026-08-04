@@ -311,7 +311,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # test). Now reuses mcl.call_test_lines(), the same real function MCA uses.
         calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
         psap_line = speed_lte_line = speed_5g_line = fnet_line = None
-        market_val = market
+        # Confirmed real bug (same class as GPS Installation's stakeholder fix): the
+        # Subject-line "market" (MNS/TILLMAN/AT&T) is NOT the same thing as the regional
+        # market (TN-KY/NCSC/etc.) that calltest_rules is actually keyed by. Passing the
+        # Subject field directly meant rules.get((market, scenario)) never matched
+        # anything real, so every Call Test check silently returned nothing.
+        regional_market = None
+        if calltest_path.exists() and mm_objs:
+            _rm_prefix_to_market, _rm_calltest_rules = mcl.load_calltest_table(calltest_path, tab_name="NSB")
+            regional_market = mcl.determine_market(mm_objs[0].get("Node to be built as"), _rm_prefix_to_market)
+        market_val = regional_market
         if calltest_path.exists() and market_val:
             prefix_to_market, calltest_rules = mcl.load_calltest_table(calltest_path, tab_name="NSB")
 
