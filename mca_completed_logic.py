@@ -1436,3 +1436,10 @@ def _hardware_component_state(post_text, component_prefix):
 def xmu_in_ciq(post_configuration_text):
     """Confirmed trigger: XMU appears in the CIQ target (Post Configuration string)."""
     return "XMU" in (post_configuration_text or "")
+
+
+def gps_pending_stakeholder(market):
+    """Confirmed rule, applies across MCA/NSB (N2E has no market lookup at all and
+    always uses Tower Crew regardless): GPS Installation Pending's stakeholder is
+    'MIC PM' specifically in NCSC, 'Tower Crew' in every other market."""
+    return "MIC PM" if market == "NCSC" else "Tower Crew"
