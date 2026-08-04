@@ -1817,3 +1817,14 @@ def digital_tilt_warnings(ciq_wb, mm_objs, post_text, classification):
         if ciq_val and post_val != ciq_val:
             warnings.append(f"DigitalTilt mismatch on {sector}: Post-checks={post_val}, CIQ={ciq_val}.")
     return warnings
+
+
+def sort_bands_lte_first(bands):
+    """Confirmed ordering: LTE bands first (alphabetically among themselves), then
+    5G/CBAND/DOD bands (alphabetically among themselves) — NOT a single pure alphabetical
+    sort, which mixes them together since '5G_850' alphabetically precedes 'AWS_1'.
+    Confirmed real example: 'AWS_1/AWS_2/FNET/LTE_700/LTE_700_E/PCS_1/5G_850/CBAND/DOD',
+    not '5G_850/AWS_1/AWS_2/CBAND/DOD/FNET/LTE_700/LTE_700_E/PCS_1'."""
+    lte = sorted(b for b in bands if not (b.startswith("5G_") or b in ("CBAND", "DOD", "DOD_BWE")))
+    fiveg = sorted(b for b in bands if b.startswith("5G_") or b in ("CBAND", "DOD", "DOD_BWE"))
+    return lte + fiveg
