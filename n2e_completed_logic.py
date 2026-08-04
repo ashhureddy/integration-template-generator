@@ -328,7 +328,7 @@ def sa_conversion_amf_warning(post_text, sa_conversion_nodes_list):
     '{Node} GNBCUCPFunction=1,TermPointToAmf={amf_name} {UNLOCKED|LOCKED} {OpState}'.
     If ANY TermPointToAmf entry for the node is LOCKED (not all — any single one is
     enough), fires the warning. Confirmed exact wording:
-    'TermpointtoAmf is in locked state, please unlock.'
+    'TermpointtoAmf is in locked state on {node}, please unlock.'
     Returns list of warning texts (one per affected node, deduplicated)."""
     if not sa_conversion_nodes_list or not post_text:
         return []
@@ -338,7 +338,7 @@ def sa_conversion_amf_warning(post_text, sa_conversion_nodes_list):
         node, _amf_name, admin, _oper = m.groups()
         if node in sa_conversion_nodes_list and admin == "LOCKED":
             locked_nodes.add(node)
-    return [f"TermpointtoAmf is in locked state, please unlock. ({node})" for node in sorted(locked_nodes)]
+    return [f"TermpointtoAmf is in locked state on {node}, please unlock." for node in sorted(locked_nodes)]
 
 
 # ============================================================
