@@ -339,9 +339,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     else:
                         added_bands_by_tech["lte"].add(label)
 
-            psap_sched_id = st.text_input("\U0001F4DD PSAP Schedule ID (if PSAP applies)", key="nsb_psap_sched")
             ct_lines = mcl.call_test_lines(classification, market_val, calltest_rules,
                                              set(), added_bands_by_tech, {"lte": set(), "5g": set(), "cband_dod": set()})
+            psap_applies = any(l.startswith("PSAP test/Speedtest/VoLTE voice calltest") for l in ct_lines)
+            psap_sched_id = st.text_input("\U0001F4DD PSAP Schedule ID", key="nsb_psap_sched") if psap_applies else ""
             for l in ct_lines:
                 l_display = l.replace("\t", " ")
                 if l.startswith("PSAP test/Speedtest/VoLTE voice calltest"):
