@@ -610,13 +610,78 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_pending.append(smm_pending)
             st.caption(smm_pending)
 
-        # Locked alarm ports classification — confirmed removed entirely per explicit
-        # request: no detected-ports display, no instructional text, no category input
-        # fields. The simple "all locked" case is still handled automatically via
-        # testing_note (mcl.external_alarm_testing_placement), which independently
-        # produces "All external alarms are kept locked, due to NEA is pending." when
-        # every scripted port on the controller is locked.
-        bucket_pending, bucket_notes, ignore_state_notes = [], [], []
+        # Locked alarm ports — confirmed N2E-specific rules, restored per explicit
+        # request: the engineer must manually classify which locked port belongs to
+        # which scenario (Pre-existing Active Alarms / Loops & Bridge Clips / Power
+        # Plant Swap / Not Cleared by FE / Ignore State), since there's no way to
+        # automatically infer that from the raw controller-checks data alone.
+        locked_ports_list = [p for p in (controller_checks_data.get("alarm_ports", []) if controller_checks_data else [])
+                              if p["admin"] == "LOCKED" and p["slogan"]]
+        bucket_pending, bucket_notes = [], []
+        ignore_state_notes = []
+        if locked_ports_list:
+            with st.container(border=True):
+                st.markdown(f"**Locked alarm ports** \u2014 {len(locked_ports_list)} scripted port(s) detected LOCKED "
+                            f"in the controller-checks file:")
+                for p in locked_ports_list:
+                    st.caption(f"Port {p['port']} \u2014 {p['slogan']} ({p['severity']})")
+                st.markdown("Classify each one below (per the confirmed N2E 6610 Alarm Cutover reporting "
+                            "standard). Leave blank whichever don't apply.")
+                n2e_all_alarm_ports = controller_checks_data.get("alarm_ports", []) if controller_checks_data else []
+                n2e_port_slogan_map = {p["port"]: p["slogan"] for p in n2e_all_alarm_ports if p["slogan"]}
+
+                def _n2e_warn_missing_slogans(ports_str):
+                    missing = mcl.missing_slogan_ports(ports_str, n2e_port_slogan_map)
+                    if missing:
+                        st.markdown(f"<div style='color:#c0392b;'>\u26a0\ufe0f Port(s) {', '.join(missing)} have "
+                                    f"no detected slogan \u2014 check the number(s), a slogan is required for every "
+                                    f"reported port.</div>", unsafe_allow_html=True)
+
+                nb1 = st.text_input("\U0001F4DD 1. Pre-existing Active Alarms \u2014 port numbers", key="n2e_lp_active", placeholder="e.g. 3, 20")
+                _n2e_warn_missing_slogans(nb1)
+                t1 = n2e.n2e_locked_port_active_alarms(nb1, n2e_port_slogan_map)
+                if t1:
+                    bucket_notes.append(t1)
+
+                st.markdown("\U0001F4DD 2. Pre-Existing Loops and Bridge Clips \u2014 port numbers per category:")
+                bc1, bc2, bc3 = st.columns(3)
+                with bc1: nb2_loops = st.text_input("Pre existing loops", key="n2e_lp_loops", placeholder="e.g. 1")
+                with bc2: nb2_clips = st.text_input("Bridge clips", key="n2e_lp_clips", placeholder="e.g. 2")
+                with bc3: nb2_noequip = st.text_input("No equipment end connections", key="n2e_lp_noequip", placeholder="e.g. 3")
+                for f in (nb2_loops, nb2_clips, nb2_noequip):
+                    _n2e_warn_missing_slogans(f)
+                b2_notes, b2_active_line = mcl.loops_bridge_clips_notes(nb2_loops, nb2_clips, nb2_noequip,
+                                                                          n2e_all_alarm_ports, n2e_port_slogan_map)
+                bucket_notes += b2_notes
+                if b2_active_line:
+                    bucket_notes.append(b2_active_line)
+
+                power_plant_swap_performed = st.checkbox("Power Plant Swap performed on this site", key="n2e_lp_power_performed")
+                nb3 = st.text_input("\U0001F4DD 3. Power Plant Swap \u2014 port numbers (only if any alarms are currently active; leave blank otherwise)", key="n2e_lp_power")
+                _n2e_warn_missing_slogans(nb3)
+                nb4 = st.text_input("\U0001F4DD 4. Post-Cutover Alarms Not Cleared by FE \u2014 port numbers", key="n2e_lp_notcleared")
+                _n2e_warn_missing_slogans(nb4)
+
+                ignore_state_entries = st.text_input(
+                    "\U0001F4DD Any Pre-existing External Alarms Found in 'Ignore' State? "
+                    "Enter port(slogan), comma-separated for multiple", key="n2e_ignore_state",
+                    placeholder="e.g. 3(RBS Temp High)")
+                ignore_state_notes = n2e.ignore_state_alarm_notes(ignore_state_entries)
+                for n in ignore_state_notes:
+                    st.caption(n)
+
+                power_plant_pending, power_plant_note, power_plant_active_ports = \
+                    n2e.n2e_locked_port_power_plant_swap(power_plant_swap_performed, nb3, n2e_port_slogan_map, n2e_all_alarm_ports)
+                if power_plant_note:
+                    bucket_notes.append(power_plant_note)
+
+                merged_pending = n2e.n2e_merged_post_cutover_pending(power_plant_active_ports, nb4, n2e_port_slogan_map)
+                if merged_pending:
+                    bucket_pending.append(merged_pending)
+
+                choices_pending += bucket_pending
+                for l in bucket_pending:
+                    st.caption(l)
 
         additional_pending = st.text_area("\U0001F4DD Enter any additional pending information",
                                            key="n2e_add_pending", height=80)
