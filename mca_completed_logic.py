@@ -691,14 +691,27 @@ def external_alarm_scripting_confirmed(controller_checks_data):
 
 def external_alarm_testing_placement(controller_checks_data):
     """Among SCRIPTED ports (real slogan present) only: all locked -> Pending + Notes line.
-    Any unlocked (all-unlocked or mixed) -> Completed."""
+    Confirmed real gap found and fixed: a MIXED scenario (some locked, some unlocked —
+    not all) used to just report 'Completed' with zero mention of the ports that are
+    still individually locked. Now returns a third value: a Notes line automatically
+    listing those still-locked ports (reusing the same 'port[SLOGAN]' format already used
+    elsewhere), so nothing gets silently dropped just because the overall status is
+    Completed. Returns (section, pending_note, mixed_locked_note)."""
     scripted = [p for p in controller_checks_data.get("alarm_ports", []) if p["slogan"]]
     if not scripted:
-        return None, None
+        return None, None, None
     all_locked = all(p["admin"] == "LOCKED" for p in scripted)
     if all_locked:
-        return "Pending", "All external alarms are kept locked, due to NEA is pending."
-    return "Completed", None
+        return "Pending", "All external alarms are kept locked, due to NEA is pending.", None
+
+    still_locked = [p for p in scripted if p["admin"] == "LOCKED"]
+    mixed_locked_note = None
+    if still_locked:
+        port_slogan_map = {p["port"]: p["slogan"] for p in still_locked}
+        ports_str = ", ".join(p["port"] for p in still_locked)
+        ports_fmt = format_ports_with_slogans(ports_str, port_slogan_map)
+        mixed_locked_note = f"Port(s) {ports_fmt} are kept locked (Owner: AT&T)."
+    return "Completed", None, mixed_locked_note
 
 
 def controller_integration_cascade(six610_present_and_edp_published, controller_checks_data, controller_id):
