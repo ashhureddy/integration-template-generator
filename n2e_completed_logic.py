@@ -251,12 +251,16 @@ def ignore_state_alarm_notes(entries_str):
     Confirmed manual entry — port + slogan typed directly by the engineer (e.g.
     '3(RBS Temp High)'), since Ignore-state ports aren't necessarily captured by the
     standard activeExternalAlarm/LOCKED detection at all. Supports multiple entries,
-    comma-separated (e.g. '3(RBS Temp High), 7(RBS INTRUSION)'), one Note line each.
-    Confirmed exact format: 'Pre - existing Port {N} ({slogan}) is configured in SMM but
-    is currently set to 'Ignore' state and will not be migrated to the 6610.(Owner:AT&T)'"""
+    comma-separated (e.g. '3(RBS Temp High), 7(RBS INTRUSION)').
+    Confirmed real correction: all entries combine into ONE single Note line (not one
+    line per port) — 'Port' becomes 'Ports' when there's more than one, e.g.:
+    'Pre - existing Ports 10 (SMM IGNORE), 8 (RBS HEX FAIL) is configured in SMM but is
+    currently set to 'Ignore' state and will not be migrated to the 6610.(Owner:AT&T)'
+    Returns a list with either 0 or 1 note (kept as a list for compatibility with how
+    callers merge it in)."""
     if not entries_str:
         return []
-    notes = []
+    parsed = []
     for entry in entries_str.split(","):
         entry = entry.strip()
         if not entry:
@@ -265,7 +269,11 @@ def ignore_state_alarm_notes(entries_str):
         if not m:
             continue
         port, slogan = m.groups()
-        notes.append(f"Pre - existing Port {port} ({slogan}) is configured in SMM but is "
-                     f"currently set to 'Ignore' state and will not be migrated to the "
-                     f"6610.(Owner:AT&T)")
-    return notes
+        parsed.append(f"{port} ({slogan})")
+    if not parsed:
+        return []
+    label = "Port" if len(parsed) == 1 else "Ports"
+    combined = ", ".join(parsed)
+    return [f"Pre - existing {label} {combined} is configured in SMM but is "
+            f"currently set to 'Ignore' state and will not be migrated to the "
+            f"6610.(Owner:AT&T)"]
