@@ -511,7 +511,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         testing_completed, testing_pending = None, None
         if testing_completed is None and controller_checks_data and not cascade_fires:
-            testing_section, _ = mcl.external_alarm_testing_placement(controller_checks_data)
+            testing_section, _, _ = mcl.external_alarm_testing_placement(controller_checks_data)
             if testing_section == "Completed":
                 testing_completed = f"External alarm testing: {controller_id}"
                 choices_completed.append(testing_completed)
