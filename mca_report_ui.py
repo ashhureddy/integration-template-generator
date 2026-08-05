@@ -235,7 +235,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     cascade_fires = mcl.controller_integration_cascade(
         bool(controller_in_edp), controller_checks_data, controller_id)
     sau_placement = mcl.sau_connections_placement(controller_checks_data, controller_id) if controller_id else None
-    testing_section, testing_note, mixed_locked_note = mcl.external_alarm_testing_placement(controller_checks_data) \
+    testing_section, testing_note, _ = mcl.external_alarm_testing_placement(controller_checks_data) \
         if controller_checks_data else (None, None, None)
 
     # ---- GPS: Installation (new nodes, grouped by Post-checks type), Upgrade (existing
@@ -828,11 +828,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             scripted_locked_checked = st.checkbox(scripted_locked_note, value=True, key="chk_scripted_locked")
             if scripted_locked_checked:
                 scripted_locked_lines = [scripted_locked_note]
-        mixed_locked_lines = [mixed_locked_note] if mixed_locked_note else []
-        if mixed_locked_note:
-            st.caption(f"\u26a0\ufe0f Auto-added (still-locked ports, mixed scenario): {mixed_locked_note}")
+        # Confirmed: no separate auto-generated "mixed still-locked ports" note for MCA —
+        # this would duplicate what the engineer already manually classifies via the
+        # existing Bucket 1 (locked_port_bucket_1) "Active alarms observed on ports..."
+        # mechanism, which N2E never had (hence N2E does need the automatic version).
         choices["notes_generic_text"] = "\n".join(
-            [notes_generic or ""] + emergency_unlock_lines + ngs_notes_lines + bucket_notes + scripted_locked_lines + mixed_locked_lines).strip()
+            [notes_generic or ""] + emergency_unlock_lines + ngs_notes_lines + bucket_notes + scripted_locked_lines).strip()
 
     st.markdown("---")
     node_tag = mm_objs[0].get("Node to be built as", "site") if mm_objs else "site"
@@ -965,7 +966,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if n_not_mon:
             notes_buffer_lines.append(f"{'|'.join(new_nodes)} is in not monitored state.")
         notes_buffer_lines += [l for l in (notes_generic or "").split("\n") if l.strip()]
-        notes_buffer_lines += emergency_unlock_lines + ngs_notes_lines + bucket_notes + scripted_locked_lines + mixed_locked_lines
+        notes_buffer_lines += emergency_unlock_lines + ngs_notes_lines + bucket_notes + scripted_locked_lines
 
         notes_buffer_rows = list(range(184, 192))
         for i, row_num in enumerate(notes_buffer_rows):
