@@ -14,6 +14,7 @@ transcript — see the inline comments for the "why", not just the "what".
 
 import re
 from pathlib import Path
+import streamlit as st
 
 # IMPORTANT: do NOT "import app as qx" at module level. app.py has Streamlit UI code
 # directly at module scope (not wrapped in `if __name__ == "__main__"`), so importing it
@@ -246,6 +247,7 @@ def extract_controller_checks(text):
 
 # ---- Calltest market table (Calltest_sheet.xlsx, 'Legacy' tab for MCA) ----
 
+@st.cache_data
 def load_calltest_table(xlsx_path, tab_name="Legacy"):
     """Parses Calltest_sheet.xlsx into:
         prefix_to_market: {"NC": "NCSC", "EC": "NCSC", ...}
@@ -255,7 +257,11 @@ def load_calltest_table(xlsx_path, tab_name="Legacy"):
     it applies to every row until the next non-blank Market cell.
     tab_name: confirmed NSB uses its own dedicated "NSB" tab in the same workbook
     (different market-lookup rules from MCA's "Legacy" tab), not the market-based lookup
-    N2E skips entirely — pass tab_name="NSB" for NSB's Call Test logic."""
+    N2E skips entirely — pass tab_name="NSB" for NSB's Call Test logic.
+    Confirmed cached: this is a static file bundled with the app that never changes
+    between reruns, but was previously being re-read from disk on every single call —
+    called from multiple places (GPS, Call Test, DSS, Florida) across every render pass,
+    since Streamlit reruns the whole script on every interaction."""
     import openpyxl
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
     ws = wb[tab_name]
