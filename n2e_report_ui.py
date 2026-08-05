@@ -460,15 +460,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             smm_pending = "SMM Triggering (MIC PM)"
 
         # External alarm testing — Completed if any scripted port unlocked, else Pending+Notes.
-        testing_section, testing_note, mixed_locked_note = mcl.external_alarm_testing_placement(controller_checks_data) \
+        # Confirmed: discard the auto-generated mixed_locked_note here too, matching MCA —
+        # redundant now that N2E's manual Bucket 1 (Pre-existing Active Alarms)
+        # classification is restored, since the engineer classifies these ports there.
+        testing_section, testing_note, _ = mcl.external_alarm_testing_placement(controller_checks_data) \
             if controller_checks_data and not cascade_fires else (None, None, None)
         testing_completed, testing_pending = None, None
         if testing_section == "Completed":
             testing_completed = f"External alarm testing: {controller_id}."
             choices_completed.append(testing_completed)
             st.caption(f"\u2705 {testing_completed}")
-            if mixed_locked_note:
-                st.caption(f"\u26a0\ufe0f {mixed_locked_note}")
         elif testing_section == "Pending":
             testing_pending = f"External alarm testing: {controller_id}. (MIC PM)"
 
@@ -587,8 +588,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.caption(testing_pending)
         if testing_note:
             st.caption(f"Auto-added to Notes: {testing_note}")
-        if mixed_locked_note:
-            st.caption(f"Auto-added to Notes: {mixed_locked_note}")
 
         # 6673 Configuration / 6673 Port Configuration in ENM — auto, always Pending.
         if has_6673:
@@ -714,8 +713,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 choices_notes.append(scripted_locked_note)
         if testing_note:
             choices_notes.append(testing_note)
-        if mixed_locked_note:
-            choices_notes.append(mixed_locked_note)
         final_port_checked = st.checkbox("Final Port Configuration attached.", value=True, key="n2e_notes_finalport")
         if final_port_checked:
             choices_notes.append("Final Port Configuration attached.")
