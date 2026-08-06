@@ -119,6 +119,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         warnings += mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text, _warnings_fiveg_rows)
         warnings += mcl.sctp_status_warnings(postcheck_text)
         warnings += mcl.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification, _warnings_fiveg_rows)
+        warnings += mcl.lte_cell_presence_warnings(ciq_wb, postcheck_text, _warnings_eutran_rows)
+        warnings += mcl.fiveg_cell_presence_warnings(ciq_wb, postcheck_text, _warnings_fiveg_rows)
 
     # SA Conversion — moved earlier (previously computed later, inside the Completed
     # expander) since the AMF warning check below needs it before the gate.
