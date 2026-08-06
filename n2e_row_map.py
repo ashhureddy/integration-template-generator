@@ -11,7 +11,7 @@ N2E_ROW_MAP = {
     "iwm_details": 6,
     "pre_configuration": 10,       # always "Nokia"
     "current_configuration": 11,
-    "post_configuration": 12,
+    "post_configuration": {"completed": 12, "pending": 77},
     "wll_node": 13,
     "controller_6610": 14,
     "software_version": 15,
