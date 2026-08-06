@@ -228,13 +228,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         st.markdown("**Configuration**")
         st.markdown(f"Pre Configuration : **Nokia**")
         if missing_nodes:
-            st.markdown(f"Post Configuration (Pending) : **{post_line} (MIC PM)**")
+            st.markdown(f"Post Configuration (Pending) : **{post_line}(MIC PM)**")
             st.warning(f"Node(s) not found in Post-checks, treated as not yet integrated: {', '.join(missing_nodes)}")
         else:
             st.markdown(f"Post Configuration : **{post_line}**")
         st.markdown(f"6610 Controller : **{controller_id or '(none detected)'}**")
         mm_objs_no_wll = [row for row in mm_objs if row.get("Node to be built as") not in wll_detected_nodes]
-        current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs_no_wll, postcheck_text, missing_nodes) if postcheck_text else ""
+        current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs_no_wll, postcheck_text, missing_nodes, dual_identity=True) if postcheck_text else ""
         if current_config_auto:
             current_config = st.text_input("\U0001F4DD Current Configuration \u2014 review/edit:",
                                              value=current_config_auto, key="n2e_current_config")
@@ -877,7 +877,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_notes += bucket_notes
 
     # ==================== Report text + xlsm ====================
-    post_config_display = f"{post_line} (MIC PM)" if missing_nodes else post_line
+    post_config_display = f"{post_line}(MIC PM)" if missing_nodes else post_line
     report_lines = ["Subject", f"MIC | MNS | N2E | IX-STF | {site_name} | {fa_code} | {site_ids}",
                     "", "IWM Details", iwm_details,
                     "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_config_display}",
@@ -916,7 +916,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             # rather than being marked Completed.
             if missing_nodes:
                 row_writes.append((N2E_ROW_MAP["post_configuration"]["completed"], False, []))
-                row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], True, [(3, f"{post_line} (MIC PM)")]))
+                row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], True, [(3, f"{post_line}(MIC PM)")]))
             else:
                 row_writes.append((N2E_ROW_MAP["post_configuration"]["completed"], True, [(3, post_line)]))
                 row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], False, []))
