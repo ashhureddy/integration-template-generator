@@ -174,7 +174,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             target_row = app.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or \
                 app.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
         hw = app.hw_string(target_row) if target_row else None
-        post_parts.append(f"{node}({hw or 'NOT FOUND'})")
+        # Confirmed fix: was missing the dual-identity case entirely (a node with BOTH
+        # an eNodeB Name and gNodeB Name populated — i.e. co-located LTE+5G) — ported
+        # from the same fix already applied to NSB, matching app.py's generate_n2e().
+        if app.is_populated(e_name) and app.is_populated(g_name):
+            secondary = g_name if is_lte_primary else e_name
+            bbu_mode = row.get("BBU Mode")
+            post_parts.append(f"{node}(P)/{secondary}(S)({bbu_mode})({hw or 'NOT FOUND'})")
+        else:
+            post_parts.append(f"{node}({hw or 'NOT FOUND'})")
     if post_parts:
         post_line = " + ".join(post_parts)
 
@@ -380,10 +388,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 c1, c2 = st.columns([2, 1])
                 with c1: st.caption(f"{controller_id} (controller)")
                 with c2:
-                    cpick = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
-                                           key="n2e_lkf_controller", label_visibility="collapsed")
-                    if cpick != "\u2014 Select \u2014":
-                        lkf_controller_choice = cpick
+                    if cascade_fires:
+                        st.caption("Pending (auto \u2014 no 6610 checks)")
+                        lkf_controller_choice = "Pending"
+                    else:
+                        cpick = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                               key="n2e_lkf_controller", label_visibility="collapsed")
+                        if cpick != "\u2014 Select \u2014":
+                            lkf_controller_choice = cpick
 
             lkf_lines_by_section = mcl.lkf_lines_by_choice(lkf_node_choices, lkf_controller_choice, controller_id) \
                 if (lkf_node_choices or lkf_controller_choice) else {}
@@ -393,9 +405,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if lkf_lines_by_section.get("Pending"):
                 lkf_pending = lkf_lines_by_section["Pending"]
 
-        # Transport SFP — new-node trigger, manual SFP model per node. Confirmed
-        # correction: blank fields simply produce nothing (no line at all) — no longer
-        # auto-converted into a Pending "Compatible Transport SFP Installation" entry.
+        # Transport SFP — new-node trigger, per node. Confirmed correction: blank
+        # fields simply produce nothing (no line at all) — no longer auto-converted
+        # into a Pending "Compatible Transport SFP Installation" entry.
+        # Confirmed new fix: BBU End auto-fetches from the Transport SFP table already
+        # parsed from the Post-checks PDF (ericssonprod, matched by node ID) — pre-fills
+        # the field but engineer can still override it. SIAD End stays fully manual,
+        # since that's not present anywhere in the PDF data.
         sfp_completed_lines = []
         if new_nodes:
             with st.container(border=True):
@@ -403,7 +419,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 for node in new_nodes:
                     c1, c2, c3 = st.columns([1, 1, 1])
                     with c1: st.caption(node)
-                    with c2: bbu = st.text_input("BBU", key=f"n2e_sfp_bbu_{node}", label_visibility="collapsed", placeholder="SFP Model (BBU End)")
+                    with c2:
+                        bbu_auto = transport_sfp_data.get(node, {}).get("ericssonprod", "")
+                        bbu = st.text_input("BBU", value=bbu_auto, key=f"n2e_sfp_bbu_{node}", label_visibility="collapsed", placeholder="SFP Model (BBU End)")
                     with c3: siad = st.text_input("SIAD", key=f"n2e_sfp_siad_{node}", label_visibility="collapsed", placeholder="SFP Model (SIAD End)")
                     if bbu.strip() or siad.strip():
                         sfp_completed_lines.append(f"Transport SFP Installation on: {node} {bbu} (BBU End) & {siad} (SIAD End)")
@@ -415,6 +433,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # External alarm Scripting / SAU Connections.
         alarm_scripting_completed, alarm_scripting_pending = None, None
         sau_completed, sau_pending = None, None
+        sau_disabled = False
         if controller_checks_data and not cascade_fires:
             if mcl.external_alarm_scripting_confirmed(controller_checks_data):
                 alarm_scripting_completed = f"External alarm Scripting: {controller_id}"
@@ -427,6 +446,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     choices_completed.append(sau_completed)
                     st.caption(f"\u2705 {sau_completed}")
                 else:
+                    sau_disabled = True
                     sau_pending = f"SAU Connections: {controller_id}. (MIC PM)"
 
         # SUP Connections / XMU Installation.
@@ -535,10 +555,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 choices_pending.append(line)
                 st.caption(line)
 
-        if cascade_fires:
-            choices_pending.append("LKF Installation. (MIC)")
-            st.caption("LKF Installation. (MIC)")
-        elif lkf_pending:
+        if lkf_pending:
             choices_pending.append(lkf_pending)
             st.caption(lkf_pending)
 
@@ -561,10 +578,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         st.caption(ret_pending)
 
         if cascade_fires:
-            choices_pending.append("External alarm Scripting. (MIC)")
-            choices_pending.append("SAU Connections. (MIC PM)")
-            st.caption("External alarm Scripting. (MIC)")
-            st.caption("SAU Connections. (MIC PM)")
+            l1 = f"External alarm Scripting: {controller_id}. (MIC)"
+            l2 = f"SAU Connections: {controller_id}. (MIC PM)"
+            choices_pending.append(l1)
+            choices_pending.append(l2)
+            st.caption(l1)
+            st.caption(l2)
         else:
             if sau_pending:
                 choices_pending.append(sau_pending)
@@ -586,8 +605,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.caption(area_pending)
 
         if cascade_fires:
-            choices_pending.append("External alarm testing. (MIC PM)")
-            st.caption("External alarm testing. (MIC PM)")
+            l = f"External alarm testing: {controller_id}. (MIC PM)"
+            choices_pending.append(l)
+            st.caption(l)
         elif testing_pending:
             choices_pending.append(testing_pending)
             st.caption(testing_pending)
@@ -642,7 +662,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # in the first place) — with no Power Plant Swap port field in this case, since
         # there'd be nothing active to meaningfully type in.
         nb3, nb4 = "", ""
-        if locked_ports_list:
+        # Confirmed: when EVERY scripted port is locked, the simple automatic rule
+        # (testing_section == "Pending") already covers it completely with the single
+        # "All external alarms are kept locked, due to NEA is pending." note — nothing
+        # left to manually classify. So the detected-ports display and the two
+        # locked-port-specific classifiers (Pre-existing Active Alarms, Not Cleared by
+        # FE) fall through to the same simplified 3-item view used when there are no
+        # locked ports at all — the 3 that don't depend on locked-port status stay
+        # visible either way.
+        if locked_ports_list and testing_section != "Pending":
             with st.container(border=True):
                 st.markdown(f"**Locked alarm ports** \u2014 {len(locked_ports_list)} scripted port(s) detected LOCKED "
                             f"in the controller-checks file:")
@@ -734,16 +762,20 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # checkbox in Notes, moved to the top. Auto-fills from the existing SAU
         # Connections detection when available (controller_id, since that detection is
         # controller-based); otherwise falls back to manual node ID entry.
-        sau_auto_target = controller_id if sau_completed else None
-        sau_label = f"SAU enabled on the: {sau_auto_target}" if sau_auto_target else "SAU enabled on the: Node or Controller"
-        sau_notes_checked = st.checkbox(sau_label, value=True, key="n2e_sau_notes")
-        if sau_notes_checked:
-            if sau_auto_target:
-                choices_notes.append(f"SAU enabled on the: {sau_auto_target}")
-            else:
-                sau_manual_target = st.text_input("\U0001F4DD Node ID or Controller ID", key="n2e_sau_manual")
-                if sau_manual_target.strip():
-                    choices_notes.append(f"SAU enabled on the: {sau_manual_target}")
+        # Confirmed: hidden entirely (not just falling back to manual) when there's no
+        # controller-checks data at all, or when SAU is explicitly confirmed DISABLED —
+        # nothing meaningful to report in either case.
+        if not cascade_fires and not sau_disabled:
+            sau_auto_target = controller_id if sau_completed else None
+            sau_label = f"SAU enabled on the: {sau_auto_target}" if sau_auto_target else "SAU enabled on the: Node or Controller"
+            sau_notes_checked = st.checkbox(sau_label, value=True, key="n2e_sau_notes")
+            if sau_notes_checked:
+                if sau_auto_target:
+                    choices_notes.append(f"SAU enabled on the: {sau_auto_target}")
+                else:
+                    sau_manual_target = st.text_input("\U0001F4DD Node ID or Controller ID", key="n2e_sau_manual")
+                    if sau_manual_target.strip():
+                        choices_notes.append(f"SAU enabled on the: {sau_manual_target}")
 
         choices_notes += ignore_state_notes
         scripted_locked_note = mcl.scripted_locked_bands_note(ciq_wb)
@@ -769,11 +801,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 choices_notes.append(f"{'|'.join(new_nodes)} nodes is in Not monitored state.")
 
         if controller_id:
-            ctrl_mon_choice = st.selectbox(f"{controller_id} monitored state", ["\u2014 Select \u2014", "Monitored", "Not monitored"], key="n2e_ctrl_mon")
-            if ctrl_mon_choice == "Monitored":
-                choices_notes.append(f"{controller_id} is in monitored state.")
-            elif ctrl_mon_choice == "Not monitored":
+            if cascade_fires or sau_disabled:
+                st.caption(f"{controller_id} is in not monitored state. (auto \u2014 "
+                            f"{'no 6610 checks' if cascade_fires else 'SAU disabled'})")
                 choices_notes.append(f"{controller_id} is in not monitored state.")
+            else:
+                ctrl_mon_choice = st.selectbox(f"{controller_id} monitored state", ["\u2014 Select \u2014", "Monitored", "Not monitored"], key="n2e_ctrl_mon")
+                if ctrl_mon_choice == "Monitored":
+                    choices_notes.append(f"{controller_id} is in monitored state.")
+                elif ctrl_mon_choice == "Not monitored":
+                    choices_notes.append(f"{controller_id} is in not monitored state.")
 
         sa_note = n2e.sa_conversion_note(sa_nodes)
         if sa_note:
@@ -945,9 +982,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             # column here, confirmed different structure from the Completed row).
             gps_p_row = N2E_ROW_MAP["gps_installation"]["pending"][0]
             row_writes.append((gps_p_row, bool(gps_pending_line), [(3, "|".join(disabled_nodes))] if gps_pending_line else []))
-            lkf_p_final = "LKF Installation. (MIC)" if cascade_fires else lkf_pending
+            lkf_p_final = lkf_pending
             lkf_p_value = (lkf_p_final.replace("LKF Installation:", "").replace("(MIC)", "").strip()
-                           if lkf_p_final and lkf_p_final != "LKF Installation. (MIC)" else None)
+                           if lkf_p_final else None)
             _rw_simple(N2E_ROW_MAP["lkf_installation"]["pending"][0], lkf_p_final, lkf_p_value)
             _rw_simple(N2E_ROW_MAP["psap_speedtest"]["pending"][0], lte_bands, lte_bands)
             _rw_simple(N2E_ROW_MAP["speed_test_5g"]["pending"][0], fiveg_bands, fiveg_bands)
