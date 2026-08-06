@@ -162,6 +162,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     wll_detected_nodes = [n for n in all_node_names if n and str(n).strip().upper().endswith("L")]
     new_nodes = [n for n in all_node_names if n not in wll_detected_nodes]  # confirmed: every OTHER node is "new" for N2E
 
+    # Confirmed new check: a node whose hardware string can't be found anywhere in
+    # Post-checks at all is treated as genuinely NOT integrated (issue prevented
+    # completion), not just a config mismatch. integrated_nodes excludes these —
+    # used everywhere a per-node item should only reflect nodes that actually made it
+    # into Post-checks (Integration, DSS, GPS, Call Test items, Transport SFP).
+    # new_nodes itself stays unfiltered, since Post Configuration's own Pending line
+    # needs to list every node, including the missing one(s).
+    missing_nodes = mcl.detect_missing_nodes(postcheck_text, new_nodes)
+    integrated_nodes = [n for n in new_nodes if n not in missing_nodes]
+
     # Confirmed correction: Post Configuration should NOT include the WLL node's hardware
     # info at all — generate_n2e()'s own post_line includes every Mixed Mode Info row
     # (including WLL nodes), so rebuild it here filtered to new_nodes only.
@@ -217,7 +227,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     with st.container(border=True):
         st.markdown("**Configuration**")
         st.markdown(f"Pre Configuration : **Nokia**")
-        st.markdown(f"Post Configuration : **{post_line}**")
+        if missing_nodes:
+            st.markdown(f"Post Configuration (Pending) : **{post_line} (MIC PM)**")
+            st.warning(f"Node(s) not found in Post-checks, treated as not yet integrated: {', '.join(missing_nodes)}")
+        else:
+            st.markdown(f"Post Configuration : **{post_line}**")
         st.markdown(f"6610 Controller : **{controller_id or '(none detected)'}**")
         mm_objs_no_wll = [row for row in mm_objs if row.get("Node to be built as") not in wll_detected_nodes]
         current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs_no_wll, postcheck_text) if postcheck_text else ""
@@ -276,7 +290,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # Integration — from generate_n2e's own scope_lines. Confirmed bug: was using
         # next() which only grabbed the FIRST matching line, silently dropping every
         # additional node's Integration line when 2+ nodes are present.
-        integration_lines_all = [l.replace("\t", " ") for l in scope_lines if l.startswith("Integration")]
+        integration_lines_all = [l.replace("\t", " ") for l in scope_lines
+                                  if l.startswith("Integration") and l.split("\t")[-1] not in missing_nodes]
         int_checked, int_lines = _checked_group("Integration", integration_lines_all, "n2e_int")
         if int_checked:
             choices_completed += int_lines
@@ -301,6 +316,22 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         dss_pending_bands_combined = set()  # confirmed fix: tracked directly, not parsed back out of display text later
         if dss_line:
             dss_all_bands = set(dss_line.split("\t")[1].split(" & ")) if "\t" in dss_line else set()
+            # Confirmed fix: DSS bands are tracked as a flat set with no per-node
+            # attribution, so a missing node's bands can't be excluded by node lookup
+            # directly. Instead, trace bands back to their source node via
+            # classification["added"] (same cell data every other section uses) and
+            # only keep bands that appear on at least one INTEGRATED node — a band that
+            # exists ONLY on the missing node gets excluded, but a band shared with an
+            # integrated node still shows.
+            bands_from_integrated_nodes = set()
+            for node, cells in classification.get("added", {}).items():
+                if node in missing_nodes:
+                    continue
+                for c in cells:
+                    label, _sector = app.band_label(c)
+                    if label:
+                        bands_from_integrated_nodes.add(label)
+            dss_all_bands = dss_all_bands & bands_from_integrated_nodes
             n2e_scripted_locked = mcl.scripted_locked_bands(ciq_wb)
             n2e_dss_calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
             n2e_dss_regional_market = None
@@ -417,10 +448,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # the field but engineer can still override it. SIAD End stays fully manual,
         # since that's not present anywhere in the PDF data.
         sfp_completed_lines = []
-        if new_nodes:
+        if integrated_nodes:
             with st.container(border=True):
                 st.markdown("**Transport SFP Installation on** \u2014 Enter SFP models")
-                for node in new_nodes:
+                for node in integrated_nodes:
                     c1, c2, c3 = st.columns([1, 1, 1])
                     with c1: st.caption(node)
                     with c2:
@@ -571,7 +602,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         # PSAP/Speedtest + Speed test + F-NET — Integration bands split LTE/5G, all
         # markets, no lookup table for N2E.
-        lte_bands, fiveg_bands = n2e.integration_bands_by_tech(classification)
+        lte_bands, fiveg_bands = n2e.integration_bands_by_tech(classification, missing_nodes)
         if lte_bands:
             psap_line = f"PSAP/Speed test/VoLTE voice call test on: {lte_bands}. (MIC PM)"
             choices_pending.append(psap_line)
@@ -846,9 +877,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_notes += bucket_notes
 
     # ==================== Report text + xlsm ====================
+    post_config_display = f"{post_line} (MIC PM)" if missing_nodes else post_line
     report_lines = ["Subject", f"MIC | MNS | N2E | IX-STF | {site_name} | {fa_code} | {site_ids}",
                     "", "IWM Details", iwm_details,
-                    "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_line}",
+                    "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_config_display}",
                     f"6610 Controller : {controller_id or ''}"]
     if current_config: report_lines.append(f"Current Configuration : {current_config}")
     if wll_node.strip(): report_lines.append(f"WLL node : {wll_node}")
@@ -879,7 +911,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             row_writes.append((N2E_ROW_MAP["iwm_details"], bool(iwm_details.strip()), [(3, iwm_details)]))
             row_writes.append((N2E_ROW_MAP["pre_configuration"], True, [(3, "Nokia")]))
             row_writes.append((N2E_ROW_MAP["current_configuration"], bool(current_config.strip()), [(3, current_config)] if current_config.strip() else []))
-            row_writes.append((N2E_ROW_MAP["post_configuration"], True, [(3, post_line)]))
+            # Confirmed: when any node is missing from Post-checks entirely, Post
+            # Configuration moves to Pending in full (still listing every node, "(MIC PM)")
+            # rather than being marked Completed.
+            if missing_nodes:
+                row_writes.append((N2E_ROW_MAP["post_configuration"]["completed"], False, []))
+                row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], True, [(3, f"{post_line} (MIC PM)")]))
+            else:
+                row_writes.append((N2E_ROW_MAP["post_configuration"]["completed"], True, [(3, post_line)]))
+                row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], False, []))
             row_writes.append((N2E_ROW_MAP["wll_node"], bool(wll_node.strip()), [(3, wll_node)] if wll_node.strip() else []))
             row_writes.append((N2E_ROW_MAP["controller_6610"], bool(controller_id), [(3, controller_id)] if controller_id else []))
             row_writes.append((N2E_ROW_MAP["software_version"], bool(software_version.strip()), [(3, software_version)] if software_version.strip() else []))
@@ -909,6 +949,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             int_pairs = []
             if int_checked:
                 for node, cells in classification.get("added", {}).items():
+                    if node in missing_nodes:
+                        continue
                     bands = mcl.sort_bands_lte_first({app.band_label(c)[0] for c in cells if app.band_label(c)[0]})
                     if bands:
                         int_pairs.append(("/".join(bands), node))
@@ -933,8 +975,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw_simple(N2E_ROW_MAP["lkf_installation"]["completed"][0], lkf_completed, lkf_completed)  # confirmed: template's C is one combined "node | controller" column
             sfp_rows = N2E_ROW_MAP["transport_sfp"]["completed"]
             sfp_pairs = []
-            for i in range(min(len(new_nodes), len(sfp_completed_lines))):
-                node = new_nodes[i]
+            for i in range(min(len(integrated_nodes), len(sfp_completed_lines))):
+                node = integrated_nodes[i]
                 m = re.search(r'on: \S+ (.+?) \(BBU End\) & (.+?) \(SIAD End\)', sfp_completed_lines[i])
                 models = f"{m.group(1)} (BBU End) & {m.group(2)} (SIAD End)" if m else ""
                 sfp_pairs.append((node, models))
