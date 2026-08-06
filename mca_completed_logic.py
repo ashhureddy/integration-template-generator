@@ -1853,6 +1853,53 @@ def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text, fiveg_rows=None):
     return warnings
 
 
+def lte_cell_presence_warnings(ciq_wb, post_text, eutran_rows=None):
+    """New check, distinct from lte_sector_param_warnings: that function only compares
+    FIELD VALUES for cells present in BOTH the CIQ and the Health Check (Post-checks),
+    silently skipping any cell missing from either side. This check instead flags
+    presence mismatches themselves — both directions: a cell in the CIQ with no
+    matching row in Post-checks, and a cell in Post-checks with no matching row in the
+    CIQ. Confirmed scope: checks EVERY cell in the CIQ's 'eUtran Parameters' sheet,
+    not just newly-added ones — a genuinely unexpected cell (extra or missing) is worth
+    flagging regardless of whether it's part of this specific integration.
+    Returns list of warning texts."""
+    warnings = []
+    if not post_text or "eUtran Parameters" not in ciq_wb.sheetnames:
+        return warnings
+    post_cells = extract_lte_cell_status(post_text)
+    if eutran_rows is None:
+        eutran_rows = qx.sheet_objs(ciq_wb["eUtran Parameters"])
+    ciq_cell_ids = {r.get("EutranCellFDDId") for r in eutran_rows if r.get("EutranCellFDDId")}
+    post_cell_ids = set(post_cells.keys())
+
+    for cell in sorted(ciq_cell_ids - post_cell_ids):
+        warnings.append(f"Cell {cell} present in CIQ but missing from Post-checks.")
+    for cell in sorted(post_cell_ids - ciq_cell_ids):
+        warnings.append(f"Cell {cell} present in Post-checks but missing from CIQ.")
+    return warnings
+
+
+def fiveg_cell_presence_warnings(ciq_wb, post_text, fiveg_rows=None):
+    """Same principle as lte_cell_presence_warnings, for 5G: checks EVERY cell in the
+    CIQ's '5G Info' sheet against every cell found in Post-checks (via
+    extract_5g_cell_du_status), flagging presence mismatches in both directions.
+    Returns list of warning texts."""
+    warnings = []
+    if not post_text or "5G Info" not in ciq_wb.sheetnames:
+        return warnings
+    post_cells = extract_5g_cell_du_status(post_text)
+    if fiveg_rows is None:
+        fiveg_rows = qx.sheet_objs(ciq_wb["5G Info"])
+    ciq_cell_ids = {r.get("NRCellDU") for r in fiveg_rows if r.get("NRCellDU")}
+    post_cell_ids = set(post_cells.keys())
+
+    for cell in sorted(ciq_cell_ids - post_cell_ids):
+        warnings.append(f"Cell {cell} present in CIQ but missing from Post-checks.")
+    for cell in sorted(post_cell_ids - ciq_cell_ids):
+        warnings.append(f"Cell {cell} present in Post-checks but missing from CIQ.")
+    return warnings
+
+
 def sctp_status_warnings(post_text):
     """Confirmed check: every SCTP endpoint should be ENABLED. Confirmed real format:
     '{Node} Transport=1,SctpEndpoint={endpoint} {ENABLED|DISABLED}'. Fires one warning
