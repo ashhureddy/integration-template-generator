@@ -12,6 +12,8 @@ external alarm, 6673 items) is new, built and confirmed this session.
 """
 
 import re
+import io
+import zipfile
 import streamlit as st
 
 import n2e_completed_logic as n2e
@@ -1034,3 +1036,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             xlsm_bytes = fill_legacy_mca_surgical(N2E_TEMPLATE_PATH, row_writes)
             st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
                                 file_name=f"{node_tag}_N2E_Filled.xlsm", key="n2e_dl_xlsm")
+
+            # Confirmed: combined download - both the report text and the filled
+            # checklist together in one .zip, so the engineer doesn't have to click
+            # two separate buttons.
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(f"{node_tag}_N2E_Report.txt", report_text)
+                zf.writestr(f"{node_tag}_N2E_Filled.xlsm", xlsm_bytes)
+            st.download_button("Download both (report + filled checklist, .zip)", zip_buffer.getvalue(),
+                                file_name=f"{node_tag}_N2E_Bundle.zip", key="n2e_dl_zip")
