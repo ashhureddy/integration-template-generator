@@ -1234,13 +1234,13 @@ def loops_bridge_clips_notes(loops_ports, bridge_clips_ports, no_equip_ports, al
     notes_lines = []
     if loops_ports:
         fmt = format_ports_with_slogans(loops_ports, port_slogan_map)
-        notes_lines.append(f"Pre\u2011existing loops have been removed from alarm ports {fmt}.")
+        notes_lines.append(f"Pre\u2011existing loops have been removed from alarm ports {fmt} (Owner: AT&T).")
     if bridge_clips_ports:
         fmt = format_ports_with_slogans(bridge_clips_ports, port_slogan_map)
-        notes_lines.append(f"Pre\u2011existing Bridge clips have been removed from alarm ports {fmt}.")
+        notes_lines.append(f"Pre\u2011existing Bridge clips have been removed from alarm ports {fmt} (Owner: AT&T).")
     if no_equip_ports:
         fmt = format_ports_with_slogans(no_equip_ports, port_slogan_map)
-        notes_lines.append(f"No equipment connections on port {fmt}.")
+        notes_lines.append(f"No equipment connections on port {fmt} (Owner: AT&T).")
 
     all_ports_str = ",".join(p for p in (loops_ports, bridge_clips_ports, no_equip_ports) if p)
     all_port_list = [p.strip() for p in all_ports_str.split(",") if p.strip()]
