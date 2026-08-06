@@ -8,6 +8,8 @@ display of auto-fetched read-only values, and a more organized bordered-card lay
 """
 import streamlit as st
 import re
+import io
+import zipfile
 
 import report_detect
 import mca_checklist
@@ -908,15 +910,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # FSL00456 had 2 connections on the same switch). Never wired at all before this fix.
         extra_sidehaul_rows = list(range(25, 40))
         extra_connections = sidehaul_rows_data[1:] if sidehaul_rows_data else []
-        for i, row_num in enumerate(extra_sidehaul_rows):
-            if i < len(extra_connections):
-                conn = extra_connections[i]
-                cable_pn_extra = st.session_state.get(f"cable_pn_{i+1}", "")
-                line = (f"Switch type: {conn['switch_type']}  Switch ID: {conn['switch_id']}  "
-                        f"Slot/Port: {conn['slot_port']}  Cable part number: {cable_pn_extra}  Node ID: {conn['node_id']}")
-                row_writes.append((row_num, True, [(2, line)]))
-            else:
-                row_writes.append((row_num, False, []))
+        extra_sidehaul_lines = []
+        for i, conn in enumerate(extra_connections):
+            cable_pn_extra = st.session_state.get(f"cable_pn_{i+1}", "")
+            line = (f"Switch type: {conn['switch_type']}  Switch ID: {conn['switch_id']}  "
+                    f"Slot/Port: {conn['slot_port']}  Cable part number: {cable_pn_extra}  Node ID: {conn['node_id']}")
+            extra_sidehaul_lines.append(line)
+        mcl.write_buffer_with_overflow(row_writes, extra_sidehaul_rows, extra_sidehaul_lines)
 
         # Row 80 "Swap Sector Verification" — confirmed explicitly removed from scope
         # earlier this session, but never wrote False, so its template default (True,
@@ -969,15 +969,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         notes_buffer_lines += emergency_unlock_lines + ngs_notes_lines + bucket_notes + scripted_locked_lines
 
         notes_buffer_rows = list(range(184, 192))
-        for i, row_num in enumerate(notes_buffer_rows):
-            if i < len(notes_buffer_lines):
-                row_writes.append((row_num, True, [(2, notes_buffer_lines[i])]))
-            else:
-                row_writes.append((row_num, False, []))
-        if len(notes_buffer_lines) > len(notes_buffer_rows):
-            warnings.append({"type": "notes_buffer_exhausted",
-                              "text": f"Notes \u2014 {len(notes_buffer_lines) - len(notes_buffer_rows)} additional "
-                                      f"entries could not fit in report, review manually."})
+        mcl.write_buffer_with_overflow(row_writes, notes_buffer_rows, notes_buffer_lines)
 
         # ---- Everything built this session that build_xlsm_row_writes never knew about —
         # parsed back out of the already-tested formatted strings rather than re-deriving
@@ -1087,3 +1079,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             xlsm_bytes = fill_legacy_mca_surgical(TEMPLATE_PATH, row_writes)
             st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
                                 file_name=f"{node_tag}_Legacy_MCA_Filled.xlsm", key="rpt_dl_xlsm")
+
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(f"{node_tag}_Integration_Report.txt", report_text)
+                zf.writestr(f"{node_tag}_Legacy_MCA_Filled.xlsm", xlsm_bytes)
+            st.download_button("Download both (report + filled checklist, .zip)", zip_buffer.getvalue(),
+                                file_name=f"{node_tag}_MCA_Bundle.zip", key="rpt_dl_zip")
