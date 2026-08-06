@@ -150,6 +150,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         warnings += mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text, _warnings_fiveg_rows)
         warnings += mcl.sctp_status_warnings(postcheck_text)
         warnings += mcl.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification, _warnings_fiveg_rows)
+        warnings += mcl.lte_cell_presence_warnings(ciq_wb, postcheck_text, _warnings_eutran_rows)
+        warnings += mcl.fiveg_cell_presence_warnings(ciq_wb, postcheck_text, _warnings_fiveg_rows)
 
     if nsb_sa_nodes and postcheck_text:
         warnings += mcl.sa_conversion_amf_warning(postcheck_text, nsb_sa_nodes)
@@ -488,6 +490,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             alarm_notes_line = nsb.external_alarm_scripting_locked_note(controller_checks_data)
             alarm_partial_pending = nsb.external_alarm_scripting_partial_pending(controller_checks_data)
             active_alarms_pending = nsb.active_external_alarms_pending(controller_checks_data)
+            if active_alarms_pending:
+                nsb_pending_from_warnings.append(active_alarms_pending)
             sau_state = controller_checks_data.get("sau_state")
             if sau_state:
                 if sau_state["oper"] == "ENABLED":
@@ -585,7 +589,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 choices_pending.append(alarm_partial_pending)
                 st.caption(alarm_partial_pending)
             if active_alarms_pending:
-                choices_pending.append(active_alarms_pending)
                 st.caption(active_alarms_pending)
             if sau_pending:
                 choices_pending.append(sau_pending)
@@ -769,11 +772,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
             # ---- Completed ----
             int_rows = NSB_ROW_MAP["integration"]["completed"]
-            for i, row_num in enumerate(int_rows):
-                if int_checked and i < len(int_pairs):
-                    _rw(row_num, True, [(3, int_pairs[i][0]), (4, int_pairs[i][1])])
-                else:
-                    _rw(row_num, False)
+            mcl.write_buffer_2col_with_overflow(row_writes, int_rows, int_pairs if int_checked else [])
             _rw(NSB_ROW_MAP["controller_integration"]["completed"][0], ctrl_checked and controller_id, [(3, controller_id)] if ctrl_checked else None)
             _rw(NSB_ROW_MAP["dss_activation"]["completed"][0], dss_completed, [(3, dss_bands)] if dss_completed else None)
             _rw(NSB_ROW_MAP["ngs_activation"]["completed"][0], ngs_completed, [(3, ngs_bands), (4, ngs_node)] if ngs_completed else None)
@@ -784,14 +783,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 [(3, "/".join(lte_bands_all))] + ([(4, psap_sched_id.strip())] if psap_sched_id.strip() else []) if psap_line else None)
             _rw(NSB_ROW_MAP["speedtest_lte"]["completed"][0], speed_lte_line, [(3, "/".join(lte_bands_all))] if speed_lte_line else None)
             _rw(NSB_ROW_MAP["speed_test_5g"]["completed"][0], speed_5g_line, [(3, "/".join(fiveg_bands_all))] if speed_5g_line else None)
-            _rw(NSB_ROW_MAP["calltest_fnet"]["completed"][0], False)
+            _rw(NSB_ROW_MAP["calltest_fnet"]["completed"][0], fnet_line, [(3, fnet_line)] if fnet_line else None)
             sfp_rows = NSB_ROW_MAP["transport_sfp"]["completed"]
-            for i, row_num in enumerate(sfp_rows):
-                if i < len(sfp_completed_lines):
-                    node, bbu, siad = sfp_completed_lines[i]
-                    _rw(row_num, True, [(3, node), (4, f"{bbu} (BBU End) & {siad} (SIAD End)")])
-                else:
-                    _rw(row_num, False)
+            sfp_pairs = [(node, f"{bbu} (BBU End) & {siad} (SIAD End)") for node, bbu, siad in sfp_completed_lines]
+            mcl.write_buffer_2col_with_overflow(row_writes, sfp_rows, sfp_pairs)
             _rw(NSB_ROW_MAP["ret_configuration"]["completed"][0], ret_completed)
             _rw(NSB_ROW_MAP["external_alarm_scripting"]["completed"][0], not cascade_fires and alarm_scripting_completed, [(3, controller_id)] if alarm_scripting_completed else None)
             _rw(NSB_ROW_MAP["sau_connections"]["completed"][0], not cascade_fires and sau_completed, [(3, controller_id)] if sau_completed else None)
@@ -858,11 +853,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw(NSB_ROW_MAP["vswr_overthreshold"]["pending"][0], False)
 
             pending_buffer_lines = list(nsb_pending_from_warnings) + ([additional_pending] if additional_pending.strip() else [])
-            for i, row_num in enumerate(NSB_ROW_MAP["additional_pending"]):
-                if i < len(pending_buffer_lines):
-                    row_writes.append((row_num, True, [(2, pending_buffer_lines[i])]))
-                else:
-                    row_writes.append((row_num, False, []))
+            mcl.write_buffer_with_overflow(row_writes, NSB_ROW_MAP["additional_pending"], pending_buffer_lines)
 
             florida_xlsm_rows = NSB_ROW_MAP["florida_cells"]
             row_writes.append((NSB_ROW_MAP["florida_header"], bool(florida_checked), []))
@@ -877,13 +868,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             nr_line = "NR configuration has been verified." if "NR configuration has been verified." in choices_notes else None
             row_writes.append((NSB_ROW_MAP["notes_nr_verified"], bool(nr_line), [(2, nr_line)] if nr_line else []))
             other_notes = [n for n in choices_notes if n not in ("Final Port Configuration attached.", "NR configuration has been verified.")]
-            if alarm_notes_line:
-                other_notes = other_notes + [alarm_notes_line]
-            for i, row_num in enumerate(NSB_ROW_MAP["notes_buffer"]):
-                if i < len(other_notes):
-                    row_writes.append((row_num, True, [(2, other_notes[i])]))
-                else:
-                    row_writes.append((row_num, False, []))
+            mcl.write_buffer_with_overflow(row_writes, NSB_ROW_MAP["notes_buffer"], other_notes)
 
             xlsm_bytes = fill_legacy_mca_surgical(NSB_TEMPLATE_PATH, row_writes)
             st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
