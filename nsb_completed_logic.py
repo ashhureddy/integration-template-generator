@@ -49,6 +49,22 @@ def external_alarm_scripting_partial_pending(controller_checks_data):
     return f"external alarm ports {ports_fmt} locked (Tower crew)"
 
 
+def active_external_alarms_pending(controller_checks_data):
+    """New NSB-specific check: reports EVERY genuinely active alarm port (per
+    activeExternalAlarm), regardless of whether it's currently locked or unlocked —
+    this is independent of, and separate from, the locked-ports classification above.
+    Uses the standard Oxford-comma 'and' slogan format (format_ports_with_slogans),
+    unlike external_alarm_scripting_partial_pending's plain-comma style. Confirmed
+    destination: Pending, stakeholder Tower crew."""
+    active_ports = [p for p in controller_checks_data.get("alarm_ports", []) if p.get("active") and p["slogan"]]
+    if not active_ports:
+        return None
+    port_slogan_map = {p["port"]: p["slogan"] for p in active_ports}
+    ports_str = ",".join(p["port"] for p in active_ports)
+    ports_fmt = mcl.format_ports_with_slogans(ports_str, port_slogan_map)
+    return f"Active external alarms on ports : {ports_fmt}. (Tower crew)"
+
+
 # ============================================================
 # 6610 CASCADE — confirmed 6 items (one more than MCA/N2E's 5): adds Area test to the
 # forced-Pending set. Same simple trigger as N2E (controller-checks file not present).
