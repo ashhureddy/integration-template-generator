@@ -110,10 +110,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         warnings += sfp_warning_texts
         n2e_pending_from_warnings += sfp_pending_lines
 
-        warnings += mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
-        warnings += mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
+        # Confirmed perf fix: compute these once here instead of letting each of the
+        # three warning checks below independently re-parse the same sheets.
+        _warnings_eutran_rows = app.sheet_objs(ciq_wb["eUtran Parameters"]) if "eUtran Parameters" in ciq_wb.sheetnames else []
+        _warnings_fiveg_rows = app.sheet_objs(ciq_wb["5G Info"]) if "5G Info" in ciq_wb.sheetnames else []
+
+        warnings += mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text, _warnings_eutran_rows)
+        warnings += mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text, _warnings_fiveg_rows)
         warnings += mcl.sctp_status_warnings(postcheck_text)
-        warnings += mcl.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification)
+        warnings += mcl.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification, _warnings_fiveg_rows)
 
     # SA Conversion — moved earlier (previously computed later, inside the Completed
     # expander) since the AMF warning check below needs it before the gate.
@@ -850,6 +855,26 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 columns untouched."""
                 row_writes.append((row_num, bool(checked), [(col, value)] if checked and value else []))
 
+            def _write_buffer_with_overflow(rows, items, col=2, sep=" | "):
+                """Confirmed fix: when there are more items than available template rows,
+                the overflow no longer gets silently dropped — instead, everything from
+                the last available row onward gets combined into ONE line, joined by the
+                separator, and written into that final row. Every row before the last
+                still gets exactly one item as normal."""
+                if not rows:
+                    return
+                if len(items) <= len(rows):
+                    for i, row_num in enumerate(rows):
+                        if i < len(items):
+                            row_writes.append((row_num, True, [(col, items[i])]))
+                        else:
+                            row_writes.append((row_num, False, []))
+                else:
+                    for i, row_num in enumerate(rows[:-1]):
+                        row_writes.append((row_num, True, [(col, items[i])]))
+                    overflow = sep.join(items[len(rows) - 1:])
+                    row_writes.append((rows[-1], True, [(col, overflow)]))
+
             # ---- Completed ----
             # Integration (42,43,44): C=bands only, D=node only, per node — confirmed
             # real column split, not the whole "Integration: bands node" sentence in one cell.
@@ -973,11 +998,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 + ([additional_pending] if additional_pending.strip() else [])
             )
             pending_buffer_rows = N2E_ROW_MAP["additional_pending"]
-            for i, row_num in enumerate(pending_buffer_rows):
-                if i < len(pending_buffer_lines):
-                    row_writes.append((row_num, True, [(2, pending_buffer_lines[i])]))
-                else:
-                    row_writes.append((row_num, False, []))
+            _write_buffer_with_overflow(pending_buffer_rows, pending_buffer_lines)
 
             # ---- Notes ----
             final_port_line = "Final Port Configuration attached." if "Final Port Configuration attached." in choices_notes else None
@@ -988,11 +1009,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             other_notes = [n for n in choices_notes
                             if n not in ("Final Port Configuration attached.", "NR configuration has been verified.")]
             notes_buffer_rows = N2E_ROW_MAP["notes_buffer"]
-            for i, row_num in enumerate(notes_buffer_rows):
-                if i < len(other_notes):
-                    row_writes.append((row_num, True, [(2, other_notes[i])]))
-                else:
-                    row_writes.append((row_num, False, []))
+            _write_buffer_with_overflow(notes_buffer_rows, other_notes)
 
             xlsm_bytes = fill_legacy_mca_surgical(N2E_TEMPLATE_PATH, row_writes)
             st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
