@@ -25,7 +25,7 @@ from nsb_row_map import NSB_ROW_MAP
 from mca_xlsm_surgical import fill_legacy_mca_surgical
 from pathlib import Path
 
-NSB_TEMPLATE_PATH = Path(__file__).parent / "templates" / "Static" / "NSB_Macro_Template_v4.xlsm"
+NSB_TEMPLATE_PATH = Path(__file__).parent / "templates" / "Static" / "NSB_Macro_Template_v4_updated (2).xlsm"
 
 
 def _checked_group(label, lines, key):
@@ -374,10 +374,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 c1, c2 = st.columns([2, 1])
                 with c1: st.caption(f"{controller_id} (controller)")
                 with c2:
-                    cpick = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
-                                           key="nsb_lkf_controller", label_visibility="collapsed")
-                    if cpick != "\u2014 Select \u2014":
-                        lkf_controller_choice = cpick
+                    if cascade_fires:
+                        st.caption("Pending (auto \u2014 no 6610 checks)")
+                        lkf_controller_choice = "Pending"
+                    else:
+                        cpick = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                               key="nsb_lkf_controller", label_visibility="collapsed")
+                        if cpick != "\u2014 Select \u2014":
+                            lkf_controller_choice = cpick
             lkf_lines_by_section = mcl.lkf_lines_by_choice(lkf_node_choices, lkf_controller_choice, controller_id) \
                 if (lkf_node_choices or lkf_controller_choice) else {}
             if lkf_lines_by_section.get("Completed"):
@@ -446,6 +450,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 if speed_5g_line: choices_completed.append(speed_5g_line)
                 if fnet_line: choices_completed.append(fnet_line)
 
+        # Confirmed new fix: BBU End auto-fetches from the Transport SFP table already
+        # parsed from the Post-checks PDF (ericssonprod, matched by node ID). SIAD End
+        # stays fully manual.
         sfp_completed_lines = []
         if new_nodes:
             with st.container(border=True):
@@ -453,7 +460,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 for node in new_nodes:
                     c1, c2, c3 = st.columns([1, 1, 1])
                     with c1: st.caption(node)
-                    with c2: bbu = st.text_input("BBU", key=f"nsb_sfp_bbu_{node}", label_visibility="collapsed", placeholder="SFP Model (BBU End)")
+                    with c2:
+                        bbu_auto = transport_sfp_data.get(node, {}).get("ericssonprod", "")
+                        bbu = st.text_input("BBU", value=bbu_auto, key=f"nsb_sfp_bbu_{node}", label_visibility="collapsed", placeholder="SFP Model (BBU End)")
                     with c3: siad = st.text_input("SIAD", key=f"nsb_sfp_siad_{node}", label_visibility="collapsed", placeholder="SFP Model (SIAD End)")
                     if bbu.strip() or siad.strip():
                         sfp_completed_lines.append((node, bbu, siad))
@@ -470,6 +479,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         alarm_scripting_completed = None
         alarm_notes_line, alarm_partial_pending = None, None
         sau_completed, sau_pending = None, None
+        sau_disabled = False
         if controller_checks_data and not cascade_fires:
             if mcl.external_alarm_scripting_confirmed(controller_checks_data):
                 alarm_scripting_completed = f"External alarm Scripting on: {controller_id}"
@@ -477,6 +487,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 st.caption(f"\u2705 {alarm_scripting_completed}")
             alarm_notes_line = nsb.external_alarm_scripting_locked_note(controller_checks_data)
             alarm_partial_pending = nsb.external_alarm_scripting_partial_pending(controller_checks_data)
+            active_alarms_pending = nsb.active_external_alarms_pending(controller_checks_data)
             sau_state = controller_checks_data.get("sau_state")
             if sau_state:
                 if sau_state["oper"] == "ENABLED":
@@ -484,6 +495,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     choices_completed.append(sau_completed)
                     st.caption(f"\u2705 {sau_completed}")
                 else:
+                    sau_disabled = True
                     sau_pending = f"SAU Connections: {controller_id} (MIC PM)"
 
         sup_completed_lines, sup_pending_lines = [], []
@@ -522,7 +534,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 choices_completed.append(testing_completed)
                 st.caption(f"\u2705 {testing_completed}")
             elif testing_section == "Pending":
-                testing_pending = f"External alarm testing: {controller_id} (MIC PM)"
+                # Confirmed exception: Florida market reports to AT&T, not MIC PM.
+                # Computed independently here since regional_market isn't reliably in
+                # scope this early (only conditionally set inside the GPS section).
+                _testing_calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
+                _testing_market = None
+                if _testing_calltest_path.exists() and mm_objs:
+                    _testing_prefix_to_market, _ = mcl.load_calltest_table(_testing_calltest_path, tab_name="NSB")
+                    _testing_market = mcl.determine_market(mm_objs[0].get("Node to be built as"), _testing_prefix_to_market)
+                _testing_stakeholder = "AT&T" if _testing_market == "Florida" else "MIC PM"
+                testing_pending = f"External alarm testing: {controller_id} ({_testing_stakeholder})"
 
         script_6673_completed = None
         if has_6673:
@@ -550,11 +571,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         if cascade_fires:
             for item_key, item_text in [
                 ("6610 Controller Integration", f"6610 Controller Integration: {controller_id} (MIC PM)"),
-                ("External alarm Scripting on", "External alarm Scripting on. (MIC)"),
-                ("LKF Installation", "LKF Installation. (MIC)"),
-                ("External alarm testing", "External alarm testing. (MIC PM)"),
+                ("External alarm Scripting on", f"External alarm Scripting on: {controller_id}. (MIC)"),
+                ("External alarm testing", f"External alarm testing: {controller_id}. (MIC PM)"),
                 ("Area test", area_pending or "Area test. (MIC PM)"),
-                ("SAU Connections", "SAU Connections. (MIC PM)"),
+                ("SAU Connections", f"SAU Connections: {controller_id}. (MIC PM)"),
             ]:
                 choices_pending.append(item_text)
                 st.caption(item_text)
@@ -564,6 +584,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if alarm_partial_pending:
                 choices_pending.append(alarm_partial_pending)
                 st.caption(alarm_partial_pending)
+            if active_alarms_pending:
+                choices_pending.append(active_alarms_pending)
+                st.caption(active_alarms_pending)
             if sau_pending:
                 choices_pending.append(sau_pending)
                 st.caption(sau_pending)
@@ -614,17 +637,20 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     florida_active_rows = florida_rows if florida_checked else []
 
     with st.expander("Notes"):
-        # SAU enabled on Node/Controller — same as N2E, moved to the top.
-        sau_auto_target = controller_id if sau_completed else None
-        sau_label = f"SAU enabled on the: {sau_auto_target}" if sau_auto_target else "SAU enabled on the: Node or Controller"
-        sau_notes_checked = st.checkbox(sau_label, value=True, key="nsb_sau_notes")
-        if sau_notes_checked:
-            if sau_auto_target:
-                choices_notes.append(f"SAU enabled on the: {sau_auto_target}")
-            else:
-                sau_manual_target = st.text_input("\U0001F4DD Node ID or Controller ID", key="nsb_sau_manual")
-                if sau_manual_target.strip():
-                    choices_notes.append(f"SAU enabled on the: {sau_manual_target}")
+        # SAU enabled on Node/Controller — same as N2E, moved to the top. Confirmed:
+        # hidden entirely when there's no controller-checks data at all, or when SAU is
+        # explicitly confirmed DISABLED.
+        if not cascade_fires and not sau_disabled:
+            sau_auto_target = controller_id if sau_completed else None
+            sau_label = f"SAU enabled on the: {sau_auto_target}" if sau_auto_target else "SAU enabled on the: Node or Controller"
+            sau_notes_checked = st.checkbox(sau_label, value=True, key="nsb_sau_notes")
+            if sau_notes_checked:
+                if sau_auto_target:
+                    choices_notes.append(f"SAU enabled on the: {sau_auto_target}")
+                else:
+                    sau_manual_target = st.text_input("\U0001F4DD Node ID or Controller ID", key="nsb_sau_manual")
+                    if sau_manual_target.strip():
+                        choices_notes.append(f"SAU enabled on the: {sau_manual_target}")
 
         nsb_scripted_locked_note = mcl.scripted_locked_bands_note(ciq_wb)
         if nsb_scripted_locked_note:
@@ -647,11 +673,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if mon_checked:
                 choices_notes.append(f"{'|'.join(new_nodes)} nodes is in Not monitored state.")
         if controller_id:
-            ctrl_mon_choice = st.selectbox(f"{controller_id} monitored state", ["\u2014 Select \u2014", "Monitored", "Not monitored"], key="nsb_ctrl_mon")
-            if ctrl_mon_choice == "Monitored":
-                choices_notes.append(f"{controller_id} is in monitored state.")
-            elif ctrl_mon_choice == "Not monitored":
+            if cascade_fires or sau_disabled:
+                st.caption(f"{controller_id} is in not monitored state. (auto \u2014 "
+                            f"{'no 6610 checks' if cascade_fires else 'SAU disabled'})")
                 choices_notes.append(f"{controller_id} is in not monitored state.")
+            else:
+                ctrl_mon_choice = st.selectbox(f"{controller_id} monitored state", ["\u2014 Select \u2014", "Monitored", "Not monitored"], key="nsb_ctrl_mon")
+                if ctrl_mon_choice == "Monitored":
+                    choices_notes.append(f"{controller_id} is in monitored state.")
+                elif ctrl_mon_choice == "Not monitored":
+                    choices_notes.append(f"{controller_id} is in not monitored state.")
 
         # SA Conversion / TermPointToAmf note — same as N2E, fires only if the CIQ's
         # NR_SA tab is present AND SA Conversion is detected for at least one node.
@@ -783,7 +814,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 [(3, " & ".join(mcl.sort_bands_lte_first(dss_pending_bands_combined)))] if dss_pending_bands_combined else None)
             _rw(NSB_ROW_MAP["ngs_activation"]["pending"][0], ngs_pending, [(3, ngs_bands), (4, ngs_node)] if ngs_pending else None)
             _rw(NSB_ROW_MAP["gps_installation"]["pending"][0], gps_pending_line, [(3, "|".join(disabled_nodes))] if gps_pending_line else None)
-            _rw(NSB_ROW_MAP["lkf_installation"]["pending"][0], cascade_fires or lkf_pending, None)
+            lkf_p_value = (lkf_pending.replace("LKF Installation:", "").replace("(MIC)", "").strip()
+                           if lkf_pending else None)
+            _rw(NSB_ROW_MAP["lkf_installation"]["pending"][0], bool(lkf_pending), [(3, lkf_p_value)] if lkf_p_value else None)
             _rw(NSB_ROW_MAP["psap_speedtest"]["pending"][0], False)
             _rw(NSB_ROW_MAP["speedtest_lte"]["pending"][0], False)
             _rw(NSB_ROW_MAP["speed_test_5g"]["pending"][0], False)
