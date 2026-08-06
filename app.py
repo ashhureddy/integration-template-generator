@@ -51,7 +51,7 @@ TPL_DSS_3SECTOR = resolve_dss_template("stand")
 TDIR_N2E = Path(__file__).parent / "templates" / "N2E"
 TPL_N2E_LTE = TDIR_N2E / "N2E_LTE_Integration_Procedure_with_LTE_Node_as_Primary_V5.txt"
 TPL_N2E_5G = TDIR_N2E / "N2E_5G_Integration_Procedure_with_5G_Node_as_Primary_V6.txt"
-TPL_N2E_MMBB = TDIR_N2E / "MMBB_N2E_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V8"
+TPL_N2E_MMBB = TDIR_N2E / "MMBB_N2E_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V8.txt"
 TPL_N2E_TRIMODE = TDIR_N2E / "N2E_TRIMODE_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V8.txt"
 
 TDIR_NSB = Path(__file__).parent / "templates" / "NSB"
