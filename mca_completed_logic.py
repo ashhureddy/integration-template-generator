@@ -1156,12 +1156,17 @@ def detect_missing_nodes(postcheck_text, candidate_nodes):
     return missing
 
 
-def current_configuration_line(ciq_wb, mm_objs, postcheck_text):
+def current_configuration_line(ciq_wb, mm_objs, postcheck_text, missing_nodes=None):
     """Returns the Current Configuration string, or "" if Post-checks already matches the
-    CIQ target for every node (nothing missing, field should stay blank/not triggered)."""
+    CIQ target for every node (nothing missing, field should stay blank/not triggered).
+    Confirmed new behavior: when any node is missing from Post-checks entirely
+    (missing_nodes non-empty), shows EVERY present node's actual hardware
+    unconditionally — whatever is actually on site now — not just mismatches, since a
+    missing node changes what "current configuration" means for the whole report."""
     if not postcheck_text:
         return ""
-    mismatches = []
+    missing_nodes = missing_nodes or []
+    lines = []
     for row in mm_objs:
         node = row.get("Node to be built as")
         if not node:
@@ -1175,11 +1180,14 @@ def current_configuration_line(ciq_wb, mm_objs, postcheck_text):
                 qx.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
         target_hw = qx.hw_string(target_row) or "NOT FOUND"
         actual_hw = qx.pre_hw_string(postcheck_text, node) or "NOT FOUND"
-        if target_hw != actual_hw:
-            mismatches.append(f"{node}({actual_hw})")
-    if not mismatches:
+        if missing_nodes:
+            if node not in missing_nodes:
+                lines.append(f"{node}({actual_hw})")
+        elif target_hw != actual_hw:
+            lines.append(f"{node}({actual_hw})")
+    if not lines:
         return ""
-    return "/".join(mismatches)
+    return "/".join(lines)
 
 
 # ============================================================
