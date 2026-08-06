@@ -38,12 +38,18 @@ def integration_bands_and_nodes(classification):
     return "/".join(mcl.sort_bands_lte_first(all_bands)), "|".join(all_nodes)
 
 
-def integration_bands_by_tech(classification):
+def integration_bands_by_tech(classification, missing_nodes=None):
     """Splits Integration's detected bands into LTE-only and 5G-only subsets — confirmed
     this is what PSAP/Speedtest and Speed test reuse directly, no separate detection and
-    no market lookup at all for N2E (confirmed: report for ALL markets)."""
+    no market lookup at all for N2E (confirmed: report for ALL markets).
+    Confirmed fix: missing_nodes excludes cells belonging to a node that's genuinely
+    not integrated (no hardware string found anywhere in Post-checks) — a band still
+    counts if it also appears on an integrated node, only fully-exclusive bands drop."""
+    missing_nodes = missing_nodes or []
     lte_bands, fiveg_bands = set(), set()
     for node, cells in classification.get("added", {}).items():
+        if node in missing_nodes:
+            continue
         for cell in cells:
             label, _sector = qx.band_label(cell)
             if not label:
