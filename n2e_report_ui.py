@@ -916,7 +916,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             # rather than being marked Completed.
             if missing_nodes:
                 row_writes.append((N2E_ROW_MAP["post_configuration"]["completed"], False, []))
-                row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], True, [(3, f"{post_line}(MIC PM)")]))
+                row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], True, [(3, post_line), (5, "MIC PM")]))
             else:
                 row_writes.append((N2E_ROW_MAP["post_configuration"]["completed"], True, [(3, post_line)]))
                 row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], False, []))
