@@ -410,7 +410,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.markdown("**LKF Installation** \u2014 Node and Controller are tracked "
                         "independently, required:")
             lkf_node_choices = {}
-            for node in new_nodes:
+            for node in integrated_nodes:
                 c1, c2 = st.columns([2, 1])
                 with c1: st.caption(node)
                 with c2:
@@ -544,8 +544,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # when External alarm testing is Pending for the 6610, include the controller ID
         # alongside the node(s) in Area test's Pending line too.
         area_completed, area_pending = None, None
-        if new_nodes:
-            area_targets = new_nodes + ([controller_id] if testing_pending and controller_id else [])
+        if integrated_nodes:
+            area_targets = integrated_nodes + ([controller_id] if testing_pending and controller_id else [])
             area_pending = n2e.area_test_line(area_targets, "Failed") + " (MIC PM)"
 
         # 6673 Script load — auto, Completed only.
@@ -836,10 +836,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if nr_checked:
                 choices_notes.append("NR configuration has been verified.")
 
-        if new_nodes:
-            mon_checked = st.checkbox(f"{'|'.join(new_nodes)} nodes is in Not monitored state.", value=True, key="n2e_notes_mon")
+        if integrated_nodes:
+            mon_checked = st.checkbox(f"{'|'.join(integrated_nodes)} nodes is in Not monitored state.", value=True, key="n2e_notes_mon")
             if mon_checked:
-                choices_notes.append(f"{'|'.join(new_nodes)} nodes is in Not monitored state.")
+                choices_notes.append(f"{'|'.join(integrated_nodes)} nodes is in Not monitored state.")
 
         if controller_id:
             if cascade_fires or sau_disabled:
@@ -860,7 +860,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 choices_notes.append(sa_note)
 
         cpri_choice = st.selectbox("Area prechecks verification for CPRI/SFP check", ["\u2014 Select \u2014", "Completed", "Pending"], key="n2e_cpri") \
-            if new_nodes else "\u2014 Select \u2014"
+            if integrated_nodes else "\u2014 Select \u2014"
         if cpri_choice == "Completed":
             choices_notes.append("Area prechecks verification for CPRI/SFP check is completed.")
         elif cpri_choice == "Pending":
