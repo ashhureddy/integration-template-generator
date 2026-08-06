@@ -1139,6 +1139,23 @@ def fdd_renaming_lines(ciq_wb):
 # directly against postcheck_text, same as elsewhere this session.
 # ============================================================
 
+def detect_missing_nodes(postcheck_text, candidate_nodes):
+    """New shared check: a node is considered genuinely NOT integrated if its hardware
+    string can't be found anywhere in Post-checks at all — same detection signal
+    current_configuration_line already uses via pre_hw_string, just applied here to
+    decide node presence rather than to flag a hardware mismatch. Returns the subset of
+    candidate_nodes with no hardware string found. Confirmed distinct from a hardware
+    MISMATCH (node present but wrong config) — this is node ABSENCE entirely."""
+    if not postcheck_text:
+        return list(candidate_nodes)
+    missing = []
+    for node in candidate_nodes:
+        actual_hw = qx.pre_hw_string(postcheck_text, node)
+        if not actual_hw:
+            missing.append(node)
+    return missing
+
+
 def current_configuration_line(ciq_wb, mm_objs, postcheck_text):
     """Returns the Current Configuration string, or "" if Post-checks already matches the
     CIQ target for every node (nothing missing, field should stay blank/not triggered)."""
