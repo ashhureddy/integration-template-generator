@@ -1156,13 +1156,17 @@ def detect_missing_nodes(postcheck_text, candidate_nodes):
     return missing
 
 
-def current_configuration_line(ciq_wb, mm_objs, postcheck_text, missing_nodes=None):
+def current_configuration_line(ciq_wb, mm_objs, postcheck_text, missing_nodes=None, dual_identity=False):
     """Returns the Current Configuration string, or "" if Post-checks already matches the
     CIQ target for every node (nothing missing, field should stay blank/not triggered).
-    Confirmed new behavior: when any node is missing from Post-checks entirely
-    (missing_nodes non-empty), shows EVERY present node's actual hardware
-    unconditionally — whatever is actually on site now — not just mismatches, since a
-    missing node changes what "current configuration" means for the whole report."""
+    Confirmed: when any node is missing from Post-checks entirely (missing_nodes
+    non-empty), shows EVERY present node's actual hardware unconditionally — whatever
+    is actually on site now — not just mismatches, since a missing node changes what
+    "current configuration" means for the whole report.
+    Confirmed dual_identity=True (N2E/NSB only, not MCA): matches Post Configuration's
+    own "{node}(P)/{secondary}(S)({bbu_mode})({hw})" format exactly, for co-located
+    LTE+5G nodes — but using the ACTUAL hardware from Post-checks, not the CIQ target,
+    since this field reflects what's really deployed now."""
     if not postcheck_text:
         return ""
     missing_nodes = missing_nodes or []
@@ -1180,14 +1184,20 @@ def current_configuration_line(ciq_wb, mm_objs, postcheck_text, missing_nodes=No
                 qx.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
         target_hw = qx.hw_string(target_row) or "NOT FOUND"
         actual_hw = qx.pre_hw_string(postcheck_text, node) or "NOT FOUND"
-        if missing_nodes:
-            if node not in missing_nodes:
-                lines.append(f"{node}({actual_hw})")
-        elif target_hw != actual_hw:
+
+        include = (node not in missing_nodes) if missing_nodes else (target_hw != actual_hw)
+        if not include:
+            continue
+
+        if dual_identity and qx.is_populated(e_name) and qx.is_populated(g_name):
+            secondary = g_name if is_lte_primary else e_name
+            bbu_mode = row.get("BBU Mode")
+            lines.append(f"{node}(P)/{secondary}(S)({bbu_mode})({actual_hw})")
+        else:
             lines.append(f"{node}({actual_hw})")
     if not lines:
         return ""
-    return "/".join(lines)
+    return " + ".join(lines) if dual_identity else "/".join(lines)
 
 
 # ============================================================
