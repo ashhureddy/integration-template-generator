@@ -89,6 +89,7 @@ KNOWN_GPS_TYPES = {"GPS 02 01", "GPS 03 01", "GRU 04 01", "GRU 05 01"}
 # value; we just treat anything outside KNOWN_GPS_TYPES as unconfirmed.
 
 
+@st.cache_data
 def extract_sync_status_2(post_text):
     """Parses 'Status of Synchronization 2' — confirmed real structure (ECL02586, SCL01706):
 
@@ -113,6 +114,7 @@ def extract_sync_status_2(post_text):
     return out
 
 
+@st.cache_data
 def extract_transport_sfp(post_text):
     """Parses the 'Transport SFP' table — confirmed real structure (ECL02586):
 
@@ -190,6 +192,7 @@ def extract_sidehaul_info(ciq_wb):
 # ---- Controller-checks PDF (separate file from Pre/Post-checks, confirmed real
 # structure from FNOC222775_C001_controller_checks.pdf) ----
 
+@st.cache_data
 def extract_controller_checks(text):
     """Returns {
         'node_alarm_status': 'OK' | 'NOT OK' | None,
@@ -1575,6 +1578,7 @@ _LTE_CELL_ROW_RE = re.compile(
     r'(ENABLED|DISABLED) (\d+) (true|false) (\S+) (\d+) (\d+)')
 
 
+@st.cache_data
 def extract_lte_cell_status(post_text):
     """Parses the real 'LTE FDD Cell Status Information' table. Confirmed real header:
     'Cells adminState availabilityStatus cellBarred dlChannelBandwidth earfcndl earfcnul
@@ -1592,13 +1596,16 @@ def extract_lte_cell_status(post_text):
     return out
 
 
-def lte_sector_param_warnings(ciq_wb, mm_objs, post_text):
+def lte_sector_param_warnings(ciq_wb, mm_objs, post_text, eutran_rows=None):
     """Confirmed CIQ mapping (cross-checked against real data, corrected from the
     original ask: PCI compares against CIQ's own PCI column, not cellId):
     dlChannelBandwidth->dlChannelBandwidth, earfcndl->earfcnDl, earfcnul->earfcnUl,
     PCI->PCI, sectorCarrierRef->sectorId, ulChannelBandwidth->ulChannelBandwidth (all in
     'eUtran Parameters'); tac->tac (in 'eNB Info', matched via eNBId, same value for
-    every cell under that eNB). Returns list of warning texts, one per mismatched field."""
+    every cell under that eNB). Returns list of warning texts, one per mismatched field.
+    Confirmed perf fix: eutran_rows can be passed in pre-computed (once per render) to
+    avoid re-parsing the same sheet repeatedly across this and other warning checks —
+    falls back to computing it here if not provided, for backward compatibility."""
     warnings = []
     if not post_text or "eUtran Parameters" not in ciq_wb.sheetnames:
         return warnings
@@ -1606,7 +1613,9 @@ def lte_sector_param_warnings(ciq_wb, mm_objs, post_text):
     if not post_cells:
         return warnings
 
-    ciq_rows = {r.get("EutranCellFDDId"): r for r in qx.sheet_objs(ciq_wb["eUtran Parameters"])
+    if eutran_rows is None:
+        eutran_rows = qx.sheet_objs(ciq_wb["eUtran Parameters"])
+    ciq_rows = {r.get("EutranCellFDDId"): r for r in eutran_rows
                 if r.get("EutranCellFDDId")}
     field_map = [
         ("dlChannelBandwidth", "dlChannelBandwidth"), ("earfcndl", "earfcnDl"),
@@ -1628,7 +1637,6 @@ def lte_sector_param_warnings(ciq_wb, mm_objs, post_text):
     # tac — matched via eNBId, same value expected for every cell under that eNB.
     if "eNB Info" in ciq_wb.sheetnames:
         enb_tac = {r.get("eNBId"): r.get("tac") for r in qx.sheet_objs(ciq_wb["eNB Info"]) if r.get("eNBId")}
-        eutran_rows = qx.sheet_objs(ciq_wb["eUtran Parameters"])
         cell_to_enbid = {r.get("EutranCellFDDId"): r.get("eNBId") for r in eutran_rows if r.get("EutranCellFDDId")}
         checked_enbids = set()
         for cell, post_vals in post_cells.items():
@@ -1643,6 +1651,7 @@ def lte_sector_param_warnings(ciq_wb, mm_objs, post_text):
     return warnings
 
 
+@st.cache_data
 def extract_5g_cell_du_status(post_text):
     """Parses '5G NR Cell DU Status' table. Confirmed real complication: nCI is
     sometimes empty (variable-length row), so pure positional splitting is unreliable —
@@ -1670,6 +1679,7 @@ def extract_5g_cell_du_status(post_text):
     return out
 
 
+@st.cache_data
 def extract_5g_sector_carrier(post_text):
     """Parses '5G NR Sector Carrier' table. Confirmed real header:
     'nrSectorCarrier adminState arfcnDL arfcnUL bSChannelBwDL bSChannelBwUL
@@ -1687,6 +1697,7 @@ def extract_5g_sector_carrier(post_text):
     return out
 
 
+@st.cache_data
 def extract_ssb_frequency(post_text):
     """Parses the real 'NRCellDU={cell} ssbFrequency {value}' lines. Returns
     {cell: ssbFrequency}."""
@@ -1697,6 +1708,7 @@ def extract_ssb_frequency(post_text):
     return out
 
 
+@st.cache_data
 def extract_5g_cell_cu_status(post_text):
     """Parses '5G NR Cell CU Status' table — confirmed genuinely separate real table
     from '5G NR Cell DU Status', with its own cellLocalId that should independently
@@ -1717,12 +1729,15 @@ def extract_5g_cell_cu_status(post_text):
     return out
 
 
-def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text):
+def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text, fiveg_rows=None):
     """Confirmed CIQ mapping: cellLocalId, CellRange, nRPCI, arfcnDL, arfcnUL,
     bSChannelBwDL, bSChannelBwUL, configuredMaxTxPower, ssbFrequency all compared
     directly against '5G Info' (matched by NRCellDU); nrTAC compared against 'NR_SA'
     (matched by node name, same value expected for every cell on that node — same
-    per-node pattern as LTE's tac/eNBId check)."""
+    per-node pattern as LTE's tac/eNBId check).
+    Confirmed perf fix: fiveg_rows can be passed in pre-computed (once per render) to
+    avoid re-parsing the same sheet repeatedly across this and other warning checks —
+    falls back to computing it here if not provided, for backward compatibility."""
     warnings = []
     if not post_text or "5G Info" not in ciq_wb.sheetnames:
         return warnings
@@ -1734,7 +1749,9 @@ def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text):
     if not cell_du:
         return warnings
 
-    ciq_rows = {r.get("NRCellDU"): r for r in qx.sheet_objs(ciq_wb["5G Info"]) if r.get("NRCellDU")}
+    if fiveg_rows is None:
+        fiveg_rows = qx.sheet_objs(ciq_wb["5G Info"])
+    ciq_rows = {r.get("NRCellDU"): r for r in fiveg_rows if r.get("NRCellDU")}
 
     # cellLocalId — confirmed checked independently from BOTH the CU Status and DU
     # Status tables, since either could diverge from the CIQ on its own.
@@ -1803,13 +1820,16 @@ def sctp_status_warnings(post_text):
     return warnings
 
 
-def digital_tilt_warnings(ciq_wb, mm_objs, post_text, classification):
+def digital_tilt_warnings(ciq_wb, mm_objs, post_text, classification, fiveg_rows=None):
     """Confirmed check: DigitalTilt in Post-checks (the 'usedDigitalTilt' value — the
     'digitalTilt' field itself is confirmed blank/not printed in the real data) must
     match CIQ's 'Electrical Tilt' column, for CBAND/DOD sectors only. Confirmed real
     format: 'NRSectorCarrier={sector},CommonBeamforming={n} {usedDigitalTilt}'. Matched
     to CIQ via the NRSectorCarrier column. Only checks sectors whose band is CBAND or
-    DOD/DOD_BWE (confirmed via classification['added'] + band_label)."""
+    DOD/DOD_BWE (confirmed via classification['added'] + band_label).
+    Confirmed perf fix: fiveg_rows can be passed in pre-computed (once per render,
+    shared with fiveg_sector_param_warnings) to avoid re-parsing the same '5G Info'
+    sheet a third time — falls back to computing it here if not provided."""
     warnings = []
     if not post_text or "5G Info" not in ciq_wb.sheetnames:
         return warnings
@@ -1829,7 +1849,9 @@ def digital_tilt_warnings(ciq_wb, mm_objs, post_text, classification):
         sector, used_tilt = m.groups()
         post_tilt[sector] = used_tilt
 
-    ciq_rows = {r.get("NRSectorCarrier"): r for r in qx.sheet_objs(ciq_wb["5G Info"]) if r.get("NRSectorCarrier")}
+    if fiveg_rows is None:
+        fiveg_rows = qx.sheet_objs(ciq_wb["5G Info"])
+    ciq_rows = {r.get("NRSectorCarrier"): r for r in fiveg_rows if r.get("NRSectorCarrier")}
 
     for sector in cband_dod_cells:
         if sector not in post_tilt or sector not in ciq_rows:
