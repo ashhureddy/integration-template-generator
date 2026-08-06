@@ -1171,6 +1171,55 @@ def current_configuration_line(ciq_wb, mm_objs, postcheck_text):
 # generators (confirmed: reuse the shared buffer lines, no dedicated classification UI).
 # ============================================================
 
+def write_buffer_with_overflow(row_writes, rows, items, col=2, sep=" | "):
+    """Confirmed shared helper (moved from N2E-local, now used by all three scopes):
+    when there are more items than available template rows, the overflow no longer
+    gets silently dropped — everything from the last available row onward gets
+    combined into ONE line, joined by the separator, and written into that final row.
+    Every row before the last still gets exactly one item as normal. Appends directly
+    to the passed-in row_writes list (matches each scope's existing local convention)."""
+    if not rows:
+        return
+    if len(items) <= len(rows):
+        for i, row_num in enumerate(rows):
+            if i < len(items):
+                row_writes.append((row_num, True, [(col, items[i])]))
+            else:
+                row_writes.append((row_num, False, []))
+    else:
+        for i, row_num in enumerate(rows[:-1]):
+            row_writes.append((row_num, True, [(col, items[i])]))
+        overflow = sep.join(items[len(rows) - 1:])
+        row_writes.append((rows[-1], True, [(col, overflow)]))
+
+
+def write_buffer_2col_with_overflow(row_writes, rows, items, col_a=3, col_b=4, sep=" | "):
+    """Same overflow-safe principle as write_buffer_with_overflow, but for the
+    2-column row structure used by Integration (bands, node) and Transport SFP
+    (node, models): items is a list of (val_a, val_b) tuples. On overflow, the two
+    columns' overflow values are joined SEPARATELY (col_a's overflow values joined
+    together, col_b's overflow values joined together) into the last row — not
+    interleaved — so e.g. Integration's last row would show
+    'LTE_B2/PCS_2 | LTE_B4' in the bands column and 'NODE_A | NODE_B' in the node
+    column, keeping each column internally consistent rather than mixing bands and
+    node names together."""
+    if not rows:
+        return
+    if len(items) <= len(rows):
+        for i, row_num in enumerate(rows):
+            if i < len(items):
+                row_writes.append((row_num, True, [(col_a, items[i][0]), (col_b, items[i][1])]))
+            else:
+                row_writes.append((row_num, False, []))
+    else:
+        for i, row_num in enumerate(rows[:-1]):
+            row_writes.append((row_num, True, [(col_a, items[i][0]), (col_b, items[i][1])]))
+        overflow_items = items[len(rows) - 1:]
+        overflow_a = sep.join(str(x[0]) for x in overflow_items)
+        overflow_b = sep.join(str(x[1]) for x in overflow_items)
+        row_writes.append((rows[-1], True, [(col_a, overflow_a), (col_b, overflow_b)]))
+
+
 def missing_slogan_ports(ports_str, port_slogan_map):
     """Confirmed real requirement: a slogan is a MUST for every reported port, not
     optional. Returns the list of typed port numbers that have NO matching detected
