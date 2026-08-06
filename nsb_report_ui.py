@@ -141,10 +141,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         warnings += sfp_warning_texts
         nsb_pending_from_warnings += sfp_pending_lines
 
-        warnings += mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
-        warnings += mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)
+        # Confirmed perf fix: compute these once here instead of letting each of the
+        # three warning checks below independently re-parse the same sheets.
+        _warnings_eutran_rows = app.sheet_objs(ciq_wb["eUtran Parameters"]) if "eUtran Parameters" in ciq_wb.sheetnames else []
+        _warnings_fiveg_rows = app.sheet_objs(ciq_wb["5G Info"]) if "5G Info" in ciq_wb.sheetnames else []
+
+        warnings += mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text, _warnings_eutran_rows)
+        warnings += mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text, _warnings_fiveg_rows)
         warnings += mcl.sctp_status_warnings(postcheck_text)
-        warnings += mcl.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification)
+        warnings += mcl.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification, _warnings_fiveg_rows)
 
     if nsb_sa_nodes and postcheck_text:
         warnings += mcl.sa_conversion_amf_warning(postcheck_text, nsb_sa_nodes)
