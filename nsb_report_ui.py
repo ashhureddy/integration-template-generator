@@ -17,6 +17,8 @@ Key confirmed differences from N2E:
 """
 
 import re
+import io
+import zipfile
 import streamlit as st
 
 import nsb_completed_logic as nsb
@@ -873,3 +875,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             xlsm_bytes = fill_legacy_mca_surgical(NSB_TEMPLATE_PATH, row_writes)
             st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
                                 file_name=f"{node_tag}_NSB_Filled.xlsm", key="nsb_dl_xlsm")
+
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(f"{node_tag}_NSB_Report.txt", report_text)
+                zf.writestr(f"{node_tag}_NSB_Filled.xlsm", xlsm_bytes)
+            st.download_button("Download both (report + filled checklist, .zip)", zip_buffer.getvalue(),
+                                file_name=f"{node_tag}_NSB_Bundle.zip", key="nsb_dl_zip")
