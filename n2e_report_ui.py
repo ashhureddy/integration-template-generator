@@ -475,14 +475,20 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             elif idl_choice == "Pending":
                 idl_pending = "IDL connections (MIC PM)"
 
-        # SMM Triggering — manual toggle, MIC PM if Pending.
+        # SMM Triggering — manual toggle, MIC PM if Pending. N/A removes the item
+        # entirely (neither Completed nor Pending, no line in the report or .xlsm).
+        # Confirmed: also auto-removed entirely (no dropdown at all) when Power Plant
+        # Swap is checked — looked up via session_state since that checkbox renders
+        # later in the script, but its value from the previous rerun is already stored
+        # under its key by the time this point in the script executes.
         smm_completed, smm_pending = None, None
-        smm_choice = st.selectbox("SMM Triggering status", ["\u2014 Select \u2014", "Completed", "Pending"], key="n2e_smm")
-        if smm_choice == "Completed":
-            smm_completed = "SMM Triggering"
-            choices_completed.append(smm_completed)
-        elif smm_choice == "Pending":
-            smm_pending = "SMM Triggering (MIC PM)"
+        if not st.session_state.get("n2e_lp_power_performed", False):
+            smm_choice = st.selectbox("SMM Triggering status", ["\u2014 Select \u2014", "Completed", "Pending", "N/A"], key="n2e_smm")
+            if smm_choice == "Completed":
+                smm_completed = "SMM Triggering"
+                choices_completed.append(smm_completed)
+            elif smm_choice == "Pending":
+                smm_pending = "SMM Triggering (MIC PM)"
 
         # External alarm testing — Completed if any scripted port unlocked, else Pending+Notes.
         # Confirmed: discard the auto-generated mixed_locked_note here too, matching MCA —
@@ -892,26 +898,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 columns untouched."""
                 row_writes.append((row_num, bool(checked), [(col, value)] if checked and value else []))
 
-            def _write_buffer_with_overflow(rows, items, col=2, sep=" | "):
-                """Confirmed fix: when there are more items than available template rows,
-                the overflow no longer gets silently dropped — instead, everything from
-                the last available row onward gets combined into ONE line, joined by the
-                separator, and written into that final row. Every row before the last
-                still gets exactly one item as normal."""
-                if not rows:
-                    return
-                if len(items) <= len(rows):
-                    for i, row_num in enumerate(rows):
-                        if i < len(items):
-                            row_writes.append((row_num, True, [(col, items[i])]))
-                        else:
-                            row_writes.append((row_num, False, []))
-                else:
-                    for i, row_num in enumerate(rows[:-1]):
-                        row_writes.append((row_num, True, [(col, items[i])]))
-                    overflow = sep.join(items[len(rows) - 1:])
-                    row_writes.append((rows[-1], True, [(col, overflow)]))
-
             # ---- Completed ----
             # Integration (42,43,44): C=bands only, D=node only, per node — confirmed
             # real column split, not the whole "Integration: bands node" sentence in one cell.
@@ -922,11 +908,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     bands = mcl.sort_bands_lte_first({app.band_label(c)[0] for c in cells if app.band_label(c)[0]})
                     if bands:
                         int_pairs.append(("/".join(bands), node))
-            for i, row_num in enumerate(int_rows):
-                if i < len(int_pairs):
-                    row_writes.append((row_num, True, [(3, int_pairs[i][0]), (4, int_pairs[i][1])]))
-                else:
-                    row_writes.append((row_num, False, []))
+            mcl.write_buffer_2col_with_overflow(row_writes, int_rows, int_pairs)
 
             _rw_simple(N2E_ROW_MAP["controller_integration"]["completed"][0],
                        not cascade_fires and controller_line and ctrl_checked, controller_id)
@@ -946,14 +928,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 row_writes.append((gps_row, False, []))
             _rw_simple(N2E_ROW_MAP["lkf_installation"]["completed"][0], lkf_completed, lkf_completed)  # confirmed: template's C is one combined "node | controller" column
             sfp_rows = N2E_ROW_MAP["transport_sfp"]["completed"]
-            for i, row_num in enumerate(sfp_rows):
-                if i < len(new_nodes) and i < len(sfp_completed_lines):
-                    node = new_nodes[i]
-                    m = re.search(r'on: \S+ (.+?) \(BBU End\) & (.+?) \(SIAD End\)', sfp_completed_lines[i])
-                    models = f"{m.group(1)} (BBU End) & {m.group(2)} (SIAD End)" if m else ""
-                    row_writes.append((row_num, True, [(3, node), (4, models)]))
-                else:
-                    row_writes.append((row_num, False, []))
+            sfp_pairs = []
+            for i in range(min(len(new_nodes), len(sfp_completed_lines))):
+                node = new_nodes[i]
+                m = re.search(r'on: \S+ (.+?) \(BBU End\) & (.+?) \(SIAD End\)', sfp_completed_lines[i])
+                models = f"{m.group(1)} (BBU End) & {m.group(2)} (SIAD End)" if m else ""
+                sfp_pairs.append((node, models))
+            mcl.write_buffer_2col_with_overflow(row_writes, sfp_rows, sfp_pairs)
             _rw_simple(N2E_ROW_MAP["ret_configuration"]["completed"][0], False)
             _rw_simple(N2E_ROW_MAP["external_alarm_scripting"]["completed"][0], not cascade_fires and alarm_scripting_completed, controller_id)
             _rw_simple(N2E_ROW_MAP["sau_connections"]["completed"][0], not cascade_fires and sau_completed, controller_id)
@@ -1035,7 +1016,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 + ([additional_pending] if additional_pending.strip() else [])
             )
             pending_buffer_rows = N2E_ROW_MAP["additional_pending"]
-            _write_buffer_with_overflow(pending_buffer_rows, pending_buffer_lines)
+            mcl.write_buffer_with_overflow(row_writes, pending_buffer_rows, pending_buffer_lines)
 
             # ---- Notes ----
             final_port_line = "Final Port Configuration attached." if "Final Port Configuration attached." in choices_notes else None
@@ -1046,7 +1027,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             other_notes = [n for n in choices_notes
                             if n not in ("Final Port Configuration attached.", "NR configuration has been verified.")]
             notes_buffer_rows = N2E_ROW_MAP["notes_buffer"]
-            _write_buffer_with_overflow(notes_buffer_rows, other_notes)
+            mcl.write_buffer_with_overflow(row_writes, notes_buffer_rows, other_notes)
 
             xlsm_bytes = fill_legacy_mca_surgical(N2E_TEMPLATE_PATH, row_writes)
             st.download_button("Download filled checklist (.xlsm)", xlsm_bytes,
