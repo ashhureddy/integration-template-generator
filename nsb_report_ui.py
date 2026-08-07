@@ -534,6 +534,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             for node, state in xmu_state.items():
                 (xmu_completed_lines if state == "ENABLED" else xmu_pending_lines).append(
                     f"XMU Installation: {node}" + ("" if state == "ENABLED" else " (MIC PM)"))
+            # Confirmed same fix as N2E: a node genuinely present in Post-checks but
+            # whose expected XMU never appears in Post-checks' Hardware Status at all
+            # was previously silently dropped entirely. Now reports Pending.
+            xmu_expected_nodes = mcl.nodes_expecting_xmu(mm_objs, ciq_wb) & set(integrated_nodes)
+            for node in sorted(xmu_expected_nodes - set(xmu_state.keys())):
+                xmu_pending_lines.append(f"XMU Installation: {node} (MIC PM)")
         choices_completed += sup_completed_lines + xmu_completed_lines
         for l in sup_completed_lines + xmu_completed_lines:
             st.caption(f"\u2705 {l}")
