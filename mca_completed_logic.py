@@ -1547,6 +1547,30 @@ def _hardware_component_state(post_text, component_prefix):
     return out
 
 
+def nodes_expecting_xmu(mm_objs, ciq_wb):
+    """New check: which specific nodes' CIQ TARGET hardware string (not the combined
+    site-wide post_line) contains 'XMU' — confirmed distinct from xmu_in_ciq(), which
+    only checks the whole site at once and can't identify which node(s) specifically
+    expect it. Used to catch the case where a node is genuinely present in Post-checks
+    but its expected XMU component is missing from Post-checks' Hardware Status
+    entirely (not found at all, not just DISABLED) — that node would otherwise be
+    silently dropped from XMU Installation reporting altogether."""
+    expecting = set()
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        is_lte_primary = str(node).strip().upper() == str(e_name or "").strip().upper()
+        target_row = qx.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) if is_lte_primary else \
+            qx.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        if not target_row:
+            target_row = qx.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or \
+                qx.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        target_hw = qx.hw_string(target_row) or ""
+        if "XMU" in target_hw:
+            expecting.add(node)
+    return expecting
+
+
 def xmu_in_ciq(post_configuration_text):
     """Confirmed trigger: XMU appears in the CIQ target (Post Configuration string)."""
     return "XMU" in (post_configuration_text or "")
