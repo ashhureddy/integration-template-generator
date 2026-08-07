@@ -227,11 +227,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     with st.container(border=True):
         st.markdown("**Configuration**")
         st.markdown(f"Pre Configuration : **Nokia**")
+        st.markdown(f"Post Configuration : **{post_line}**")
         if missing_nodes:
             st.markdown(f"Post Configuration (Pending) : **{post_line}(MIC PM)**")
             st.warning(f"Node(s) not found in Post-checks, treated as not yet integrated: {', '.join(missing_nodes)}")
-        else:
-            st.markdown(f"Post Configuration : **{post_line}**")
         st.markdown(f"6610 Controller : **{controller_id or '(none detected)'}**")
         mm_objs_no_wll = [row for row in mm_objs if row.get("Node to be built as") not in wll_detected_nodes]
         current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs_no_wll, postcheck_text, missing_nodes, dual_identity=True) if postcheck_text else ""
@@ -285,6 +284,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     # ==================== Completed / Pending items ====================
     st.markdown("### Which of these apply?")
     choices_completed, choices_pending, stakeholders = [], [], {}
+    if missing_nodes:
+        post_config_pending_line = f"Post Configuration : {post_line}(MIC PM)"
+        choices_pending.append(post_config_pending_line)
 
     with st.expander("Completed", expanded=True):
         # Integration — from generate_n2e's own scope_lines. Confirmed bug: was using
@@ -877,10 +879,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_notes += bucket_notes
 
     # ==================== Report text + xlsm ====================
-    post_config_display = f"{post_line}(MIC PM)" if missing_nodes else post_line
     report_lines = ["Subject", f"MIC | MNS | N2E | IX-STF | {site_name} | {fa_code} | {site_ids}",
                     "", "IWM Details", iwm_details,
-                    "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_config_display}",
+                    "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_line}",
                     f"6610 Controller : {controller_id or ''}"]
     if current_config: report_lines.append(f"Current Configuration : {current_config}")
     if wll_node.strip(): report_lines.append(f"WLL node : {wll_node}")
@@ -911,15 +912,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             row_writes.append((N2E_ROW_MAP["iwm_details"], bool(iwm_details.strip()), [(3, iwm_details)]))
             row_writes.append((N2E_ROW_MAP["pre_configuration"], True, [(3, "Nokia")]))
             row_writes.append((N2E_ROW_MAP["current_configuration"], bool(current_config.strip()), [(3, current_config)] if current_config.strip() else []))
-            # Confirmed: when any node is missing from Post-checks entirely, Post
-            # Configuration moves to Pending in full (still listing every node, "(MIC PM)")
-            # rather than being marked Completed.
-            if missing_nodes:
-                row_writes.append((N2E_ROW_MAP["post_configuration"]["completed"], False, []))
-                row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], True, [(3, post_line), (5, "MIC PM")]))
-            else:
-                row_writes.append((N2E_ROW_MAP["post_configuration"]["completed"], True, [(3, post_line)]))
-                row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], False, []))
+            # Confirmed correction: row 12 (Configuration section) always shows post_line
+            # normally, unconditionally, matching the CIQ regardless of missing nodes.
+            # When any node is missing, row 77 (Pending) is an ADDITIONAL point, not a
+            # replacement — combined text in one column, not split across columns.
+            row_writes.append((N2E_ROW_MAP["post_configuration"]["completed"], True, [(3, post_line)]))
+            row_writes.append((N2E_ROW_MAP["post_configuration"]["pending"], bool(missing_nodes),
+                               [(3, f"{post_line}(MIC PM)")] if missing_nodes else []))
             row_writes.append((N2E_ROW_MAP["wll_node"], bool(wll_node.strip()), [(3, wll_node)] if wll_node.strip() else []))
             row_writes.append((N2E_ROW_MAP["controller_6610"], bool(controller_id), [(3, controller_id)] if controller_id else []))
             row_writes.append((N2E_ROW_MAP["software_version"], bool(software_version.strip()), [(3, software_version)] if software_version.strip() else []))
