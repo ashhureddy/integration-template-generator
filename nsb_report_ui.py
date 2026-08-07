@@ -81,6 +81,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     controller_in_edp = bool(controller_id)
 
     new_nodes = [row.get("Node to be built as") for row in mm_objs]
+
+    # Confirmed same fix as N2E: a node whose hardware string can't be found anywhere in
+    # Post-checks at all is treated as genuinely NOT integrated. integrated_nodes
+    # excludes these — used for per-node items that should only reflect nodes that
+    # actually made it into Post-checks. new_nodes itself stays unfiltered, since Post
+    # Configuration's own display and Pending line need to list every node.
+    missing_nodes = mcl.detect_missing_nodes(postcheck_text, new_nodes)
+    integrated_nodes = [n for n in new_nodes if n not in missing_nodes]
     for row in mm_objs:
         node = row.get("Node to be built as")
         e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
@@ -201,8 +209,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         st.markdown("**Configuration**")
         st.markdown(f"Pre Configuration : **NSB**")
         st.markdown(f"Post Configuration : **{post_line}**")
+        if missing_nodes:
+            st.markdown(f"Post Configuration (Pending) : **{post_line}(MIC PM)**")
+            st.warning(f"Node(s) not found in Post-checks, treated as not yet integrated: {', '.join(missing_nodes)}")
         st.markdown(f"6610 Controller : **{controller_id or '(none detected)'}**")
-        current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs, postcheck_text) if postcheck_text else ""
+        current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs, postcheck_text, missing_nodes, dual_identity=True) if postcheck_text else ""
         if current_config_auto:
             current_config = st.text_input("\U0001F4DD Current Configuration \u2014 review/edit:",
                                              value=current_config_auto, key="nsb_current_config")
@@ -250,11 +261,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     # ==================== Completed / Pending ====================
     st.markdown("### Which of these apply?")
     choices_completed, choices_pending, choices_notes = [], [], []
+    if missing_nodes:
+        choices_pending.append(f"Post Configuration : {post_line}(MIC PM)")
 
     with st.expander("Completed", expanded=True):
         int_pairs = []
         int_lines_display = []
         for node, cells in classification.get("added", {}).items():
+            if node in missing_nodes:
+                continue
             bands = mcl.sort_bands_lte_first({app.band_label(c)[0] for c in cells if app.band_label(c)[0]})
             if bands:
                 int_pairs.append(("/".join(bands), node))
@@ -361,6 +376,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             lkf_node_choices = {}
             for row in mm_objs:
                 node = row.get("Node to be built as")
+                if node in missing_nodes:
+                    continue
                 c1, c2 = st.columns([2, 1])
                 with c1: st.caption(node)
                 with c2:
@@ -416,7 +433,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             # NSB confirmed: every cell is "newly added" (no "moved" concept, same as
             # N2E) — split by tech into the three categories call_test_lines() needs.
             added_bands_by_tech = {"lte": set(), "5g": set(), "cband_dod": set()}
-            for cells in classification.get("added", {}).values():
+            for node, cells in classification.get("added", {}).items():
+                if node in missing_nodes:
+                    continue
                 for c in cells:
                     label, _sector = app.band_label(c)
                     if not label:
@@ -458,10 +477,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # parsed from the Post-checks PDF (ericssonprod, matched by node ID). SIAD End
         # stays fully manual.
         sfp_completed_lines = []
-        if new_nodes:
+        if integrated_nodes:
             with st.container(border=True):
                 st.markdown("**Transport SFP Installation on** \u2014 Enter SFP models")
-                for node in new_nodes:
+                for node in integrated_nodes:
                     c1, c2, c3 = st.columns([1, 1, 1])
                     with c1: st.caption(node)
                     with c2:
@@ -529,8 +548,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 idl_pending = "IDL connections (MIC PM)"
 
         area_pending = None
-        if new_nodes:
-            area_pending = f"Area test: {'|'.join(new_nodes)}: Area Lite - Failed (MIC PM)"
+        if integrated_nodes:
+            area_pending = f"Area test: {'|'.join(integrated_nodes)}: Area Lite - Failed (MIC PM)"
 
         testing_completed, testing_pending = None, None
         if testing_completed is None and controller_checks_data and not cascade_fires:
@@ -673,10 +692,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 choices_notes.append("NR configuration has been verified.")
 
         # Nodes/controller monitored state — same as N2E.
-        if new_nodes:
-            mon_checked = st.checkbox(f"{'|'.join(new_nodes)} nodes is in Not monitored state.", value=True, key="nsb_notes_mon")
+        if integrated_nodes:
+            mon_checked = st.checkbox(f"{'|'.join(integrated_nodes)} nodes is in Not monitored state.", value=True, key="nsb_notes_mon")
             if mon_checked:
-                choices_notes.append(f"{'|'.join(new_nodes)} nodes is in Not monitored state.")
+                choices_notes.append(f"{'|'.join(integrated_nodes)} nodes is in Not monitored state.")
         if controller_id:
             if cascade_fires or sau_disabled:
                 st.caption(f"{controller_id} is in not monitored state. (auto \u2014 "
@@ -699,7 +718,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         # Area prechecks verification for CPRI/SFP check — same as N2E.
         cpri_choice = st.selectbox("Area prechecks verification for CPRI/SFP check", ["\u2014 Select \u2014", "Completed", "Pending"], key="nsb_cpri") \
-            if new_nodes else "\u2014 Select \u2014"
+            if integrated_nodes else "\u2014 Select \u2014"
         if cpri_choice == "Completed":
             choices_notes.append("Area prechecks verification for CPRI/SFP check is completed.")
         elif cpri_choice == "Pending":
@@ -756,6 +775,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             row_writes.append((NSB_ROW_MAP["pre_configuration"], True, [(3, "NSB")]))
             row_writes.append((NSB_ROW_MAP["current_configuration"], bool(current_config.strip()), [(3, current_config)] if current_config.strip() else []))
             row_writes.append((NSB_ROW_MAP["post_configuration"], True, [(3, post_line)]))
+            # Confirmed same fix as N2E: additional Pending point (not a replacement)
+            # when any node is missing from Post-checks entirely.
+            row_writes.append((NSB_ROW_MAP["post_configuration_pending"]["pending"][0], bool(missing_nodes),
+                               [(3, f"{post_line}(MIC PM)")] if missing_nodes else []))
             row_writes.append((NSB_ROW_MAP["wll_node"], bool(wll_node.strip()), [(3, wll_node)] if wll_node.strip() else []))
             row_writes.append((NSB_ROW_MAP["controller_6610"], bool(controller_id), [(3, controller_id)] if controller_id else []))
             row_writes.append((NSB_ROW_MAP["software_version"], bool(software_version.strip()), [(3, software_version)] if software_version.strip() else []))
@@ -838,7 +861,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw(NSB_ROW_MAP["script_load_6673"]["pending"][0], False)
             _rw(NSB_ROW_MAP["siad_provisioning"]["pending"][0], False)
             _rw(NSB_ROW_MAP["area_test"]["pending"][0], cascade_fires or area_pending,
-                [(3, "|".join(new_nodes)), (4, "Failed")] if area_pending else None)
+                [(3, "|".join(integrated_nodes)), (4, "Failed")] if area_pending else None)
             _rw(NSB_ROW_MAP["external_alarm_testing"]["pending"][0], cascade_fires or testing_pending, [(3, controller_id)] if (cascade_fires or testing_pending) else None)
             _rw(NSB_ROW_MAP["config_6673"]["pending"][0], has_6673, [(3, sidehaul_rows[0]["switch_id"])] if has_6673 and sidehaul_rows else None)
             _rw(NSB_ROW_MAP["port_config_6673_enm"]["pending"][0], has_6673, [(4, sidehaul_rows[0]["switch_id"])] if has_6673 and sidehaul_rows else None)
