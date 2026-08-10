@@ -488,6 +488,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             lte_bands_all = sorted(added_bands_by_tech["lte"])
             fiveg_bands_all = sorted(added_bands_by_tech["5g"] | added_bands_by_tech["cband_dod"])
             psap_sched_id = ""
+            ct_completed_inputs, ct_pending_inputs = {}, {}
 
             if ct_status == "Completed":
                 if psap_applies:
@@ -904,12 +905,29 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw(NSB_ROW_MAP["ngs_activation"]["completed"][0], ngs_completed, [(3, ngs_bands), (4, ngs_node)] if ngs_completed else None)
             _rw(NSB_ROW_MAP["gps_installation"]["completed"][0], gps_completed_line,
                 [(3, "|".join(enabled_nodes)), (5, gtype)] if gps_completed_line else None)
-            _rw(NSB_ROW_MAP["lkf_installation"]["completed"][0], lkf_completed, [(3, lkf_completed)] if lkf_completed else None)
-            _rw(NSB_ROW_MAP["psap_speedtest"]["completed"][0], ct_status == "Completed" and psap_line,
-                [(3, "/".join(lte_bands_all))] + ([(4, psap_sched_id.strip())] if psap_sched_id.strip() else []) if ct_status == "Completed" and psap_line else None)
-            _rw(NSB_ROW_MAP["speedtest_lte"]["completed"][0], ct_status == "Completed" and speed_lte_line, [(3, "/".join(lte_bands_all))] if ct_status == "Completed" and speed_lte_line else None)
-            _rw(NSB_ROW_MAP["speed_test_5g"]["completed"][0], ct_status == "Completed" and speed_5g_line, [(3, "/".join(fiveg_bands_all))] if ct_status == "Completed" and speed_5g_line else None)
-            _rw(NSB_ROW_MAP["calltest_fnet"]["completed"][0], ct_status == "Completed" and fnet_line, [(3, fnet_line)] if ct_status == "Completed" and fnet_line else None)
+            lkf_c_value = lkf_completed.replace("LKF Installation:", "").strip() if lkf_completed else None
+            _rw(NSB_ROW_MAP["lkf_installation"]["completed"][0], lkf_completed, [(3, lkf_c_value)] if lkf_c_value else None)
+            # Confirmed fix: Partially Completed's manual per-item inputs now also flow
+            # into these dedicated rows, not just the text report — previously these 8
+            # writes were strictly gated to ct_status == "Completed"/"Pending" only, so
+            # anything entered under Partially Completed never reached the .xlsm at all.
+            psap_write_completed = (ct_status == "Completed" and psap_line) or \
+                (ct_status == "Partially Completed" and ct_completed_inputs.get("psap", "").strip())
+            _rw(NSB_ROW_MAP["psap_speedtest"]["completed"][0], psap_write_completed,
+                ([(3, "/".join(lte_bands_all) if ct_status == "Completed" else ct_completed_inputs.get("psap", "").strip())]
+                 + ([(4, psap_sched_id.strip())] if psap_sched_id.strip() else [])) if psap_write_completed else None)
+            speed_lte_write_completed = (ct_status == "Completed" and speed_lte_line) or \
+                (ct_status == "Partially Completed" and ct_completed_inputs.get("speed_lte", "").strip())
+            _rw(NSB_ROW_MAP["speedtest_lte"]["completed"][0], speed_lte_write_completed,
+                [(3, "/".join(lte_bands_all) if ct_status == "Completed" else ct_completed_inputs.get("speed_lte", "").strip())] if speed_lte_write_completed else None)
+            speed_5g_write_completed = (ct_status == "Completed" and speed_5g_line) or \
+                (ct_status == "Partially Completed" and ct_completed_inputs.get("speed_5g", "").strip())
+            _rw(NSB_ROW_MAP["speed_test_5g"]["completed"][0], speed_5g_write_completed,
+                [(3, "/".join(fiveg_bands_all) if ct_status == "Completed" else ct_completed_inputs.get("speed_5g", "").strip())] if speed_5g_write_completed else None)
+            fnet_write_completed = (ct_status == "Completed" and fnet_line) or \
+                (ct_status == "Partially Completed" and ct_completed_inputs.get("fnet", "").strip())
+            _rw(NSB_ROW_MAP["calltest_fnet"]["completed"][0], fnet_write_completed,
+                [(3, fnet_line if ct_status == "Completed" else ct_completed_inputs.get("fnet", "").strip())] if fnet_write_completed else None)
             sfp_rows = NSB_ROW_MAP["transport_sfp"]["completed"]
             sfp_pairs = [(node, f"{bbu} (BBU End) & {siad} (SIAD End)") for node, bbu, siad in sfp_completed_lines]
             mcl.write_buffer_2col_with_overflow(row_writes, sfp_rows, sfp_pairs)
@@ -938,14 +956,22 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             lkf_p_value = (lkf_pending.replace("LKF Installation:", "").replace("(MIC)", "").strip()
                            if lkf_pending else None)
             _rw(NSB_ROW_MAP["lkf_installation"]["pending"][0], bool(lkf_pending), [(3, lkf_p_value)] if lkf_p_value else None)
-            _rw(NSB_ROW_MAP["psap_speedtest"]["pending"][0], ct_status == "Pending" and psap_line,
-                [(3, "/".join(lte_bands_all))] if ct_status == "Pending" and psap_line else None)
-            _rw(NSB_ROW_MAP["speedtest_lte"]["pending"][0], ct_status == "Pending" and speed_lte_line,
-                [(3, "/".join(lte_bands_all))] if ct_status == "Pending" and speed_lte_line else None)
-            _rw(NSB_ROW_MAP["speed_test_5g"]["pending"][0], ct_status == "Pending" and speed_5g_line,
-                [(3, "/".join(fiveg_bands_all))] if ct_status == "Pending" and speed_5g_line else None)
-            _rw(NSB_ROW_MAP["calltest_fnet"]["pending"][0], ct_status == "Pending" and fnet_line,
-                [(3, fnet_line)] if ct_status == "Pending" and fnet_line else None)
+            psap_write_pending = (ct_status == "Pending" and psap_line) or \
+                (ct_status == "Partially Completed" and ct_pending_inputs.get("psap", "").strip())
+            _rw(NSB_ROW_MAP["psap_speedtest"]["pending"][0], psap_write_pending,
+                [(3, "/".join(lte_bands_all) if ct_status == "Pending" else ct_pending_inputs.get("psap", "").strip())] if psap_write_pending else None)
+            speed_lte_write_pending = (ct_status == "Pending" and speed_lte_line) or \
+                (ct_status == "Partially Completed" and ct_pending_inputs.get("speed_lte", "").strip())
+            _rw(NSB_ROW_MAP["speedtest_lte"]["pending"][0], speed_lte_write_pending,
+                [(3, "/".join(lte_bands_all) if ct_status == "Pending" else ct_pending_inputs.get("speed_lte", "").strip())] if speed_lte_write_pending else None)
+            speed_5g_write_pending = (ct_status == "Pending" and speed_5g_line) or \
+                (ct_status == "Partially Completed" and ct_pending_inputs.get("speed_5g", "").strip())
+            _rw(NSB_ROW_MAP["speed_test_5g"]["pending"][0], speed_5g_write_pending,
+                [(3, "/".join(fiveg_bands_all) if ct_status == "Pending" else ct_pending_inputs.get("speed_5g", "").strip())] if speed_5g_write_pending else None)
+            fnet_write_pending = (ct_status == "Pending" and fnet_line) or \
+                (ct_status == "Partially Completed" and ct_pending_inputs.get("fnet", "").strip())
+            _rw(NSB_ROW_MAP["calltest_fnet"]["pending"][0], fnet_write_pending,
+                [(3, fnet_line if ct_status == "Pending" else ct_pending_inputs.get("fnet", "").strip())] if fnet_write_pending else None)
             # Confirmed removed: SFP Installation, Rilinks Scripting, SIAD provisioning,
             # Link failure, SFP Not Present, Mo Inconsistent config alarm, Fiberloss,
             # High/Low RSSI, High/Low VSWR, VSWR overthreshold — all purely manual, no
