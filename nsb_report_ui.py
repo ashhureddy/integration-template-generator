@@ -672,8 +672,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if alarm_partial_pending:
                 choices_pending.append(alarm_partial_pending)
                 st.caption(alarm_partial_pending)
-            if active_alarms_pending:
-                st.caption(active_alarms_pending)
             if sau_pending:
                 choices_pending.append(sau_pending)
                 st.caption(sau_pending)
