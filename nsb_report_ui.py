@@ -779,45 +779,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_pending.append(idl_pending)
             st.caption(idl_pending)
 
-        # Confirmed: previously removed as purely manual with no auto-detection,
-        # now re-added as a dedicated section — all go to Pending, stakeholder Tower
-        # Crew, each a checkbox + Node ID input producing "{label} on: {node} (Tower Crew)".
-        with st.container(border=True):
-            st.markdown("**Issues that needs to be reported**")
-
-            def _issue_row(label, key_suffix):
-                c1, c2 = st.columns([2, 1])
-                with c1:
-                    checked = st.checkbox(label, key=f"nsb_issue_{key_suffix}_chk")
-                with c2:
-                    node_input = st.text_input("Node ID", key=f"nsb_issue_{key_suffix}_node", label_visibility="collapsed", placeholder="Node ID")
-                if checked and node_input.strip():
-                    line = f"{label} on: {node_input.strip()} (Tower Crew)"
-                    choices_pending.append(line)
-                    st.caption(line)
-
-            _issue_row("Link failure", "link_failure")
-            _issue_row("SFP Not Present", "sfp_not_present")
-            _issue_row("Mo Inconsistent configuration alarm", "mo_inconsistent")
-            _issue_row("Fiberloss", "fiberloss_1")
-            _issue_row("Fiberloss", "fiberloss_2")
-
-            # Confirmed side by side: High/Low RSSI, High/Low VSWR.
-            c1, c2 = st.columns(2)
-            with c1:
-                _issue_row("High RSSI", "high_rssi")
-            with c2:
-                _issue_row("Low RSSI", "low_rssi")
-            c3, c4 = st.columns(2)
-            with c3:
-                _issue_row("High VSWR", "high_vswr")
-            with c4:
-                _issue_row("Low VSWR", "low_vswr")
-
-            _issue_row("VSWR overthreshold alarm", "vswr_overthreshold")
-            _issue_row("NZ BER reporting", "nz_ber")
-            _issue_row("BER not reporting", "ber_not_reporting")
-
         if has_6673:
             switch_id = sidehaul_rows[0]["switch_id"] if sidehaul_rows else ""
             l1 = f"6673 Configuration: {switch_id} (AT&T)"
@@ -842,6 +803,48 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 for r in florida_rows:
                     st.caption(r)
     florida_active_rows = florida_rows if florida_checked else []
+
+    # Confirmed: previously removed as purely manual with no auto-detection, now
+    # re-added as its own top-level collapsible expander (siblings with
+    # Completed/Pending/Notes, not nested inside any of them — Streamlit doesn't
+    # allow nesting an expander inside another expander) — all go to Pending,
+    # stakeholder Tower Crew, each a checkbox + Node ID + Sector input producing
+    # "{label} on: {node} {sector} (Tower Crew)".
+    with st.expander("Issues that needs to be reported", expanded=False):
+
+        def _issue_row(label, key_suffix, col_width=None):
+            cols = st.columns([2, 1, 1]) if col_width is None else col_width
+            c1, c2, c3 = cols
+            with c1:
+                checked = st.checkbox(label, key=f"nsb_issue_{key_suffix}_chk")
+            with c2:
+                node_input = st.text_input("Node ID", key=f"nsb_issue_{key_suffix}_node", label_visibility="collapsed", placeholder="Node ID")
+            with c3:
+                sector_input = st.text_input("Sector", key=f"nsb_issue_{key_suffix}_sector", label_visibility="collapsed", placeholder="Sector")
+            if checked and node_input.strip():
+                sector_part = f" {sector_input.strip()}" if sector_input.strip() else ""
+                line = f"{label} on: {node_input.strip()}{sector_part} (Tower Crew)"
+                choices_pending.append(line)
+                st.caption(line)
+
+        _issue_row("Link failure", "link_failure")
+        _issue_row("SFP Not Present", "sfp_not_present")
+        _issue_row("Mo Inconsistent configuration alarm", "mo_inconsistent")
+        _issue_row("Fiberloss", "fiberloss_1")
+        _issue_row("Fiberloss", "fiberloss_2")
+
+        # Confirmed side by side, same [2,1,1] proportions per item for consistent
+        # alignment with the single-item rows above and below.
+        c1, c2, c3, c4, c5, c6 = st.columns([2, 1, 1, 2, 1, 1])
+        _issue_row("High RSSI", "high_rssi", col_width=[c1, c2, c3])
+        _issue_row("Low RSSI", "low_rssi", col_width=[c4, c5, c6])
+        d1, d2, d3, d4, d5, d6 = st.columns([2, 1, 1, 2, 1, 1])
+        _issue_row("High VSWR", "high_vswr", col_width=[d1, d2, d3])
+        _issue_row("Low VSWR", "low_vswr", col_width=[d4, d5, d6])
+
+        _issue_row("VSWR overthreshold alarm", "vswr_overthreshold")
+        _issue_row("NZ BER reporting", "nz_ber")
+        _issue_row("BER not reporting", "ber_not_reporting")
 
     with st.expander("Notes"):
         # SAU enabled on Node/Controller — same as N2E, moved to the top. Confirmed:
