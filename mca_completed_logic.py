@@ -1551,11 +1551,14 @@ def sup_capacity_warning(postcheck_text, integrated_nodes):
     """New site-wide capacity check: each SUP accommodates up to 2 XMU/5216 boards
     (confirmed pooled across the whole site, not per-node — a lone board on one node
     can share a SUP slot with a lone board on another). Counts total XMU+5216 boards
-    across every integrated node (from Post-checks, via the same extract_pre_hw /
-    extract_pre_xmu_count mechanism used for actual hardware detection elsewhere), and
-    total SUP instances actually found in Post-checks. If found SUP < required
-    (ceil(total_boards / 2)), fires a warning. Confirmed: since the exact
-    board-to-SUP pairing is determined in the field (not something this tool can
+    across every integrated node (from Post-checks — base model via extract_pre_hw for
+    5216, but XMU count uses a local, state-agnostic regex rather than
+    extract_pre_xmu_count, since a DISABLED XMU is still physically present and
+    confirmed to still need SUP capacity, unlike extract_pre_xmu_count's ENABLED-only
+    matching used elsewhere). Counts total SUP instances actually found in Post-checks
+    (still ENABLED-only — this check is specifically about the XMU/5216 side). If found
+    SUP < required (ceil(total_boards / 2)), fires a warning. Confirmed: since the
+    exact board-to-SUP pairing is determined in the field (not something this tool can
     predict), the warning lists every node that has an XMU or 5216 board, not a single
     attributed node."""
     if not postcheck_text or not integrated_nodes:
@@ -1564,7 +1567,9 @@ def sup_capacity_warning(postcheck_text, integrated_nodes):
     boards_nodes = []
     for node in integrated_nodes:
         base = qx.extract_pre_hw(postcheck_text, node)
-        xmu_count = qx.extract_pre_xmu_count(postcheck_text, node)
+        xmu_count = len(re.findall(
+            re.escape(node) + r"\s+XMU\S*\s+UNLOCKED\s+OFF\s+(?:(?:true|false)\s+)?STEADY_ON\s+(?:ENABLED|DISABLED)",
+            postcheck_text, re.I))
         node_boards = xmu_count + (1 if base == "5216" else 0)
         if node_boards:
             total_boards += node_boards
