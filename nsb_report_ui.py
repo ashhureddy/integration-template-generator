@@ -694,7 +694,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         area_pending = None
         if integrated_nodes:
-            area_pending = f"Area test: {'|'.join(integrated_nodes)}: Area Lite - Failed (MIC PM)"
+            # Confirmed fix: Area test should include the controller alongside the
+            # nodes for the same 3 conditions as Controller monitored state's
+            # auto-trigger — no 6610 checks, SAU disabled, or External alarm testing
+            # Pending. testing_section computed independently here since it isn't
+            # computed until later in render(), same ordering fix used elsewhere in
+            # this file — cascade_fires/sau_disabled are already safely defined by
+            # this point.
+            _area_testing_section, _, _ = mcl.external_alarm_testing_placement(controller_checks_data) \
+                if controller_checks_data else (None, None, None)
+            _area_include_controller = cascade_fires or sau_disabled or _area_testing_section == "Pending"
+            _area_targets = list(integrated_nodes) + ([controller_id] if _area_include_controller and controller_id else [])
+            area_pending = f"Area test: {'|'.join(_area_targets)}: Area Lite - Failed (MIC PM)"
 
         testing_completed, testing_pending = None, None
         if testing_completed is None and controller_checks_data and not cascade_fires:
@@ -837,9 +848,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if mon_checked:
                 choices_notes.append(f"{'|'.join(integrated_nodes)} nodes is in Not monitored state.")
         if controller_id:
-            if cascade_fires or sau_disabled:
-                st.caption(f"{controller_id} is in not monitored state. (auto \u2014 "
-                            f"{'no 6610 checks' if cascade_fires else 'SAU disabled'})")
+            if cascade_fires or sau_disabled or testing_section == "Pending":
+                _mon_reason = "no 6610 checks" if cascade_fires else ("SAU disabled" if sau_disabled else "External alarm testing Pending")
+                st.caption(f"{controller_id} is in not monitored state. (auto \u2014 {_mon_reason})")
                 choices_notes.append(f"{controller_id} is in not monitored state.")
             else:
                 ctrl_mon_choice = st.selectbox(f"{controller_id} monitored state", ["\u2014 Select \u2014", "Monitored", "Not monitored"], key="nsb_ctrl_mon")
