@@ -741,8 +741,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         else:
             if alarm_notes_line:
                 choices_notes.append(alarm_notes_line)
-            for l in alarm_ports_report_lines:
-                st.caption(l)
             if sau_pending:
                 choices_pending.append(sau_pending)
                 st.caption(sau_pending)
