@@ -54,7 +54,7 @@ NSB_ROW_MAP = {
     "link_failure": {"completed": None, "pending": [123]},
     "sfp_not_present": {"completed": None, "pending": [124]},
     "mo_inconsistent_config_alarm": {"completed": None, "pending": [125]},
-    "fiberloss": {"completed": None, "pending": [126, 127]},   # Data Link_1, Data Link_2
+    "fiberloss": {"completed": None, "pending": [126, 127]},   # High Fiber loss, Low Fiber loss
     "high_rssi": {"completed": None, "pending": [128]},
     "low_rssi": {"completed": None, "pending": [129]},
     "high_vswr": {"completed": None, "pending": [130]},
