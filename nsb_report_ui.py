@@ -633,7 +633,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if _alarm_ports_calltest_path.exists() and mm_objs:
                 _alarm_ports_prefix_to_market, _ = mcl.load_calltest_table(_alarm_ports_calltest_path, tab_name="NSB")
                 _alarm_ports_market = mcl.determine_market(mm_objs[0].get("Node to be built as"), _alarm_ports_prefix_to_market)
-            alarm_ports_report_lines = nsb.external_alarm_ports_report(controller_checks_data, _alarm_ports_market)
+            # Confirmed fix: when EVERY scripted port is locked, the simple
+            # "All external alarms are kept locked, due to NEA is pending." note
+            # (from external_alarm_testing_placement) already covers this completely —
+            # this 3-category breakdown would just redundantly re-report the same
+            # locked ports individually. testing_section isn't computed until later in
+            # render(), so checked independently here too, same ordering fix as above.
+            _alarm_ports_testing_section, _, _ = mcl.external_alarm_testing_placement(controller_checks_data)
+            if _alarm_ports_testing_section == "Pending":
+                alarm_ports_report_lines = []
+            else:
+                alarm_ports_report_lines = nsb.external_alarm_ports_report(controller_checks_data, _alarm_ports_market)
             for l in alarm_ports_report_lines:
                 nsb_pending_from_warnings.append(l)
             sau_state = controller_checks_data.get("sau_state")
