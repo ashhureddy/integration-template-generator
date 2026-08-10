@@ -468,7 +468,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             # only appears once genuinely relevant: Completed status with PSAP detected,
             # or Partially Completed status where the engineer has typed "PSAP" into the
             # completed field themselves.
-            if psap_line or speed_lte_line or speed_5g_line or fnet_line:
+            _ct_any_detected = bool(psap_line or speed_lte_line or speed_5g_line or fnet_line)
+            if _ct_any_detected:
                 st.markdown("**Call Test requirements detected (per CT sheet):**")
                 for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line):
                     if l:
@@ -484,7 +485,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             # in the field (band or specific sector) — since call_test_lines() only
             # tracks bands, not individual sectors within a band, the tool can't
             # reliably auto-split a partial completion itself.
-            ct_status = st.selectbox("Call Test status", ["\u2014 Select \u2014", "Completed", "Pending", "Partially Completed"], key="nsb_calltest_status")
+            # Confirmed fix: the whole status selector (and everything below it) is now
+            # skipped entirely when there's genuinely nothing detected, rather than
+            # showing a dropdown with nothing meaningful to report a status for.
+            ct_status = st.selectbox("Call Test status", ["\u2014 Select \u2014", "Completed", "Pending", "Partially Completed"], key="nsb_calltest_status") \
+                if _ct_any_detected else None
             lte_bands_all = sorted(added_bands_by_tech["lte"])
             fiveg_bands_all = sorted(added_bands_by_tech["5g"] | added_bands_by_tech["cband_dod"])
             psap_sched_id = ""
