@@ -600,7 +600,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             ret_pending = "RET configuration (Tower Crew)"
 
         alarm_scripting_completed = None
-        alarm_notes_line, alarm_partial_pending = None, None
+        alarm_notes_line = None
+        alarm_ports_report_lines = []
         sau_completed, sau_pending = None, None
         sau_disabled = False
         if controller_checks_data and not cascade_fires:
@@ -609,10 +610,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 choices_completed.append(alarm_scripting_completed)
                 st.caption(f"\u2705 {alarm_scripting_completed}")
             alarm_notes_line = nsb.external_alarm_scripting_locked_note(controller_checks_data)
-            alarm_partial_pending = nsb.external_alarm_scripting_partial_pending(controller_checks_data)
-            active_alarms_pending = nsb.active_external_alarms_pending(controller_checks_data)
-            if active_alarms_pending:
-                nsb_pending_from_warnings.append(active_alarms_pending)
+            # Confirmed redesign: replaces both the old locked-ports-only and
+            # active-ports-only checks with a single 3-category split (Active+Locked,
+            # Active+Unlocked, NotActive+Locked).
+            alarm_ports_report_lines = nsb.external_alarm_ports_report(controller_checks_data)
+            for l in alarm_ports_report_lines:
+                nsb_pending_from_warnings.append(l)
             sau_state = controller_checks_data.get("sau_state")
             if sau_state:
                 if sau_state["oper"] == "ENABLED":
@@ -718,9 +721,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         else:
             if alarm_notes_line:
                 choices_notes.append(alarm_notes_line)
-            if alarm_partial_pending:
-                choices_pending.append(alarm_partial_pending)
-                st.caption(alarm_partial_pending)
+            for l in alarm_ports_report_lines:
+                st.caption(l)
             if sau_pending:
                 choices_pending.append(sau_pending)
                 st.caption(sau_pending)
@@ -991,7 +993,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             for row_num in NSB_ROW_MAP["transport_sfp"]["pending"]:
                 _rw(row_num, False)
             _rw(NSB_ROW_MAP["ret_configuration"]["pending"][0], ret_pending)
-            _rw(NSB_ROW_MAP["external_alarm_scripting"]["pending"][0], cascade_fires or alarm_partial_pending,
+            _rw(NSB_ROW_MAP["external_alarm_scripting"]["pending"][0], cascade_fires or bool(alarm_ports_report_lines),
                 [(3, controller_id)] if cascade_fires else None)
             _rw(NSB_ROW_MAP["sau_connections"]["pending"][0], cascade_fires or sau_pending, [(3, controller_id)] if (cascade_fires or sau_pending) else None)
             _rw(NSB_ROW_MAP["sup_connections"]["pending"][0], sup_pending_lines, [(3, "|".join(s.split(":")[-1].strip() for s in sup_pending_lines))] if sup_pending_lines else None)
