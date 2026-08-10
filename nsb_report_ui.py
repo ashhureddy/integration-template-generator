@@ -294,6 +294,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         _dss_outputs, _dss_summary, dss_activation_labels = app.generate_dss(ciq_wb, mm_objs, user_id, date_str, _log)
         dss_completed, dss_pending, dss_bands = None, None, None
         dss_pending_bands_combined = set()  # confirmed fix: tracked directly, since dss_bands alone only ever holds the user-choice portion
+        dss_sh = None
         if dss_activation_labels:
             nsb_dss_calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
             nsb_dss_regional_market = None
@@ -922,7 +923,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 (ct_status == "Partially Completed" and ct_completed_inputs.get("psap", "").strip())
             _rw(NSB_ROW_MAP["psap_speedtest"]["completed"][0], psap_write_completed,
                 ([(3, "/".join(lte_bands_all) if ct_status == "Completed" else ct_completed_inputs.get("psap", "").strip())]
-                 + ([(4, psap_sched_id.strip())] if psap_sched_id.strip() else [])) if psap_write_completed else None)
+                 + ([(5, psap_sched_id.strip())] if psap_sched_id.strip() else [])) if psap_write_completed else None)
             speed_lte_write_completed = (ct_status == "Completed" and speed_lte_line) or \
                 (ct_status == "Partially Completed" and ct_completed_inputs.get("speed_lte", "").strip())
             _rw(NSB_ROW_MAP["speedtest_lte"]["completed"][0], speed_lte_write_completed,
@@ -956,8 +957,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             for row_num in p_int_rows:
                 _rw(row_num, False)
             _rw(NSB_ROW_MAP["controller_integration"]["pending"][0], cascade_fires, [(3, controller_id)] if cascade_fires else None)
+            dss_stakeholder = dss_sh if dss_sh and dss_sh != "\u2014 Select \u2014" else "AT&T"
             _rw(NSB_ROW_MAP["dss_activation"]["pending"][0], dss_pending,
-                [(3, " & ".join(mcl.sort_bands_lte_first(dss_pending_bands_combined)))] if dss_pending_bands_combined else None)
+                [(3, " & ".join(mcl.sort_bands_lte_first(dss_pending_bands_combined))), (6, dss_stakeholder)] if dss_pending_bands_combined else None)
             _rw(NSB_ROW_MAP["ngs_activation"]["pending"][0], ngs_pending, [(3, ngs_bands), (4, ngs_node)] if ngs_pending else None)
             _rw(NSB_ROW_MAP["gps_installation"]["pending"][0], gps_pending_line, [(3, "|".join(disabled_nodes))] if gps_pending_line else None)
             lkf_p_value = (lkf_pending.replace("LKF Installation:", "").replace("(MIC)", "").strip()
@@ -966,19 +968,19 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             psap_write_pending = (ct_status == "Pending" and psap_line) or \
                 (ct_status == "Partially Completed" and ct_pending_inputs.get("psap", "").strip())
             _rw(NSB_ROW_MAP["psap_speedtest"]["pending"][0], psap_write_pending,
-                [(3, "/".join(lte_bands_all) if ct_status == "Pending" else ct_pending_inputs.get("psap", "").strip())] if psap_write_pending else None)
+                [(3, "/".join(lte_bands_all) if ct_status == "Pending" else ct_pending_inputs.get("psap", "").strip()), (6, "MIC PM")] if psap_write_pending else None)
             speed_lte_write_pending = (ct_status == "Pending" and speed_lte_line) or \
                 (ct_status == "Partially Completed" and ct_pending_inputs.get("speed_lte", "").strip())
             _rw(NSB_ROW_MAP["speedtest_lte"]["pending"][0], speed_lte_write_pending,
-                [(3, "/".join(lte_bands_all) if ct_status == "Pending" else ct_pending_inputs.get("speed_lte", "").strip())] if speed_lte_write_pending else None)
+                [(3, "/".join(lte_bands_all) if ct_status == "Pending" else ct_pending_inputs.get("speed_lte", "").strip()), (6, "MIC PM")] if speed_lte_write_pending else None)
             speed_5g_write_pending = (ct_status == "Pending" and speed_5g_line) or \
                 (ct_status == "Partially Completed" and ct_pending_inputs.get("speed_5g", "").strip())
             _rw(NSB_ROW_MAP["speed_test_5g"]["pending"][0], speed_5g_write_pending,
-                [(3, "/".join(fiveg_bands_all) if ct_status == "Pending" else ct_pending_inputs.get("speed_5g", "").strip())] if speed_5g_write_pending else None)
+                [(3, "/".join(fiveg_bands_all) if ct_status == "Pending" else ct_pending_inputs.get("speed_5g", "").strip()), (6, "MIC PM")] if speed_5g_write_pending else None)
             fnet_write_pending = (ct_status == "Pending" and fnet_line) or \
                 (ct_status == "Partially Completed" and ct_pending_inputs.get("fnet", "").strip())
             _rw(NSB_ROW_MAP["calltest_fnet"]["pending"][0], fnet_write_pending,
-                [(3, fnet_line if ct_status == "Pending" else ct_pending_inputs.get("fnet", "").strip())] if fnet_write_pending else None)
+                [(3, fnet_line if ct_status == "Pending" else ct_pending_inputs.get("fnet", "").strip()), (6, "MIC PM")] if fnet_write_pending else None)
             # Confirmed removed: SFP Installation, Rilinks Scripting, SIAD provisioning,
             # Link failure, SFP Not Present, Mo Inconsistent config alarm, Fiberloss,
             # High/Low RSSI, High/Low VSWR, VSWR overthreshold — all purely manual, no
