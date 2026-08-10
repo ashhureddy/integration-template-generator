@@ -810,12 +810,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     # allow nesting an expander inside another expander) — all go to Pending,
     # stakeholder Tower Crew, each a checkbox + Node ID + Sector input producing
     # "{label} on: {node} {sector} (Tower Crew)".
+    issue_row_data = {}  # confirmed: collected here, written to the .xlsm later once row_writes exists
+
     with st.expander("Issues that needs to be reported", expanded=False):
 
-        def _issue_row(label, key_suffix, col_width=None):
+        def _issue_row(label, key_suffix, row_map_key=None, row_map_index=0, col_width=None):
             # Confirmed format: "{label} : {sectors} : {node} (Tower Crew)" — Sectors
             # input comes before Node input, both free-text. Sectors given more width
-            # than Node, per confirmed proportions.
+            # than Node, per confirmed proportions. Confirmed: 9 of these 12 items have
+            # a dedicated .xlsm row (row_map_key given) — value written as one combined
+            # "{sectors} : {node}" column. The remaining items (no dedicated row, e.g.
+            # BER) flow into the shared Pending buffer instead.
             cols = st.columns([0.6, 2, 1]) if col_width is None else col_width
             c1, c2, c3 = cols
             with c1:
@@ -826,27 +831,34 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 node_input = st.text_input("Node", key=f"nsb_issue_{key_suffix}_node", label_visibility="collapsed", placeholder="Node")
             if checked and node_input.strip():
                 sector_part = f"{sector_input.strip()} : " if sector_input.strip() else ""
-                line = f"{label} : {sector_part}{node_input.strip()} (Tower Crew)"
+                value_only = f"{sector_part}{node_input.strip()}"
+                line = f"{label} : {value_only} (Tower Crew)"
                 choices_pending.append(line)
                 st.caption(line)
+                if row_map_key:
+                    issue_row_data[(row_map_key, row_map_index)] = value_only
+                else:
+                    nsb_pending_from_warnings.append(line)
 
-        _issue_row("Link failure", "link_failure")
-        _issue_row("SFP Not Present", "sfp_not_present")
-        _issue_row("Mo Inconsistent configuration alarm", "mo_inconsistent")
+        _issue_row("Link failure", "link_failure", row_map_key="link_failure")
+        _issue_row("SFP Not Present", "sfp_not_present", row_map_key="sfp_not_present")
+        _issue_row("Mo Inconsistent configuration alarm", "mo_inconsistent", row_map_key="mo_inconsistent_config_alarm")
 
         # Confirmed side by side, same proportions per item for consistent alignment
         # across all paired rows (Fiber loss, RSSI, VSWR).
         f1, f2, f3, f4, f5, f6 = st.columns([0.6, 2, 1, 0.6, 2, 1])
-        _issue_row("High Fiber loss", "fiberloss_high", col_width=[f1, f2, f3])
-        _issue_row("Low Fiber loss", "fiberloss_low", col_width=[f4, f5, f6])
+        _issue_row("High Fiber loss", "fiberloss_high", row_map_key="fiberloss", row_map_index=0, col_width=[f1, f2, f3])
+        _issue_row("Low Fiber loss", "fiberloss_low", row_map_key="fiberloss", row_map_index=1, col_width=[f4, f5, f6])
         c1, c2, c3, c4, c5, c6 = st.columns([0.6, 2, 1, 0.6, 2, 1])
-        _issue_row("High RSSI", "high_rssi", col_width=[c1, c2, c3])
-        _issue_row("Low RSSI", "low_rssi", col_width=[c4, c5, c6])
+        _issue_row("High RSSI", "high_rssi", row_map_key="high_rssi", col_width=[c1, c2, c3])
+        _issue_row("Low RSSI", "low_rssi", row_map_key="low_rssi", col_width=[c4, c5, c6])
         d1, d2, d3, d4, d5, d6 = st.columns([0.6, 2, 1, 0.6, 2, 1])
-        _issue_row("High VSWR", "high_vswr", col_width=[d1, d2, d3])
-        _issue_row("Low VSWR", "low_vswr", col_width=[d4, d5, d6])
+        _issue_row("High VSWR", "high_vswr", row_map_key="high_vswr", col_width=[d1, d2, d3])
+        _issue_row("Low VSWR", "low_vswr", row_map_key="low_vswr", col_width=[d4, d5, d6])
 
-        _issue_row("VSWR overthreshold alarm", "vswr_overthreshold")
+        _issue_row("VSWR overthreshold alarm", "vswr_overthreshold", row_map_key="vswr_overthreshold")
+        # Confirmed: BER items have no dedicated row in the template — flow into the
+        # shared Pending buffer instead (nsb_pending_from_warnings, no row_map_key).
         _issue_row("NZ BER reporting", "nz_ber")
         _issue_row("BER not reporting", "ber_not_reporting")
 
@@ -960,6 +972,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.warning(f"NSB template not found at {NSB_TEMPLATE_PATH}")
         else:
             row_writes = []
+            # Confirmed: the 9 "Issues that needs to be reported" items with a
+            # dedicated row (link_failure, sfp_not_present, mo_inconsistent_config_alarm,
+            # fiberloss x2, high/low_rssi, high/low_vswr, vswr_overthreshold) — value
+            # written as the combined "{sectors} : {node}" text, single column.
+            for (_row_key, _row_idx), _value in issue_row_data.items():
+                _row_num = NSB_ROW_MAP[_row_key]["pending"][_row_idx]
+                row_writes.append((_row_num, True, [(3, _value)]))
             row_writes.append((NSB_ROW_MAP["subject"], True, [(2, "MIC"), (3, market), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, "NSB")]))
             row_writes.append((NSB_ROW_MAP["iwm_details"], bool(iwm_details.strip()), [(3, iwm_details)]))
             row_writes.append((NSB_ROW_MAP["pre_configuration"], True, [(3, "NSB")]))
