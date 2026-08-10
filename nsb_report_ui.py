@@ -514,37 +514,55 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 # Confirmed redesign: separate Completed/Pending input pairs PER
                 # detected test type (PSAP, LTE Speed test, 5G Speed test, F-NET)
                 # instead of one flat pair that lumped everything into a single
-                # generic "Call Test completed/pending on" line — output now preserves
+                # generic "Call Test completed/pending on" line — output preserves
                 # each test type's own label and wording, matching exactly how the
                 # Completed status already reports them.
+                # Confirmed layout fix: all Completed inputs grouped in one column, all
+                # Pending inputs grouped in the other — rather than interleaving each
+                # test type's pair with its own result caption right after, which
+                # looked scattered. Results now shown together in one place at the end.
                 ct_items = [
                     ("psap", psap_line, "PSAP test/Speedtest/VoLTE voice calltest"),
                     ("speed_lte", speed_lte_line, "Speedtest/VoLTE voice calltest"),
                     ("speed_5g", speed_5g_line, "Speed test"),
                     ("fnet", fnet_line, "Calltest with F-NET SIM"),
                 ]
-                for item_key, detected_line, label in ct_items:
-                    if not detected_line:
-                        continue
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        completed_input = st.text_input(f"\U0001F4DD {label} \u2014 Completed on",
-                                                          key=f"nsb_ct_{item_key}_completed")
-                    with c2:
-                        pending_input = st.text_input(f"\U0001F4DD {label} \u2014 Pending on",
-                                                        key=f"nsb_ct_{item_key}_pending")
-                    if item_key == "psap" and psap_applies and completed_input.strip():
-                        psap_sched_id = st.text_input("\U0001F4DD PSAP Schedule ID", key="nsb_psap_sched")
+                detected_items = [(k, l, lbl) for k, l, lbl in ct_items if l]
+                ct_completed_inputs, ct_pending_inputs = {}, {}
+                col_completed, col_pending = st.columns(2)
+                with col_completed:
+                    st.markdown("**Completed**")
+                    for item_key, _detected_line, label in detected_items:
+                        ct_completed_inputs[item_key] = st.text_input(
+                            f"{label} \u2014 Completed on", key=f"nsb_ct_{item_key}_completed")
+                        if item_key == "psap" and psap_applies and ct_completed_inputs[item_key].strip():
+                            psap_sched_id = st.text_input("PSAP Schedule ID", key="nsb_psap_sched")
+                with col_pending:
+                    st.markdown("**Pending**")
+                    for item_key, _detected_line, label in detected_items:
+                        ct_pending_inputs[item_key] = st.text_input(
+                            f"{label} \u2014 Pending on", key=f"nsb_ct_{item_key}_pending")
+
+                ct_result_completed, ct_result_pending = [], []
+                for item_key, _detected_line, label in detected_items:
+                    completed_input = ct_completed_inputs.get(item_key, "")
+                    pending_input = ct_pending_inputs.get(item_key, "")
                     if completed_input.strip():
                         line = f"{label}: {completed_input.strip()}."
                         if item_key == "psap" and psap_sched_id.strip():
                             line += f" (PSAP Schedule ID: {psap_sched_id.strip()})"
                         choices_completed.append(line)
-                        st.caption(f"\u2705 {line}")
+                        ct_result_completed.append(line)
                     if pending_input.strip():
                         line = f"{label}: {pending_input.strip()} (MIC PM)"
                         choices_pending.append(line)
-                        st.caption(line)
+                        ct_result_pending.append(line)
+                if ct_result_completed or ct_result_pending:
+                    st.markdown("**Result:**")
+                    for l in ct_result_completed:
+                        st.caption(f"\u2705 {l}")
+                    for l in ct_result_pending:
+                        st.caption(l)
 
         # Confirmed new fix: BBU End auto-fetches from the Transport SFP table already
         # parsed from the Post-checks PDF (ericssonprod, matched by node ID). SIAD End
