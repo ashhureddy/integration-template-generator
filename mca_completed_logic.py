@@ -212,14 +212,22 @@ def extract_controller_checks(text):
         result["node_alarm_status"] = m2.group(1)
 
     def _fru_state(fru_name):
-        # Confirmed real line shape:
-        # "FieldReplaceableUnit=Controller6610 1 (UNLOCKED) 2 (OFF) 1 (ENABLED) ..."
+        # Confirmed real line shape (5 status fields before product info, not 3):
+        # "FieldReplaceableUnit=Controller6610 1 (UNLOCKED) 2 (OFF) 2 (OFF) 3 (STEADY_ON) 1 (ENABLED) ..."
+        # administrativeState, faultIndicator, isSharedWithExternalMe,
+        # maintenanceIndicator, operationalIndicator (this last one is the genuine
+        # ENABLED/DISABLED operational status). Confirmed real bug: the regex
+        # previously only captured 3 fields, incorrectly using the 3rd
+        # (isSharedWithExternalMe, e.g. "NOT_APPLICABLE" for SAU) as "oper" instead of
+        # the real 5th field — causing SAU/Controller to be reported as
+        # Pending/disabled even when genuinely ENABLED.
         mm = re.search(
-            re.escape(f"FieldReplaceableUnit={fru_name}") + r'\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)',
+            re.escape(f"FieldReplaceableUnit={fru_name}") +
+            r'\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)',
             text)
         if not mm:
             return None
-        admin, fault, oper = mm.groups()
+        admin, fault, _shared, _maint, oper = mm.groups()
         return {"admin": admin, "fault_ok": fault == "OFF", "oper": oper}
 
     result["controller_state"] = _fru_state("Controller6610")
@@ -1742,7 +1750,7 @@ def sa_conversion_amf_warning(post_text, sa_conversion_nodes_list):
 # ============================================================
 
 _LTE_CELL_ROW_RE = re.compile(
-    r'(\S+) (LOCKED|UNLOCKED) (\d+ \S+) (BARRED|UNBARRED) (\d+) (\d+) (\d+) '
+    r'(\S+) (LOCKED|UNLOCKED) (?:\d+ \S+ )?(BARRED|UNBARRED) (\d+) (\d+) (\d+) '
     r'(ENABLED|DISABLED) (\d+) (true|false) (\S+) (\d+) (\d+)')
 
 
@@ -1752,10 +1760,15 @@ def extract_lte_cell_status(post_text):
     'Cells adminState availabilityStatus cellBarred dlChannelBandwidth earfcndl earfcnul
     OpState PCI PLMNStatus sectorCarrierRef tac ulChannelBandwidth' — availabilityStatus
     is a two-token value (e.g. '3 OFF_LINE'), confirmed by column-count cross-check
-    against real data. Returns {cell: {field: value}}."""
+    against real data. Returns {cell: {field: value}}.
+    Confirmed fix: availabilityStatus made non-capturing/optional since some sites
+    genuinely omit it entirely (row jumps straight from adminState to cellBarred with
+    no availabilityStatus value at all) — matching it as required caused the ENTIRE row
+    to silently fail to match, making a genuinely-present cell look "missing" from
+    Post-checks in the cell-presence warnings."""
     out = {}
     for m in _LTE_CELL_ROW_RE.finditer(post_text or ""):
-        (cell, _admin, _avail, _barred, dlbw, earfcndl, earfcnul,
+        (cell, _admin, _barred, dlbw, earfcndl, earfcnul,
          _opstate, pci, _plmn, sector, tac, ulbw) = m.groups()
         out[cell] = {
             "dlChannelBandwidth": dlbw, "earfcndl": earfcndl, "earfcnul": earfcnul,
