@@ -195,8 +195,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         st.markdown("**Subject**")
         c = st.columns(7)
         with c[0]: st.markdown(f"MIC\n\n**MIC**")
-        with c[1]: market = st.text_input("\U0001F4DD Market", key="nsb_market", placeholder="MNS/TILLMAN/AT&T")
-        with c[2]: status = st.text_input("\U0001F4DD Status", key="nsb_status", placeholder="IX-STF/IX-ATP")
+        with c[1]: market = st.selectbox("\U0001F4DD Market", ["\u2014 Select \u2014", "MNS", "AT&T"], key="nsb_market")
+        with c[2]: status = st.selectbox("\U0001F4DD Status", ["\u2014 Select \u2014", "IX-STF", "IX-ATP"], key="nsb_status")
+        market = "" if market == "\u2014 Select \u2014" else market
+        status = "" if status == "\u2014 Select \u2014" else status
         with c[3]: site_name = st.text_input("\U0001F4DD Site Name", key="nsb_site_name")
         with c[4]: st.markdown(f"FA CODE\n\n**{fa_code or '(not found)'}**")
         with c[5]: st.markdown(f"Site ID's\n\n**{site_ids}**")
