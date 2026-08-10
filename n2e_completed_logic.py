@@ -96,12 +96,19 @@ def xmu_in_ciq(post_configuration_text):
     return mcl.xmu_in_ciq(post_configuration_text)
 
 
-def sup_connections_state(post_text, xmu_present_in_ciq):
-    """Confirmed: SUP Connections only applies when XMU is present in the CIQ target;
-    then checks Post-checks Hardware Status for SUP's own operational state."""
-    if not xmu_present_in_ciq:
-        return {}
-    return mcl._hardware_component_state(post_text, "SUP")
+def sup_connections_state(post_text, sup_expecting_nodes):
+    """Confirmed correction: SUP Connections is expected per-node (not site-wide) on any
+    node whose CIQ target hardware contains 5216 or XMU (see
+    mcl.nodes_expecting_sup) — sup_expecting_nodes is that pre-computed set. A node
+    expecting SUP that's ENABLED in Post-checks is Completed; found but not ENABLED, or
+    not found in Post-checks' Hardware Status at all, is Pending — same "expected but
+    not confirmed" principle as the XMU fix."""
+    if not sup_expecting_nodes:
+        return {}, set()
+    found_state = mcl._hardware_component_state(post_text, "SUP")
+    result = {node: state for node, state in found_state.items() if node in sup_expecting_nodes}
+    missing = sup_expecting_nodes - set(found_state.keys())
+    return result, missing
 
 
 def xmu_installation_state(post_text, xmu_present_in_ciq):
