@@ -465,14 +465,49 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 elif l.startswith("Calltest with F-NET SIM"):
                     fnet_line = l_display
 
-            calltest_checked, _ = _checked_group("Call Test items", [l for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line) if l], "nsb_calltest")
+            # Confirmed redesign: Call Test now has 3 possible states instead of always
+            # reporting Completed. "Completed" keeps the existing auto-detect behavior
+            # (including PSAP Schedule ID). "Pending" routes every detected item to
+            # Pending instead. "Partially Completed" shows what the CT sheet detected as
+            # required (read-only reference) and lets the engineer manually type in both
+            # what was actually completed and what's still pending, at whatever
+            # granularity they observed in the field (band or specific sector) — since
+            # call_test_lines() only tracks bands, not individual sectors within a band,
+            # the tool can't reliably auto-split a partial completion itself.
+            ct_status = st.selectbox("Call Test status", ["\u2014 Select \u2014", "Completed", "Pending", "Partially Completed"], key="nsb_calltest_status")
             lte_bands_all = sorted(added_bands_by_tech["lte"])
             fiveg_bands_all = sorted(added_bands_by_tech["5g"] | added_bands_by_tech["cband_dod"])
-            if calltest_checked:
-                if psap_line: choices_completed.append(psap_line)
-                if speed_lte_line: choices_completed.append(speed_lte_line)
-                if speed_5g_line: choices_completed.append(speed_5g_line)
-                if fnet_line: choices_completed.append(fnet_line)
+
+            if ct_status == "Completed":
+                for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line):
+                    if l:
+                        choices_completed.append(l)
+                        st.caption(f"\u2705 {l}")
+            elif ct_status == "Pending":
+                for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line):
+                    if l:
+                        pending_line = f"{l} (MIC PM)"
+                        choices_pending.append(pending_line)
+                        st.caption(pending_line)
+            elif ct_status == "Partially Completed":
+                st.markdown("**Detected per CT sheet (reference only):**")
+                for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line):
+                    if l:
+                        st.caption(l)
+                ct_completed_manual = st.text_input(
+                    "\U0001F4DD Call Test \u2014 Completed on (bands/sectors, e.g. \"WCS, AWS_1 Alpha\")",
+                    key="nsb_ct_completed_manual")
+                ct_pending_manual = st.text_input(
+                    "\U0001F4DD Call Test \u2014 Pending on (bands/sectors)",
+                    key="nsb_ct_pending_manual")
+                if ct_completed_manual.strip():
+                    ct_partial_completed_line = f"Call Test completed on: {ct_completed_manual.strip()}"
+                    choices_completed.append(ct_partial_completed_line)
+                    st.caption(f"\u2705 {ct_partial_completed_line}")
+                if ct_pending_manual.strip():
+                    ct_partial_pending_line = f"Call Test pending on: {ct_pending_manual.strip()} (MIC PM)"
+                    choices_pending.append(ct_partial_pending_line)
+                    st.caption(ct_partial_pending_line)
 
         # Confirmed new fix: BBU End auto-fetches from the Transport SFP table already
         # parsed from the Post-checks PDF (ericssonprod, matched by node ID). SIAD End
@@ -817,11 +852,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw(NSB_ROW_MAP["gps_installation"]["completed"][0], gps_completed_line,
                 [(3, "|".join(enabled_nodes)), (5, gtype)] if gps_completed_line else None)
             _rw(NSB_ROW_MAP["lkf_installation"]["completed"][0], lkf_completed, [(3, lkf_completed)] if lkf_completed else None)
-            _rw(NSB_ROW_MAP["psap_speedtest"]["completed"][0], psap_line,
-                [(3, "/".join(lte_bands_all))] + ([(4, psap_sched_id.strip())] if psap_sched_id.strip() else []) if psap_line else None)
-            _rw(NSB_ROW_MAP["speedtest_lte"]["completed"][0], speed_lte_line, [(3, "/".join(lte_bands_all))] if speed_lte_line else None)
-            _rw(NSB_ROW_MAP["speed_test_5g"]["completed"][0], speed_5g_line, [(3, "/".join(fiveg_bands_all))] if speed_5g_line else None)
-            _rw(NSB_ROW_MAP["calltest_fnet"]["completed"][0], fnet_line, [(3, fnet_line)] if fnet_line else None)
+            _rw(NSB_ROW_MAP["psap_speedtest"]["completed"][0], ct_status == "Completed" and psap_line,
+                [(3, "/".join(lte_bands_all))] + ([(4, psap_sched_id.strip())] if psap_sched_id.strip() else []) if ct_status == "Completed" and psap_line else None)
+            _rw(NSB_ROW_MAP["speedtest_lte"]["completed"][0], ct_status == "Completed" and speed_lte_line, [(3, "/".join(lte_bands_all))] if ct_status == "Completed" and speed_lte_line else None)
+            _rw(NSB_ROW_MAP["speed_test_5g"]["completed"][0], ct_status == "Completed" and speed_5g_line, [(3, "/".join(fiveg_bands_all))] if ct_status == "Completed" and speed_5g_line else None)
+            _rw(NSB_ROW_MAP["calltest_fnet"]["completed"][0], ct_status == "Completed" and fnet_line, [(3, fnet_line)] if ct_status == "Completed" and fnet_line else None)
             sfp_rows = NSB_ROW_MAP["transport_sfp"]["completed"]
             sfp_pairs = [(node, f"{bbu} (BBU End) & {siad} (SIAD End)") for node, bbu, siad in sfp_completed_lines]
             mcl.write_buffer_2col_with_overflow(row_writes, sfp_rows, sfp_pairs)
@@ -850,10 +885,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             lkf_p_value = (lkf_pending.replace("LKF Installation:", "").replace("(MIC)", "").strip()
                            if lkf_pending else None)
             _rw(NSB_ROW_MAP["lkf_installation"]["pending"][0], bool(lkf_pending), [(3, lkf_p_value)] if lkf_p_value else None)
-            _rw(NSB_ROW_MAP["psap_speedtest"]["pending"][0], False)
-            _rw(NSB_ROW_MAP["speedtest_lte"]["pending"][0], False)
-            _rw(NSB_ROW_MAP["speed_test_5g"]["pending"][0], False)
-            _rw(NSB_ROW_MAP["calltest_fnet"]["pending"][0], False)
+            _rw(NSB_ROW_MAP["psap_speedtest"]["pending"][0], ct_status == "Pending" and psap_line,
+                [(3, "/".join(lte_bands_all))] if ct_status == "Pending" and psap_line else None)
+            _rw(NSB_ROW_MAP["speedtest_lte"]["pending"][0], ct_status == "Pending" and speed_lte_line,
+                [(3, "/".join(lte_bands_all))] if ct_status == "Pending" and speed_lte_line else None)
+            _rw(NSB_ROW_MAP["speed_test_5g"]["pending"][0], ct_status == "Pending" and speed_5g_line,
+                [(3, "/".join(fiveg_bands_all))] if ct_status == "Pending" and speed_5g_line else None)
+            _rw(NSB_ROW_MAP["calltest_fnet"]["pending"][0], ct_status == "Pending" and fnet_line,
+                [(3, fnet_line)] if ct_status == "Pending" and fnet_line else None)
             # Confirmed removed: SFP Installation, Rilinks Scripting, SIAD provisioning,
             # Link failure, SFP Not Present, Mo Inconsistent config alarm, Fiberloss,
             # High/Low RSSI, High/Low VSWR, VSWR overthreshold — all purely manual, no
