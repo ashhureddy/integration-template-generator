@@ -815,7 +815,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         def _issue_row(label, key_suffix, col_width=None):
             # Confirmed format: "{label} : {sectors} : {node} (Tower Crew)" — Sectors
             # input comes before Node input, both free-text.
-            cols = st.columns([2, 1, 1]) if col_width is None else col_width
+            cols = st.columns([1.2, 1, 1]) if col_width is None else col_width
             c1, c2, c3 = cols
             with c1:
                 checked = st.checkbox(label, key=f"nsb_issue_{key_suffix}_chk")
@@ -837,10 +837,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         # Confirmed side by side, same [2,1,1] proportions per item for consistent
         # alignment with the single-item rows above and below.
-        c1, c2, c3, c4, c5, c6 = st.columns([2, 1, 1, 2, 1, 1])
+        c1, c2, c3, c4, c5, c6 = st.columns([1.2, 1, 1, 1.2, 1, 1])
         _issue_row("High RSSI", "high_rssi", col_width=[c1, c2, c3])
         _issue_row("Low RSSI", "low_rssi", col_width=[c4, c5, c6])
-        d1, d2, d3, d4, d5, d6 = st.columns([2, 1, 1, 2, 1, 1])
+        d1, d2, d3, d4, d5, d6 = st.columns([1.2, 1, 1, 1.2, 1, 1])
         _issue_row("High VSWR", "high_vswr", col_width=[d1, d2, d3])
         _issue_row("Low VSWR", "low_vswr", col_width=[d4, d5, d6])
 
