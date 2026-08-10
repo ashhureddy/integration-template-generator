@@ -813,25 +813,27 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     with st.expander("Issues that needs to be reported", expanded=False):
 
         def _issue_row(label, key_suffix, col_width=None):
+            # Confirmed format: "{label} : {sectors} : {node} (Tower Crew)" — Sectors
+            # input comes before Node input, both free-text.
             cols = st.columns([2, 1, 1]) if col_width is None else col_width
             c1, c2, c3 = cols
             with c1:
                 checked = st.checkbox(label, key=f"nsb_issue_{key_suffix}_chk")
             with c2:
-                node_input = st.text_input("Node ID", key=f"nsb_issue_{key_suffix}_node", label_visibility="collapsed", placeholder="Node ID")
+                sector_input = st.text_input("Sectors", key=f"nsb_issue_{key_suffix}_sector", label_visibility="collapsed", placeholder="Sectors")
             with c3:
-                sector_input = st.text_input("Sector", key=f"nsb_issue_{key_suffix}_sector", label_visibility="collapsed", placeholder="Sector")
+                node_input = st.text_input("Node", key=f"nsb_issue_{key_suffix}_node", label_visibility="collapsed", placeholder="Node")
             if checked and node_input.strip():
-                sector_part = f" {sector_input.strip()}" if sector_input.strip() else ""
-                line = f"{label} on: {node_input.strip()}{sector_part} (Tower Crew)"
+                sector_part = f"{sector_input.strip()} : " if sector_input.strip() else ""
+                line = f"{label} : {sector_part}{node_input.strip()} (Tower Crew)"
                 choices_pending.append(line)
                 st.caption(line)
 
         _issue_row("Link failure", "link_failure")
         _issue_row("SFP Not Present", "sfp_not_present")
         _issue_row("Mo Inconsistent configuration alarm", "mo_inconsistent")
-        _issue_row("Fiberloss", "fiberloss_1")
-        _issue_row("Fiberloss", "fiberloss_2")
+        _issue_row("High Fiber loss", "fiberloss_high")
+        _issue_row("Low Fiber loss", "fiberloss_low")
 
         # Confirmed side by side, same [2,1,1] proportions per item for consistent
         # alignment with the single-item rows above and below.
