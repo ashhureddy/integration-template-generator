@@ -625,8 +625,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             alarm_notes_line = nsb.external_alarm_scripting_locked_note(controller_checks_data)
             # Confirmed redesign: replaces both the old locked-ports-only and
             # active-ports-only checks with a single 3-category split (Active+Locked,
-            # Active+Unlocked, NotActive+Locked).
-            alarm_ports_report_lines = nsb.external_alarm_ports_report(controller_checks_data)
+            # Active+Unlocked, NotActive+Locked). Confirmed Florida exception: computed
+            # independently here since the market lookup used for External alarm
+            # testing's own Florida check isn't computed until later in render().
+            _alarm_ports_calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
+            _alarm_ports_market = None
+            if _alarm_ports_calltest_path.exists() and mm_objs:
+                _alarm_ports_prefix_to_market, _ = mcl.load_calltest_table(_alarm_ports_calltest_path, tab_name="NSB")
+                _alarm_ports_market = mcl.determine_market(mm_objs[0].get("Node to be built as"), _alarm_ports_prefix_to_market)
+            alarm_ports_report_lines = nsb.external_alarm_ports_report(controller_checks_data, _alarm_ports_market)
             for l in alarm_ports_report_lines:
                 nsb_pending_from_warnings.append(l)
             sau_state = controller_checks_data.get("sau_state")
