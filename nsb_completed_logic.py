@@ -33,36 +33,38 @@ def external_alarm_scripting_locked_note(controller_checks_data):
     return None
 
 
-def external_alarm_scripting_partial_pending(controller_checks_data):
-    """Confirmed fully automatic — no manual classification like MCA/N2E's bucket
-    systems. Fires when SOME (not all, not none) scripted ports are locked, directly
-    listing every locked+scripted port with its slogan. Confirmed exact format:
-    'external alarm ports 1[RBS INTRUSION],2[HEX FAN FAIL],3[RBS FAN FAIL] locked
-    (Tower crew)' — plain comma-separated, no 'and', no spaces after commas."""
+def external_alarm_ports_report(controller_checks_data):
+    """New unified NSB check, replacing both external_alarm_scripting_partial_pending
+    and active_external_alarms_pending with a single 3-category split, based on the
+    2x2 matrix of active/not-active x locked/unlocked (the 4th combination,
+    not-active+unlocked, is the normal/healthy state and isn't reported at all):
+      1. Active + LOCKED  -> "Active external alarm on ports: {ports} kept locked."
+      2. Active + UNLOCKED -> "Active external alarm on: {ports}"
+      3. NOT active + LOCKED -> "external alarm ports: {ports} kept locked."
+    All three use the same Oxford-comma 'and' slogan format. Returns a list of 0-3
+    lines (only the categories that genuinely have ports populate a line). Confirmed
+    destination: Pending, stakeholder Tower crew for all three."""
     scripted = [p for p in controller_checks_data.get("alarm_ports", []) if p["slogan"]]
     if not scripted:
-        return None
-    locked = [p for p in scripted if p["admin"] == "LOCKED"]
-    if not locked or len(locked) == len(scripted):
-        return None  # none locked, or all locked (handled by the Notes case instead)
-    ports_fmt = ",".join(f"{p['port']}[{p['slogan']}]" for p in locked)
-    return f"external alarm ports {ports_fmt} locked (Tower crew)"
+        return []
 
+    active_locked = [p for p in scripted if p.get("active") and p["admin"] == "LOCKED"]
+    active_unlocked = [p for p in scripted if p.get("active") and p["admin"] != "LOCKED"]
+    inactive_locked = [p for p in scripted if not p.get("active") and p["admin"] == "LOCKED"]
 
-def active_external_alarms_pending(controller_checks_data):
-    """New NSB-specific check: reports EVERY genuinely active alarm port (per
-    activeExternalAlarm), regardless of whether it's currently locked or unlocked —
-    this is independent of, and separate from, the locked-ports classification above.
-    Uses the standard Oxford-comma 'and' slogan format (format_ports_with_slogans),
-    unlike external_alarm_scripting_partial_pending's plain-comma style. Confirmed
-    destination: Pending, stakeholder Tower crew."""
-    active_ports = [p for p in controller_checks_data.get("alarm_ports", []) if p.get("active") and p["slogan"]]
-    if not active_ports:
-        return None
-    port_slogan_map = {p["port"]: p["slogan"] for p in active_ports}
-    ports_str = ",".join(p["port"] for p in active_ports)
-    ports_fmt = mcl.format_ports_with_slogans(ports_str, port_slogan_map)
-    return f"Active external alarms on ports : {ports_fmt}. (Tower crew)"
+    def _fmt(ports):
+        port_slogan_map = {p["port"]: p["slogan"] for p in ports}
+        ports_str = ",".join(p["port"] for p in ports)
+        return mcl.format_ports_with_slogans(ports_str, port_slogan_map)
+
+    lines = []
+    if active_locked:
+        lines.append(f"Active external alarm on ports: {_fmt(active_locked)} kept locked. (Tower crew)")
+    if active_unlocked:
+        lines.append(f"Active external alarm on: {_fmt(active_unlocked)} (Tower crew)")
+    if inactive_locked:
+        lines.append(f"external alarm ports: {_fmt(inactive_locked)} kept locked. (Tower crew)")
+    return lines
 
 
 # ============================================================
