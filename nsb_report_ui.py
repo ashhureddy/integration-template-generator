@@ -833,11 +833,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         _issue_row("Link failure", "link_failure")
         _issue_row("SFP Not Present", "sfp_not_present")
         _issue_row("Mo Inconsistent configuration alarm", "mo_inconsistent")
-        _issue_row("High Fiber loss", "fiberloss_high")
-        _issue_row("Low Fiber loss", "fiberloss_low")
 
-        # Confirmed side by side, same [2,1,1] proportions per item for consistent
-        # alignment with the single-item rows above and below.
+        # Confirmed side by side, same proportions per item for consistent alignment
+        # across all paired rows (Fiber loss, RSSI, VSWR).
+        f1, f2, f3, f4, f5, f6 = st.columns([0.6, 2, 1, 0.6, 2, 1])
+        _issue_row("High Fiber loss", "fiberloss_high", col_width=[f1, f2, f3])
+        _issue_row("Low Fiber loss", "fiberloss_low", col_width=[f4, f5, f6])
         c1, c2, c3, c4, c5, c6 = st.columns([0.6, 2, 1, 0.6, 2, 1])
         _issue_row("High RSSI", "high_rssi", col_width=[c1, c2, c3])
         _issue_row("Low RSSI", "low_rssi", col_width=[c4, c5, c6])
