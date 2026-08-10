@@ -95,10 +95,15 @@ def xmu_in_ciq(post_configuration_text):
     return mcl.xmu_in_ciq(post_configuration_text)
 
 
-def sup_connections_state(post_text, xmu_present_in_ciq):
-    if not xmu_present_in_ciq:
-        return {}
-    return mcl._hardware_component_state(post_text, "SUP")
+def sup_connections_state(post_text, sup_expecting_nodes):
+    """Confirmed correction, same as N2E: SUP Connections is expected per-node (not
+    site-wide) on any node whose CIQ target hardware contains 5216 or XMU."""
+    if not sup_expecting_nodes:
+        return {}, set()
+    found_state = mcl._hardware_component_state(post_text, "SUP")
+    result = {node: state for node, state in found_state.items() if node in sup_expecting_nodes}
+    missing = sup_expecting_nodes - set(found_state.keys())
+    return result, missing
 
 
 def xmu_installation_state(post_text, xmu_present_in_ciq):
