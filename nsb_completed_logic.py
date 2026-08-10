@@ -33,7 +33,7 @@ def external_alarm_scripting_locked_note(controller_checks_data):
     return None
 
 
-def external_alarm_ports_report(controller_checks_data):
+def external_alarm_ports_report(controller_checks_data, market=None):
     """New unified NSB check, replacing both external_alarm_scripting_partial_pending
     and active_external_alarms_pending with a single 3-category split, based on the
     2x2 matrix of active/not-active x locked/unlocked (the 4th combination,
@@ -43,11 +43,14 @@ def external_alarm_ports_report(controller_checks_data):
       3. NOT active + LOCKED -> "external alarm ports: {ports} kept locked."
     All three use the same Oxford-comma 'and' slogan format. Returns a list of 0-3
     lines (only the categories that genuinely have ports populate a line). Confirmed
-    destination: Pending, stakeholder Tower crew for all three."""
+    destination: Pending. Confirmed stakeholder exception: Florida market reports to
+    AT&T for all three categories, same as the External alarm testing Florida
+    exception — every other market keeps the standard Tower crew stakeholder."""
     scripted = [p for p in controller_checks_data.get("alarm_ports", []) if p["slogan"]]
     if not scripted:
         return []
 
+    stakeholder = "AT&T" if market == "Florida" else "Tower crew"
     active_locked = [p for p in scripted if p.get("active") and p["admin"] == "LOCKED"]
     active_unlocked = [p for p in scripted if p.get("active") and p["admin"] != "LOCKED"]
     inactive_locked = [p for p in scripted if not p.get("active") and p["admin"] == "LOCKED"]
@@ -59,11 +62,11 @@ def external_alarm_ports_report(controller_checks_data):
 
     lines = []
     if active_locked:
-        lines.append(f"Active external alarm on ports: {_fmt(active_locked)} kept locked. (Tower crew)")
+        lines.append(f"Active external alarm on ports: {_fmt(active_locked)} kept locked. ({stakeholder})")
     if active_unlocked:
-        lines.append(f"Active external alarm on: {_fmt(active_unlocked)} (Tower crew)")
+        lines.append(f"Active external alarm on: {_fmt(active_unlocked)} ({stakeholder})")
     if inactive_locked:
-        lines.append(f"external alarm ports: {_fmt(inactive_locked)} kept locked. (Tower crew)")
+        lines.append(f"external alarm ports: {_fmt(inactive_locked)} kept locked. ({stakeholder})")
     return lines
 
 
