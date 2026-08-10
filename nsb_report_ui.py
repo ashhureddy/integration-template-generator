@@ -451,12 +451,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             ct_lines = mcl.call_test_lines(classification, market_val, calltest_rules,
                                              set(), added_bands_by_tech, {"lte": set(), "5g": set(), "cband_dod": set()})
             psap_applies = any(l.startswith("PSAP test/Speedtest/VoLTE voice calltest") for l in ct_lines)
-            psap_sched_id = st.text_input("\U0001F4DD PSAP Schedule ID", key="nsb_psap_sched") if psap_applies else ""
             for l in ct_lines:
                 l_display = l.replace("\t", " ")
                 if l.startswith("PSAP test/Speedtest/VoLTE voice calltest"):
-                    if psap_sched_id.strip():
-                        l_display = l_display.replace("PSAP Schedule ID: ", f"PSAP Schedule ID: {psap_sched_id.strip()}")
                     psap_line = l_display
                 elif l.startswith("Speedtest/VoLTE voice calltest"):
                     speed_lte_line = l_display
@@ -465,20 +462,38 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 elif l.startswith("Calltest with F-NET SIM"):
                     fnet_line = l_display
 
+            # Confirmed fix: detected items now shown FIRST, before the status selector,
+            # so the engineer knows what the CT sheet actually requires before choosing
+            # a status. PSAP Schedule ID no longer renders unconditionally up top — it
+            # only appears once genuinely relevant: Completed status with PSAP detected,
+            # or Partially Completed status where the engineer has typed "PSAP" into the
+            # completed field themselves.
+            if psap_line or speed_lte_line or speed_5g_line or fnet_line:
+                st.markdown("**Call Test requirements detected (per CT sheet):**")
+                for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line):
+                    if l:
+                        st.caption(l)
+
             # Confirmed redesign: Call Test now has 3 possible states instead of always
             # reporting Completed. "Completed" keeps the existing auto-detect behavior
-            # (including PSAP Schedule ID). "Pending" routes every detected item to
-            # Pending instead. "Partially Completed" shows what the CT sheet detected as
-            # required (read-only reference) and lets the engineer manually type in both
-            # what was actually completed and what's still pending, at whatever
-            # granularity they observed in the field (band or specific sector) — since
-            # call_test_lines() only tracks bands, not individual sectors within a band,
-            # the tool can't reliably auto-split a partial completion itself.
+            # (including PSAP Schedule ID, now asked only within this branch).
+            # "Pending" routes every detected item to Pending instead. "Partially
+            # Completed" shows what the CT sheet detected as required (already shown
+            # above) and lets the engineer manually type in both what was actually
+            # completed and what's still pending, at whatever granularity they observed
+            # in the field (band or specific sector) — since call_test_lines() only
+            # tracks bands, not individual sectors within a band, the tool can't
+            # reliably auto-split a partial completion itself.
             ct_status = st.selectbox("Call Test status", ["\u2014 Select \u2014", "Completed", "Pending", "Partially Completed"], key="nsb_calltest_status")
             lte_bands_all = sorted(added_bands_by_tech["lte"])
             fiveg_bands_all = sorted(added_bands_by_tech["5g"] | added_bands_by_tech["cband_dod"])
+            psap_sched_id = ""
 
             if ct_status == "Completed":
+                if psap_applies:
+                    psap_sched_id = st.text_input("\U0001F4DD PSAP Schedule ID", key="nsb_psap_sched")
+                    if psap_sched_id.strip():
+                        psap_line = psap_line.replace("PSAP Schedule ID: ", f"PSAP Schedule ID: {psap_sched_id.strip()}")
                 for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line):
                     if l:
                         choices_completed.append(l)
@@ -490,18 +505,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                         choices_pending.append(pending_line)
                         st.caption(pending_line)
             elif ct_status == "Partially Completed":
-                st.markdown("**Detected per CT sheet (reference only):**")
-                for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line):
-                    if l:
-                        st.caption(l)
                 ct_completed_manual = st.text_input(
                     "\U0001F4DD Call Test \u2014 Completed on (bands/sectors, e.g. \"WCS, AWS_1 Alpha\")",
                     key="nsb_ct_completed_manual")
+                if psap_applies and "psap" in ct_completed_manual.lower():
+                    psap_sched_id = st.text_input("\U0001F4DD PSAP Schedule ID", key="nsb_psap_sched")
                 ct_pending_manual = st.text_input(
                     "\U0001F4DD Call Test \u2014 Pending on (bands/sectors)",
                     key="nsb_ct_pending_manual")
                 if ct_completed_manual.strip():
                     ct_partial_completed_line = f"Call Test completed on: {ct_completed_manual.strip()}"
+                    if psap_sched_id.strip():
+                        ct_partial_completed_line += f" (PSAP Schedule ID: {psap_sched_id.strip()})"
                     choices_completed.append(ct_partial_completed_line)
                     st.caption(f"\u2705 {ct_partial_completed_line}")
                 if ct_pending_manual.strip():
