@@ -494,12 +494,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     psap_sched_id = st.text_input("\U0001F4DD PSAP Schedule ID", key="nsb_psap_sched")
                     if psap_sched_id.strip():
                         psap_line = psap_line.replace("PSAP Schedule ID: ", f"PSAP Schedule ID: {psap_sched_id.strip()}")
+                    else:
+                        psap_line = psap_line.replace(" PSAP Schedule ID: ", "").rstrip()
                 for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line):
                     if l:
                         choices_completed.append(l)
                         st.caption(f"\u2705 {l}")
             elif ct_status == "Pending":
-                for l in (psap_line, speed_lte_line, speed_5g_line, fnet_line):
+                # Confirmed: PSAP Schedule ID is never relevant while Pending — nothing
+                # has been tested yet, so strip the empty label out of the line entirely
+                # rather than showing a dangling "PSAP Schedule ID:" with no value.
+                psap_pending_line = psap_line.replace(" PSAP Schedule ID: ", "").rstrip() if psap_line else psap_line
+                for l in (psap_pending_line, speed_lte_line, speed_5g_line, fnet_line):
                     if l:
                         pending_line = f"{l} (MIC PM)"
                         choices_pending.append(pending_line)
