@@ -162,6 +162,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         warnings += mcl.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification, _warnings_fiveg_rows)
         warnings += mcl.lte_cell_presence_warnings(ciq_wb, postcheck_text, _warnings_eutran_rows)
         warnings += mcl.fiveg_cell_presence_warnings(ciq_wb, postcheck_text, _warnings_fiveg_rows)
+        warnings += mcl.sup_capacity_warning(postcheck_text, integrated_nodes)
 
     if nsb_sa_nodes and postcheck_text:
         warnings += mcl.sa_conversion_amf_warning(postcheck_text, nsb_sa_nodes)
@@ -525,11 +526,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         sup_completed_lines, sup_pending_lines = [], []
         xmu_completed_lines, xmu_pending_lines = [], []
-        if postcheck_text and xmu_present_in_ciq:
-            sup_state = nsb.sup_connections_state(postcheck_text, xmu_present_in_ciq)
+        # Confirmed correction, same as N2E: SUP Connections now has its own per-node
+        # trigger (5216 OR XMU present in that specific node's CIQ target).
+        if postcheck_text:
+            sup_expecting_nodes = mcl.nodes_expecting_sup(mm_objs, ciq_wb) & set(integrated_nodes)
+            sup_state, sup_missing = nsb.sup_connections_state(postcheck_text, sup_expecting_nodes)
             for node, state in sup_state.items():
                 (sup_completed_lines if state == "ENABLED" else sup_pending_lines).append(
                     f"SUP Connections: {node}" + ("" if state == "ENABLED" else " (MIC PM)"))
+            for node in sorted(sup_missing):
+                sup_pending_lines.append(f"SUP Connections: {node} (MIC PM)")
+        if postcheck_text and xmu_present_in_ciq:
             xmu_state = nsb.xmu_installation_state(postcheck_text, xmu_present_in_ciq)
             for node, state in xmu_state.items():
                 (xmu_completed_lines if state == "ENABLED" else xmu_pending_lines).append(
