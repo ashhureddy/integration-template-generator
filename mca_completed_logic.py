@@ -212,22 +212,24 @@ def extract_controller_checks(text):
         result["node_alarm_status"] = m2.group(1)
 
     def _fru_state(fru_name):
-        # Confirmed real line shape (5 status fields before product info, not 3):
-        # "FieldReplaceableUnit=Controller6610 1 (UNLOCKED) 2 (OFF) 2 (OFF) 3 (STEADY_ON) 1 (ENABLED) ..."
-        # administrativeState, faultIndicator, isSharedWithExternalMe,
-        # maintenanceIndicator, operationalIndicator (this last one is the genuine
-        # ENABLED/DISABLED operational status). Confirmed real bug: the regex
-        # previously only captured 3 fields, incorrectly using the 3rd
-        # (isSharedWithExternalMe, e.g. "NOT_APPLICABLE" for SAU) as "oper" instead of
-        # the real 5th field — causing SAU/Controller to be reported as
-        # Pending/disabled even when genuinely ENABLED.
+        # Confirmed real data has (at least) two genuine format variants for the
+        # number of status fields before the timestamp/product info — some sites have
+        # 3 (administrativeState, faultIndicator, operationalIndicator), others have 5
+        # (administrativeState, faultIndicator, isSharedWithExternalMe,
+        # maintenanceIndicator, operationalIndicator). Rather than assuming a fixed
+        # count, admin/fault are matched at their fixed positions, then the regex
+        # specifically searches for whichever field is genuinely "N (ENABLED)" or
+        # "N (DISABLED)" — the one distinctive value type among the intermediate
+        # fields (UNLOCKED/LOCKED, OFF/ON, STEADY_ON, NOT_APPLICABLE, etc.) — instead
+        # of a hardcoded field count that breaks whenever the format varies.
         mm = re.search(
             re.escape(f"FieldReplaceableUnit={fru_name}") +
-            r'\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)',
+            r'\s+\d+\s+\((UNLOCKED|LOCKED)\)\s+\d+\s+\((ON|OFF)\)'
+            r'(?:\s+\d+\s+\(\w+\))*?\s+\d+\s+\((ENABLED|DISABLED)\)',
             text)
         if not mm:
             return None
-        admin, fault, _shared, _maint, oper = mm.groups()
+        admin, fault, oper = mm.groups()
         return {"admin": admin, "fault_ok": fault == "OFF", "oper": oper}
 
     result["controller_state"] = _fru_state("Controller6610")
