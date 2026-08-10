@@ -123,6 +123,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         warnings += mcl.digital_tilt_warnings(ciq_wb, mm_objs, postcheck_text, classification, _warnings_fiveg_rows)
         warnings += mcl.lte_cell_presence_warnings(ciq_wb, postcheck_text, _warnings_eutran_rows)
         warnings += mcl.fiveg_cell_presence_warnings(ciq_wb, postcheck_text, _warnings_fiveg_rows)
+        # Confirmed fix: integrated_nodes isn't defined until later in render() — compute
+        # an independent, local version here using only mm_objs/postcheck_text, both
+        # already available at this point, rather than reordering the larger block below.
+        _warnings_all_node_names = [row.get("Node to be built as") for row in mm_objs]
+        _warnings_wll_nodes = [n for n in _warnings_all_node_names if n and str(n).strip().upper().endswith("L")]
+        _warnings_new_nodes = [n for n in _warnings_all_node_names if n not in _warnings_wll_nodes]
+        _warnings_missing_nodes = mcl.detect_missing_nodes(postcheck_text, _warnings_new_nodes)
+        _warnings_integrated_nodes = [n for n in _warnings_new_nodes if n not in _warnings_missing_nodes]
+        warnings += mcl.sup_capacity_warning(postcheck_text, _warnings_integrated_nodes)
 
     # SA Conversion — moved earlier (previously computed later, inside the Completed
     # expander) since the AMF warning check below needs it before the gate.
@@ -489,11 +498,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # SUP Connections / XMU Installation.
         sup_completed_lines, sup_pending_lines = [], []
         xmu_completed_lines, xmu_pending_lines = [], []
-        if postcheck_text and xmu_present_in_ciq:
-            sup_state = n2e.sup_connections_state(postcheck_text, xmu_present_in_ciq)
+        # Confirmed correction: SUP Connections now has its own per-node trigger (5216
+        # OR XMU present in that specific node's CIQ target), independent of XMU
+        # Installation's own site-wide xmu_present_in_ciq gate below.
+        if postcheck_text:
+            sup_expecting_nodes = mcl.nodes_expecting_sup(mm_objs, ciq_wb) & set(integrated_nodes)
+            sup_state, sup_missing = n2e.sup_connections_state(postcheck_text, sup_expecting_nodes)
             for node, state in sup_state.items():
                 (sup_completed_lines if state == "ENABLED" else sup_pending_lines).append(
                     f"SUP Connections: {node}" + ("" if state == "ENABLED" else ". (MIC PM)"))
+            for node in sorted(sup_missing):
+                sup_pending_lines.append(f"SUP Connections: {node}. (MIC PM)")
+        if postcheck_text and xmu_present_in_ciq:
             xmu_state = n2e.xmu_installation_state(postcheck_text, xmu_present_in_ciq)
             for node, state in xmu_state.items():
                 (xmu_completed_lines if state == "ENABLED" else xmu_pending_lines).append(
