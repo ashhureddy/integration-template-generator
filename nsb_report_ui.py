@@ -799,8 +799,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _issue_row("Link failure", "link_failure")
             _issue_row("SFP Not Present", "sfp_not_present")
             _issue_row("Mo Inconsistent configuration alarm", "mo_inconsistent")
-            _issue_row("Fiberloss (Data Link_1)", "fiberloss_1")
-            _issue_row("Fiberloss (Data Link_2)", "fiberloss_2")
+            _issue_row("Fiberloss", "fiberloss_1")
+            _issue_row("Fiberloss", "fiberloss_2")
 
             # Confirmed side by side: High/Low RSSI, High/Low VSWR.
             c1, c2 = st.columns(2)
