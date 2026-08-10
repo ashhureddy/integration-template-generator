@@ -1547,6 +1547,61 @@ def _hardware_component_state(post_text, component_prefix):
     return out
 
 
+def sup_capacity_warning(postcheck_text, integrated_nodes):
+    """New site-wide capacity check: each SUP accommodates up to 2 XMU/5216 boards
+    (confirmed pooled across the whole site, not per-node — a lone board on one node
+    can share a SUP slot with a lone board on another). Counts total XMU+5216 boards
+    across every integrated node (from Post-checks, via the same extract_pre_hw /
+    extract_pre_xmu_count mechanism used for actual hardware detection elsewhere), and
+    total SUP instances actually found in Post-checks. If found SUP < required
+    (ceil(total_boards / 2)), fires a warning. Confirmed: since the exact
+    board-to-SUP pairing is determined in the field (not something this tool can
+    predict), the warning lists every node that has an XMU or 5216 board, not a single
+    attributed node."""
+    if not postcheck_text or not integrated_nodes:
+        return []
+    total_boards = 0
+    boards_nodes = []
+    for node in integrated_nodes:
+        base = qx.extract_pre_hw(postcheck_text, node)
+        xmu_count = qx.extract_pre_xmu_count(postcheck_text, node)
+        node_boards = xmu_count + (1 if base == "5216" else 0)
+        if node_boards:
+            total_boards += node_boards
+            boards_nodes.append(node)
+    if not total_boards:
+        return []
+    total_sup_found = sum(
+        len(re.findall(re.escape(node) + r"\s+SUP\S*\s+UNLOCKED\s+OFF\s+(?:(?:true|false)\s+)?STEADY_ON\s+ENABLED",
+                       postcheck_text, re.I))
+        for node in integrated_nodes)
+    required_sup = -(-total_boards // 2)  # ceil without importing math
+    if total_sup_found < required_sup:
+        return [f"SUP is not scripted for the: {', '.join(boards_nodes)} (5216 or the node with XMU)."]
+    return []
+
+
+def nodes_expecting_sup(mm_objs, ciq_wb):
+    """New check, confirmed per-node (not site-wide): SUP Connections is expected on any
+    node whose CIQ TARGET hardware string contains either '5216' (a specific DU model)
+    or 'XMU' — not just XMU alone. Confirmed example: a 3-node site where only one node
+    has 5216 should only trigger SUP for that one node, not the whole site."""
+    expecting = set()
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        is_lte_primary = str(node).strip().upper() == str(e_name or "").strip().upper()
+        target_row = qx.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) if is_lte_primary else \
+            qx.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        if not target_row:
+            target_row = qx.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or \
+                qx.find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        target_hw = qx.hw_string(target_row) or ""
+        if "5216" in target_hw or "XMU" in target_hw:
+            expecting.add(node)
+    return expecting
+
+
 def nodes_expecting_xmu(mm_objs, ciq_wb):
     """New check: which specific nodes' CIQ TARGET hardware string (not the combined
     site-wide post_line) contains 'XMU' — confirmed distinct from xmu_in_ciq(), which
