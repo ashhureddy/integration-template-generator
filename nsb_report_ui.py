@@ -779,12 +779,44 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_pending.append(idl_pending)
             st.caption(idl_pending)
 
-        # Confirmed removed entirely: SFP Installation (BBU/Radio end), Rilinks
-        # Scripting, SIAD provisioning, Link failure, SFP Not Present, Mo Inconsistent
-        # configuration alarm, Fiberloss (Data Link_1/2), High/Low RSSI, High/Low VSWR,
-        # VSWR overthreshold — all purely manual with no auto-detection at all, so the
-        # engineer fills these in directly in the downloaded macro instead of duplicating
-        # entry here.
+        # Confirmed: previously removed as purely manual with no auto-detection,
+        # now re-added as a dedicated section — all go to Pending, stakeholder Tower
+        # Crew, each a checkbox + Node ID input producing "{label} on: {node} (Tower Crew)".
+        with st.container(border=True):
+            st.markdown("**Issues that needs to be reported**")
+
+            def _issue_row(label, key_suffix):
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    checked = st.checkbox(label, key=f"nsb_issue_{key_suffix}_chk")
+                with c2:
+                    node_input = st.text_input("Node ID", key=f"nsb_issue_{key_suffix}_node", label_visibility="collapsed", placeholder="Node ID")
+                if checked and node_input.strip():
+                    line = f"{label} on: {node_input.strip()} (Tower Crew)"
+                    choices_pending.append(line)
+                    st.caption(line)
+
+            _issue_row("Link failure", "link_failure")
+            _issue_row("SFP Not Present", "sfp_not_present")
+            _issue_row("Mo Inconsistent configuration alarm", "mo_inconsistent")
+            _issue_row("Fiberloss (Data Link_1)", "fiberloss_1")
+            _issue_row("Fiberloss (Data Link_2)", "fiberloss_2")
+
+            # Confirmed side by side: High/Low RSSI, High/Low VSWR.
+            c1, c2 = st.columns(2)
+            with c1:
+                _issue_row("High RSSI", "high_rssi")
+            with c2:
+                _issue_row("Low RSSI", "low_rssi")
+            c3, c4 = st.columns(2)
+            with c3:
+                _issue_row("High VSWR", "high_vswr")
+            with c4:
+                _issue_row("Low VSWR", "low_vswr")
+
+            _issue_row("VSWR overthreshold alarm", "vswr_overthreshold")
+            _issue_row("NZ BER reporting", "nz_ber")
+            _issue_row("BER not reporting", "ber_not_reporting")
 
         if has_6673:
             switch_id = sidehaul_rows[0]["switch_id"] if sidehaul_rows else ""
