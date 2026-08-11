@@ -674,6 +674,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         lkf_p_checked, lkf_p_lines = _checked_group("LKF Installation (Pending)", lkf_p_group_lines, "chk_lkf_p")
         testing_note_lines = [testing_note] if testing_note else []
         testing_note_checked, testing_note_out = _checked_group("External alarm testing note", testing_note_lines, "chk_testing_note")
+        # Confirmed fix: this is a Notes item (explicitly labeled "note" in its own
+        # _checked_group call above), but was being concatenated into
+        # additional_pending's text — showing it under Pending in the final report
+        # instead of Notes. Routed to the proper choices["notes_*"] destination, same
+        # pattern used by every other genuine Notes item in this file.
+        choices["notes_testing"] = {"checked": testing_note_checked, "text": testing_note or ""}
 
         additional_pending = st.text_area("\U0001F4DD Enter any additional pending information that needs to be reported to Market",
                                            key="rpt_add_pending", height=100)
@@ -758,7 +764,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     ).strip()
     choices["additional_pending"]["text"] = "\n".join(
         [choices["additional_pending"]["text"] or ""] + gps_p_lines + sfp_p_lines + rs_p_display
-        + edp_lines + lkf_p_lines + testing_note_out + ngs_pending_lines + dss_pending_lines
+        + edp_lines + lkf_p_lines + ngs_pending_lines + dss_pending_lines
     ).strip()
 
     with st.expander("Pre-Existing Issues"):
