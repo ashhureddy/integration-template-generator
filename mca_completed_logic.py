@@ -1576,6 +1576,65 @@ def xmu_sup_locked_warning(postcheck_text, integrated_nodes):
     return warnings
 
 
+_DL_UL_LOSS_ROW_RE = re.compile(
+    r'(\S+) (Up|Down) (\d+) (\d+%) (-?\d+\.\d+) (-?\d+\.\d+) (\S+) (\d+%) (-?\d+\.\d+) (-?\d+\.\d+) (\S+) '
+    r'(-?\d+\.?\d*) (-?\d+\.?\d*)')
+
+_NODE_CELL_ROW_RE = re.compile(r'(\S+) (LTE|5G) (\S+) (UNLOCKED|LOCKED)')
+
+
+def fiber_loss_warning(post_text, threshold_low=-3.0, threshold_high=3.0):
+    """New auto-detection check: confirmed real "DL/UL Loss" table in Post-checks,
+    present only for links that are Up (enabled) — confirmed real header:
+    'Cells LINK RiL TXbs1 TXdBm1 RXdBm1 BER1 TXbs2 TXdBm2 RXdBm2 BER2 DlLoss UlLoss ...'
+    Confirmed real threshold note from the same table: 'Thresholds for DLLoss/ULLoss:
+    -3.0 to 3.0 for new carriers.'
+    Confirmed reporting format: rather than listing raw cell names, classifies each
+    out-of-range reading as "High" (value above threshold_high) or "Low" (value below
+    threshold_low), maps each cell to its band label and sector via qx.band_label
+    (e.g. 'DXL09364_2C_1' -> band 'AWS_1', sector 'Gamma'), looks up each cell's node
+    from the Post-checks Node/Technology/Cell summary table, and groups everything
+    sharing the same (classification, node, sector) into one line listing all affected
+    bands together: 'High Fiber loss on : [BAND1|BAND2|...] {sector} sectors: {node}'."""
+    if not post_text:
+        return []
+    cell_to_node = {}
+    for node, _tech, cell, _admin in _NODE_CELL_ROW_RE.findall(post_text):
+        cell_to_node[cell] = node
+
+    # groups[(classification, node, sector)] = list of band labels
+    groups = {}
+    for m in _DL_UL_LOSS_ROW_RE.finditer(post_text):
+        cell, link, _ril, _txbs1, _txdbm1, _rxdbm1, _ber1, _txbs2, _txdbm2, _rxdbm2, _ber2, dlloss, ulloss = m.groups()
+        if link != "Up":
+            continue
+        try:
+            dl_val, ul_val = float(dlloss), float(ulloss)
+        except ValueError:
+            continue
+        out_of_range_vals = [v for v in (dl_val, ul_val) if not (threshold_low <= v <= threshold_high)]
+        if not out_of_range_vals:
+            continue
+        label, sector = qx.band_label(cell)
+        node = cell_to_node.get(cell)
+        if not label or not sector or not node:
+            continue
+        # Confirmed: High if the out-of-range value is above threshold_high, Low if
+        # below threshold_low — a cell could theoretically trigger both directions
+        # (rare, DL high + UL low), handled independently.
+        for v in out_of_range_vals:
+            classification = "High" if v > threshold_high else "Low"
+            key = (classification, node, sector)
+            if label not in groups.setdefault(key, []):
+                groups[key].append(label)
+
+    warnings = []
+    for (classification, node, sector), labels in groups.items():
+        bands_fmt = "|".join(labels)
+        warnings.append(f"{classification} Fiber loss on : [{bands_fmt}] {sector} sectors: {node}")
+    return warnings
+
+
 def sup_capacity_warning(postcheck_text, integrated_nodes):
     """New site-wide capacity check: each SUP accommodates up to 2 XMU/5216 boards
     (confirmed pooled across the whole site, not per-node — a lone board on one node
