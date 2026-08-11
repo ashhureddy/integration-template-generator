@@ -394,14 +394,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         or bool(gps_extra_pending) or bool(radio_swap_pending_lines)
         or bool(edp_publish_text) or bool(testing_note)
     )
-    default_status = "STF" if has_pending else "ATP"
+    default_status = "IX-STF" if has_pending else "IX-ATP"
 
     with st.container(border=True):
         st.markdown("**Subject**")
         c = st.columns(7)
         with c[0]: st.markdown(f"MIC\n\n**MIC**")
-        with c[1]: market_subject_input = st.text_input("\U0001F4DD Market", key="rpt_market", placeholder="MNS/TILLMAN/AT&T")
-        with c[2]: status = st.text_input("\U0001F4DD Status", value=default_status, key="rpt_status")
+        with c[1]: market_subject_input = st.selectbox("\U0001F4DD Market", ["\u2014 Select \u2014", "MNS", "AT&T"], key="rpt_market")
+        with c[2]:
+            status = st.selectbox("\U0001F4DD Status", ["IX-STF", "IX-ATP"],
+                                   index=["IX-STF", "IX-ATP"].index(default_status), key="rpt_status")
+        market_subject_input = "" if market_subject_input == "\u2014 Select \u2014" else market_subject_input
         with c[3]: site_name = st.text_input("\U0001F4DD Site Name", key="rpt_site_name")
         with c[4]: st.markdown(f"FA CODE\n\n**{fa_code or '(not found)'}**")
         with c[5]: st.markdown(f"Site ID's\n\n**{site_ids}**")
