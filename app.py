@@ -3114,11 +3114,6 @@ elif st.session_state.qkx_page == "family":
         if st.button("CRAN", use_container_width=True, key="qkx_fam_cran"):
             _qkx_go("input", "CRAN")
 
-    st.markdown("")
-    if st.button("📋  Generate Report →", use_container_width=True, key="qkx_fam_report", type="primary"):
-        _qkx_go("input", "MCA", report_only=True)
-    st.caption("Same CIQ / Pre-checks / EDP inputs — skips the full SOW analysis and templates, shows only the Integration Report. Currently available for MCA.")
-
 # ---- INPUT PAGE (all scopes land here — same form + results as before) ----
 elif st.session_state.qkx_page == "input":
     top_scope = st.session_state.qkx_scope
