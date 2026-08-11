@@ -422,9 +422,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 value=current_config_auto, key="rpt_current_config")
         else:
             current_config = ""
+        # Confirmed: auto-fill WLL node from the CIQ when detectable (same convention
+        # as N2E — node name ending in "L"), but stays a fully editable manual field
+        # otherwise — engineer can always override/clear it regardless of detection.
+        _mca_wll_detected = [row.get("Node to be built as") for row in mm_objs
+                              if row.get("Node to be built as") and str(row.get("Node to be built as")).strip().upper().endswith("L")]
         c1, c2 = st.columns(2)
         with c1:
-            wll_node = st.text_input("\U0001F4DD WLL node (if applicable)", key="rpt_wll")
+            wll_node = st.text_input("\U0001F4DD WLL node (if applicable)", value="|".join(_mca_wll_detected), key="rpt_wll")
         with c2:
             software_version = st.text_input("\U0001F4DD Software version", key="rpt_sw")
             gs_version = st.text_input("\U0001F4DD GS Version", key="rpt_gs")
