@@ -95,24 +95,9 @@ CHECKLIST = [
     {"key": "alarm_testing", "label": "External alarm testing:", "section": "completed", "toggle": True, "stakeholder": "MIC PM",
      "detect": lambda ctx: {"fill": {"controller": ctx.get("controller_id")}} if (ctx.get("controller_id") and ctx.get("controller_in_edp")) else None},
 
-    # ---------------- Completed: Call Test (market-table driven, confirmed and built this
-    # session — replaces the previous stub items, which were permanently dead: none of
-    # their 6 trigger conditions were ever actually computed anywhere in the old code). ----
-    {"key": "psap_moved_lte", "label": "PSAP test/Speedtest/VoLTE voice calltest:", "section": "completed",
-     "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "PSAP test/Speedtest/VoLTE voice calltest:")}
-               if _scope_lines_matching(ctx, "PSAP test/Speedtest/VoLTE voice calltest:") else None},
-
-    {"key": "speedtest_new_lte", "label": "Speedtest/VoLTE voice calltest:", "section": "completed",
-     "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Speedtest/VoLTE voice calltest:")}
-               if _scope_lines_matching(ctx, "Speedtest/VoLTE voice calltest:") else None},
-
-    {"key": "speedtest_5g", "label": "Speed test:", "section": "completed",
-     "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Speed test:")}
-               if _scope_lines_matching(ctx, "Speed test:") else None},
-
-    {"key": "calltest_fnet", "label": "Calltest with F-NET SIM:", "section": "completed",
-     "detect": lambda ctx: {"lines": _scope_lines_matching(ctx, "Calltest with F-NET SIM:")}
-               if _scope_lines_matching(ctx, "Calltest with F-NET SIM:") else None},
+    # ---------------- Completed: Call Test — moved to a dedicated section in
+    # mca_report_ui.py (Completed/Pending/Partially Completed), same pattern as NSB.
+    # Removed from here to avoid double-rendering.
 
     # ---------------- Completed: universal, new-node-triggered ----------------
     # Confirmed new trigger: when External alarm testing is Pending (every scripted
