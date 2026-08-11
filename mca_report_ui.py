@@ -119,7 +119,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # uploaded document together — otherwise this is treated as a wrong/mismatched
     # site upload, and the report must not be generated at all.
     is_mismatch, _mismatch_labels = mcl.detect_site_mismatch(
-        mm_objs, precheck_text=precheck_text, postcheck_text=postcheck_text, controller_checks_text=controller_checks_text)
+        mm_objs, controller_objs, precheck_text=precheck_text, postcheck_text=postcheck_text, controller_checks_text=controller_checks_text)
     if is_mismatch:
         _doc_names = {"precheck_text": "Pre-checks", "postcheck_text": "Post-checks", "controller_checks_text": "Controller-checks"}
         _bad_docs = [_doc_names.get(l, l) for l in _mismatch_labels]
