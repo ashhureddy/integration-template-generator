@@ -75,12 +75,21 @@ def _result_to_column_values(item_key, detect_result, manual_extra=None):
         # tab-separated parts into column values, dropping the leading label token itself
         # (e.g. "Integration:") and any "From:"/"To:" literal tokens that are already fixed
         # in the template (those columns are intentionally skipped in VALUE_COLUMNS).
+        # Confirmed fix: deleted_node is a genuine exception — each deleted node produces
+        # its OWN separate scope line (not multiple parts of one line), but has only a
+        # single dedicated .xlsm row/column, so multiple deleted nodes must be combined
+        # with "|" into that one value rather than silently dropping every node after the
+        # first (which is what taking only lines[0] did previously).
         lines = detect_result.get("lines")
         if lines:
-            parts = [p for p in lines[0].split("\t")]
-            parts = parts[1:]  # drop the leading label token
-            parts = [p for p in parts if p.strip().rstrip(":").lower() not in ("from", "to")]
-            values.extend(parts)
+            if item_key == "deleted_node" and len(lines) > 1:
+                nodes = [ln.split("\t")[-1].strip() for ln in lines if ln.split("\t")[-1].strip()]
+                values.append("|".join(nodes))
+            else:
+                parts = [p for p in lines[0].split("\t")]
+                parts = parts[1:]  # drop the leading label token
+                parts = [p for p in parts if p.strip().rstrip(":").lower() not in ("from", "to")]
+                values.extend(parts)
 
         fdd = detect_result.get("fdd")
         if fdd:
