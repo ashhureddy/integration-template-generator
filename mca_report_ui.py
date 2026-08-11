@@ -672,14 +672,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         edp_checked, edp_lines = _checked_group("EDP Publish", edp_group_lines, "chk_edp")
         lkf_p_group_lines = [lkf_lines_by_section["Pending"]] if lkf_lines_by_section.get("Pending") else []
         lkf_p_checked, lkf_p_lines = _checked_group("LKF Installation (Pending)", lkf_p_group_lines, "chk_lkf_p")
-        testing_note_lines = [testing_note] if testing_note else []
-        testing_note_checked, testing_note_out = _checked_group("External alarm testing note", testing_note_lines, "chk_testing_note")
-        # Confirmed fix: this is a Notes item (explicitly labeled "note" in its own
-        # _checked_group call above), but was being concatenated into
-        # additional_pending's text — showing it under Pending in the final report
-        # instead of Notes. Routed to the proper choices["notes_*"] destination, same
-        # pattern used by every other genuine Notes item in this file.
-        choices["notes_testing"] = {"checked": testing_note_checked, "text": testing_note or ""}
 
         additional_pending = st.text_area("\U0001F4DD Enter any additional pending information that needs to be reported to Market",
                                            key="rpt_add_pending", height=100)
@@ -797,6 +789,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         choices["notes_nr_verified"] = {"checked": nr_verified_checked, "text": "NR configuration has been verified."}
         if not has_5g:
             st.caption("(No 5G detected at this site)")
+
+        # Confirmed fix: this is a Notes item (explicitly a "note" from
+        # external_alarm_testing_placement, all-locked/NEA-pending case) — was
+        # previously rendered among the Pending UI elements and concatenated into
+        # additional_pending's text, showing it under Pending in both the UI and the
+        # final report instead of Notes. Now rendered here directly, matching where
+        # it belongs both visually and in the underlying routing.
+        if testing_note:
+            testing_note_checked = st.checkbox(testing_note, value=True, key="chk_testing_note")
+        else:
+            testing_note_checked = False
+        choices["notes_testing"] = {"checked": testing_note_checked, "text": testing_note or ""}
 
         cpri_choice = "\u2014 Select \u2014"
         if new_nodes:
