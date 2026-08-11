@@ -115,6 +115,12 @@ def _simple_item_row(item):
 
 def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines,
            postcheck_text="", controller_checks_text="", edp_index=None):
+    # Confirmed hard block: at least one CIQ node ID must appear across every
+    # uploaded document together — otherwise this is treated as a wrong/mismatched
+    # site upload, and the report must not be generated at all.
+    if mcl.detect_site_mismatch(mm_objs, precheck_text, postcheck_text, controller_checks_text):
+        st.error("Wrong input given: none of this CIQ's node IDs were found together across the uploaded documents. Please confirm you've uploaded the correct files for this site.")
+        st.stop()
     st.subheader("Generate Report")
 
     # Confirmed feedback: manual-entry fields were too visually plain to notice. Targets
