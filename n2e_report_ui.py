@@ -814,14 +814,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
     with st.expander("Issues that needs to be reported", expanded=False):
 
-        def _issue_row(label, key_suffix, row_map_key=None, row_map_index=0, col_width=None):
+        def _issue_row(label, key_suffix, row_map_key=None, row_map_index=0, col_width=None, data_link_label=None):
             # Confirmed format: "{label} : {sectors} : {node} (Tower Crew)" — Sectors
             # input comes before Node input, both free-text. Sectors given more width
             # than Node, per confirmed proportions. Confirmed: 9 of these 12 items have
             # a dedicated .xlsm row (row_map_key given) — Sectors written to column 3,
-            # Node written to column 4, SEPARATELY (not combined into one string). The
-            # remaining items (no dedicated row, e.g. BER) flow into the shared Pending
-            # buffer instead, still as the combined text line.
+            # Node written to column 4 (or 5 for Fiberloss specifically, since Fiberloss
+            # has an extra fixed "Data Link_1"/"Data Link_2" label written to column 4
+            # first). The remaining items (no dedicated row, e.g. BER) flow into the
+            # shared Pending buffer instead, still as the combined text line.
             cols = st.columns([0.6, 2, 1]) if col_width is None else col_width
             c1, c2, c3 = cols
             with c1:
@@ -837,7 +838,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 choices_pending.append(line)
                 st.caption(line)
                 if row_map_key:
-                    issue_row_data[(row_map_key, row_map_index)] = (sector_input.strip(), node_input.strip())
+                    issue_row_data[(row_map_key, row_map_index)] = (sector_input.strip(), data_link_label, node_input.strip())
                 else:
                     nsb_pending_from_warnings.append(line)
 
@@ -848,8 +849,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # Confirmed side by side, same proportions per item for consistent alignment
         # across all paired rows (Fiber loss, RSSI, VSWR).
         f1, f2, f3, f4, f5, f6 = st.columns([0.6, 2, 1, 0.6, 2, 1])
-        _issue_row("High Fiber loss", "fiberloss_high", row_map_key="fiberloss", row_map_index=0, col_width=[f1, f2, f3])
-        _issue_row("Low Fiber loss", "fiberloss_low", row_map_key="fiberloss", row_map_index=1, col_width=[f4, f5, f6])
+        _issue_row("High Fiber loss", "fiberloss_high", row_map_key="fiberloss", row_map_index=0, col_width=[f1, f2, f3], data_link_label="Data Link_1")
+        _issue_row("Low Fiber loss", "fiberloss_low", row_map_key="fiberloss", row_map_index=1, col_width=[f4, f5, f6], data_link_label="Data Link_2")
         c1, c2, c3, c4, c5, c6 = st.columns([0.6, 2, 1, 0.6, 2, 1])
         _issue_row("High RSSI", "high_rssi", row_map_key="high_rssi", col_width=[c1, c2, c3])
         _issue_row("Low RSSI", "low_rssi", row_map_key="low_rssi", col_width=[c4, c5, c6])
@@ -976,11 +977,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             # Confirmed correction: the 9 "Issues that needs to be reported" items with
             # a dedicated row (link_failure, sfp_not_present, mo_inconsistent_config_alarm,
             # fiberloss x2, high/low_rssi, high/low_vswr, vswr_overthreshold) — Sectors
-            # written to column 3, Node written to column 4, SEPARATELY (not combined
-            # into one string).
-            for (_row_key, _row_idx), (_sector_val, _node_val) in issue_row_data.items():
+            # written to column 3, Node written to column 4 for most items. Fiberloss
+            # specifically also writes "Data Link_1"/"Data Link_2" to column 4, shifting
+            # its own Node value to column 5 instead.
+            for (_row_key, _row_idx), (_sector_val, _data_link_val, _node_val) in issue_row_data.items():
                 _row_num = NSB_ROW_MAP[_row_key]["pending"][_row_idx]
-                _cols = ([(3, _sector_val)] if _sector_val else []) + [(4, _node_val)]
+                _cols = [(3, _sector_val)] if _sector_val else []
+                if _data_link_val:
+                    _cols += [(4, _data_link_val), (5, _node_val)]
+                else:
+                    _cols += [(4, _node_val)]
                 row_writes.append((_row_num, True, _cols))
             row_writes.append((NSB_ROW_MAP["subject"], True, [(2, "MIC"), (3, market), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, "NSB")]))
             row_writes.append((NSB_ROW_MAP["iwm_details"], bool(iwm_details.strip()), [(3, iwm_details)]))
