@@ -42,8 +42,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     # Confirmed hard block: at least one CIQ node ID must appear across every
     # uploaded document together — otherwise this is treated as a wrong/mismatched
     # site upload, and the report must not be generated at all.
-    if mcl.detect_site_mismatch(mm_objs, postcheck_text, controller_checks_text):
-        st.error("Wrong input given: none of this CIQ's node IDs were found together across the uploaded documents. Please confirm you've uploaded the correct files for this site.")
+    is_mismatch, _mismatch_labels = mcl.detect_site_mismatch(
+        mm_objs, postcheck_text=postcheck_text, controller_checks_text=controller_checks_text)
+    if is_mismatch:
+        _doc_names = {"postcheck_text": "Post-checks", "controller_checks_text": "Controller-checks"}
+        _bad_docs = [_doc_names.get(l, l) for l in _mismatch_labels]
+        _detail = f" The following document(s) don't contain any of this CIQ's node IDs: {', '.join(_bad_docs)}." \
+            if _bad_docs else " The uploaded documents don't share a common node ID with each other."
+        st.error("Wrong input given: none of this CIQ's node IDs were found together across the uploaded documents." + _detail + " Please confirm you've uploaded the correct files for this site.")
         st.stop()
     st.subheader("Generate N2E Report")
     st.markdown("""
