@@ -1557,6 +1557,25 @@ def _hardware_component_state(post_text, component_prefix):
     return out
 
 
+def xmu_sup_locked_warning(postcheck_text, integrated_nodes):
+    """New NSB check: flags any XMU or SUP found in Post-checks with admin state
+    LOCKED — separate from sup_capacity_warning (which checks capacity/counts, not
+    lock state). A LOCKED XMU/SUP needs to be unlocked before it can actually
+    function, regardless of whether SUP capacity is otherwise sufficient. Returns one
+    warning line per affected node+component combination."""
+    if not postcheck_text or not integrated_nodes:
+        return []
+    warnings = []
+    for node in integrated_nodes:
+        if re.search(re.escape(node) + r"\s+XMU\S*\s+LOCKED\s+OFF\s+(?:(?:true|false)\s+)?STEADY_ON\s+(?:ENABLED|DISABLED)",
+                      postcheck_text, re.I):
+            warnings.append(f"XMU is in locked state on {node}, please unlock.")
+        if re.search(re.escape(node) + r"\s+SUP\S*\s+LOCKED\s+OFF\s+(?:(?:true|false)\s+)?STEADY_ON\s+(?:ENABLED|DISABLED)",
+                      postcheck_text, re.I):
+            warnings.append(f"SUP is in locked state on {node}, please unlock.")
+    return warnings
+
+
 def sup_capacity_warning(postcheck_text, integrated_nodes):
     """New site-wide capacity check: each SUP accommodates up to 2 XMU/5216 boards
     (confirmed pooled across the whole site, not per-node — a lone board on one node
