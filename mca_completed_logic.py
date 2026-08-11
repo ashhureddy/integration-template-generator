@@ -133,9 +133,14 @@ def extract_transport_sfp(post_text):
     text = _normalize(post_text)
     if not text:
         return out
+    # Confirmed real-data quirk: some sites' header stops at ERICSSONPROD, omitting
+    # "TEMP TXbs TXdBm RXdBm BER" from the header line entirely — even though the data
+    # row itself still carries those values. Header's trailing columns made optional
+    # to match both variants; the row-level regex already handles the actual values
+    # correctly either way.
     m = re.search(
         r'Transport SFP\nNode BOARD PORT VENDOR VENDORPROD REV SERIAL DATE '
-        r'ERICSSONPROD TEMP TXbs TXdBm RXdBm BER\n(.*?)(?=\nTransport Fiber link Status|\n[A-Z][\w /]*\n|\Z)',
+        r'ERICSSONPROD(?: TEMP TXbs TXdBm RXdBm BER)?\n(.*?)(?=\nTransport Fiber link Status|\n[A-Z][\w /]*\n|\Z)',
         text, re.S)
     if not m:
         return out
