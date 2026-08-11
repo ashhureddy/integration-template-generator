@@ -1594,6 +1594,8 @@ def sup_capacity_warning(postcheck_text, integrated_nodes):
         return []
     total_boards = 0
     boards_nodes = []
+    has_5216 = False
+    has_xmu = False
     for node in integrated_nodes:
         base = qx.extract_pre_hw(postcheck_text, node)
         xmu_count = len(re.findall(
@@ -1603,6 +1605,10 @@ def sup_capacity_warning(postcheck_text, integrated_nodes):
         if node_boards:
             total_boards += node_boards
             boards_nodes.append(node)
+            if base == "5216":
+                has_5216 = True
+            if xmu_count:
+                has_xmu = True
     if not total_boards:
         return []
     total_sup_found = sum(
@@ -1611,7 +1617,13 @@ def sup_capacity_warning(postcheck_text, integrated_nodes):
         for node in integrated_nodes)
     required_sup = -(-total_boards // 2)  # ceil without importing math
     if total_sup_found < required_sup:
-        return [f"SUP is not scripted for the: {', '.join(boards_nodes)} (5216 or the node with XMU)."]
+        if has_5216 and has_xmu:
+            reason = "5216 or the node with XMU"
+        elif has_5216:
+            reason = "5216"
+        else:
+            reason = "the node with XMU"
+        return [f"SUP is not scripted for the: {', '.join(boards_nodes)} ({reason})."]
     return []
 
 
