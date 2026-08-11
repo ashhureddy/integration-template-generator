@@ -115,8 +115,16 @@ CHECKLIST = [
                if _scope_lines_matching(ctx, "Calltest with F-NET SIM:") else None},
 
     # ---------------- Completed: universal, new-node-triggered ----------------
+    # Confirmed new trigger: when External alarm testing is Pending (every scripted
+    # port locked, NEA pending), Area test also fires with the controller ID
+    # included. Controller ID is appended directly into the SAME "nodes" list
+    # (rather than the separate "controller" fill key, which renders with " | "
+    # spacing) so the pipe-join produces the confirmed exact format with no extra
+    # spaces: "Area test: {node}|{controller}." when a node is present, or just
+    # "Area test: {controller}." when testing is Pending with no new node at all.
     {"key": "area_test", "label": "Area test", "section": "pending", "stakeholder": "MIC PM",
-     "detect": lambda ctx: {"fill": {"nodes": ctx["new_nodes"]}} if ctx["new_nodes"] else None},
+     "detect": lambda ctx: {"fill": {"nodes": ctx["new_nodes"] + ([ctx["controller_id"]] if ctx.get("testing_section") == "Pending" and ctx.get("controller_id") else [])}}
+               if (ctx["new_nodes"] or (ctx.get("testing_section") == "Pending" and ctx.get("controller_id"))) else None},
 
     # ---------------- Pending: default-pending items ----------------
     {"key": "radio_swap", "label": "Radio Swap on:", "section": "pending", "stakeholder": "Tower Crew",
