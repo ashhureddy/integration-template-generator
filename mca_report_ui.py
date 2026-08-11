@@ -801,6 +801,86 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             [pre_existing_text or ""] + sfp_pre_existing_extra + bucket_pre_existing
         ).strip()
 
+    # Confirmed: same 3-way pattern as NSB (Completed/Pending/Partially Completed),
+    # reusing the already-built scope_lines (via mcl.call_test_lines, market-table
+    # driven) — detection logic itself untouched, only the status/reporting UI is new.
+    _psap_line = next((l.replace("\t", " ") for l in scope_lines if l.startswith("PSAP test/Speedtest/VoLTE voice calltest:")), None)
+    _speed_lte_line = next((l.replace("\t", " ") for l in scope_lines if l.startswith("Speedtest/VoLTE voice calltest:")), None)
+    _speed_5g_line = next((l.replace("\t", " ") for l in scope_lines if l.startswith("Speed test:")), None)
+    _fnet_line = next((l.replace("\t", " ") for l in scope_lines if l.startswith("Calltest with F-NET SIM:")), None)
+    _ct_row_map = {
+        "psap": (63, 126, "psap_moved_lte"), "speed_lte": (64, 127, "speedtest_new_lte"),
+        "speed_5g": (65, 128, "speedtest_5g"), "fnet": (66, 129, "calltest_fnet"),
+    }
+    _ct_items = [
+        ("psap", _psap_line, "PSAP test/Speedtest/VoLTE voice calltest"),
+        ("speed_lte", _speed_lte_line, "Speedtest/VoLTE voice calltest"),
+        ("speed_5g", _speed_5g_line, "Speed test"),
+        ("fnet", _fnet_line, "Calltest with F-NET SIM"),
+    ]
+    _ct_detected = [(k, l, lbl) for k, l, lbl in _ct_items if l]
+    _ct_status = None
+    _ct_psap_sched_id = ""
+    _ct_completed_inputs, _ct_pending_inputs = {}, {}
+    _ct_row_writes = []
+    if _ct_detected:
+        with st.container(border=True):
+            st.markdown("**Call Test requirements detected (per CT sheet):**")
+            for _k, _l, _lbl in _ct_detected:
+                st.caption(_l)
+            _ct_status = st.selectbox("Call Test status", ["\u2014 Select \u2014", "Completed", "Pending", "Partially Completed"], key="rpt_ct_status")
+            _psap_applies = any(k == "psap" for k, _l, _lbl in _ct_detected)
+
+            if _ct_status == "Completed":
+                if _psap_applies:
+                    _ct_psap_sched_id = st.text_input("PSAP Schedule ID", key="rpt_ct_psap_sched")
+                for _k, _l, _lbl in _ct_detected:
+                    _comp_row, _pend_row, _row_key = _ct_row_map[_k]
+                    _val = _l.split(": ", 1)[-1].replace(" PSAP Schedule ID: ", "").rstrip()
+                    _extra = [(5, _ct_psap_sched_id.strip())] if (_k == "psap" and _ct_psap_sched_id.strip()) else []
+                    _ct_row_writes.append((_comp_row, True, [(3, _val)] + _extra))
+                    _ct_row_writes.append((_pend_row, False, []))
+                    st.caption(f"\u2705 {_l}")
+            elif _ct_status == "Pending":
+                for _k, _l, _lbl in _ct_detected:
+                    _comp_row, _pend_row, _row_key = _ct_row_map[_k]
+                    _val = _l.split(": ", 1)[-1].replace(" PSAP Schedule ID: ", "").rstrip()
+                    _ct_row_writes.append((_comp_row, False, []))
+                    _ct_row_writes.append((_pend_row, True, [(3, _val)]))
+                    _line = f"{_lbl}: {_val} (MIC PM)"
+                    st.caption(_line)
+            elif _ct_status == "Partially Completed":
+                col_c, col_p = st.columns(2)
+                with col_c:
+                    st.markdown("**Completed**")
+                    for _k, _l, _lbl in _ct_detected:
+                        _ct_completed_inputs[_k] = st.text_input(f"{_lbl} \u2014 Completed on", key=f"rpt_ct_{_k}_completed")
+                        if _k == "psap" and _psap_applies and _ct_completed_inputs[_k].strip():
+                            _ct_psap_sched_id = st.text_input("PSAP Schedule ID", key="rpt_ct_psap_sched")
+                with col_p:
+                    st.markdown("**Pending**")
+                    for _k, _l, _lbl in _ct_detected:
+                        _ct_pending_inputs[_k] = st.text_input(f"{_lbl} \u2014 Pending on", key=f"rpt_ct_{_k}_pending")
+                _ct_result_lines = []
+                for _k, _l, _lbl in _ct_detected:
+                    _comp_row, _pend_row, _row_key = _ct_row_map[_k]
+                    _c_val = _ct_completed_inputs.get(_k, "").strip()
+                    _p_val = _ct_pending_inputs.get(_k, "").strip()
+                    if _c_val:
+                        _extra = [(5, _ct_psap_sched_id.strip())] if (_k == "psap" and _ct_psap_sched_id.strip()) else []
+                        _ct_row_writes.append((_comp_row, True, [(3, _c_val)] + _extra))
+                        _line = f"{_lbl}: {_c_val}."
+                        if _k == "psap" and _ct_psap_sched_id.strip():
+                            _line += f" (PSAP Schedule ID: {_ct_psap_sched_id.strip()})"
+                        _ct_result_lines.append(("completed", _line))
+                    if _p_val:
+                        _ct_row_writes.append((_pend_row, True, [(3, _p_val)]))
+                        _ct_result_lines.append(("pending", f"{_lbl}: {_p_val} (MIC PM)"))
+                if _ct_result_lines:
+                    st.markdown("**Result:**")
+                    for _kind, _line in _ct_result_lines:
+                        st.caption(f"\u2705 {_line}" if _kind == "completed" else _line)
+
     with st.expander("Notes"):
         has_5g = any(app.is_populated(row.get("gNBId")) for row in mm_objs)
 
@@ -923,6 +1003,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         st.download_button("Download report (.txt)", report_text, file_name=f"{node_tag}_Integration_Report.txt", key="rpt_dl_txt")
 
         row_writes = mca_glue.build_xlsm_row_writes(results, choices, ROW_MAP)
+        row_writes += _ct_row_writes
         row_writes.append((3, True, [(2, "MIC"), (3, market_subject_input), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, sow)]))
         row_writes.append((6, True, [(3, iwm_details)]))
         row_writes.append((10, True, [(3, pre_line)]))
