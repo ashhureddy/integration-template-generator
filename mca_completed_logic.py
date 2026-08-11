@@ -1557,27 +1557,37 @@ def _hardware_component_state(post_text, component_prefix):
     return out
 
 
-def detect_site_mismatch(mm_objs, *texts):
+def detect_site_mismatch(mm_objs, **labeled_texts):
     """New safety check: confirmed requirement — at least ONE node ID must appear
     across ALL uploaded documents together (not just some overlap independently per
     document, which could hide a sneaker mismatch — e.g. CIQ has nodes A+B,
     Pre-checks has A, Post-checks has B, but A and B never co-occur in the same
-    document). Finds the set of CIQ node names present in EVERY non-empty text
-    passed in; if that set is empty, this is a hard-block mismatch. Texts that are
-    empty/not uploaded are skipped (not a mismatch condition on their own — this
-    only validates what's actually been uploaded). Returns True if a mismatch is
-    detected (should hard-block), False otherwise."""
+    document). Confirmed fix: accepts labeled documents (e.g.
+    postcheck_text="...", controller_checks_text="...") rather than positional
+    texts, so a detected mismatch can name exactly which document(s) don't contain
+    any of the CIQ's node names — not just a generic "something's wrong".
+    Documents that are empty/not uploaded are skipped entirely (not a mismatch
+    condition on their own — this only validates what's actually been uploaded).
+    Returns (is_mismatch, offending_labels) — offending_labels lists every uploaded
+    document that individually contains none of the CIQ's node names. Note:
+    offending_labels can be empty even when is_mismatch is True, if each document
+    individually has SOME CIQ node but no single node is common to all of them —
+    in that case the mismatch is about the documents not agreeing with EACH OTHER,
+    not any one document being wrong on its own."""
     node_names = [row.get("Node to be built as") for row in mm_objs if row.get("Node to be built as")]
     if not node_names:
-        return False
-    uploaded_texts = [t for t in texts if t]
-    if not uploaded_texts:
-        return False
+        return False, []
+    uploaded = {label: text for label, text in labeled_texts.items() if text}
+    if not uploaded:
+        return False, []
     common_nodes = set(node_names)
-    for text in uploaded_texts:
-        common_nodes &= {n for n in node_names if n in text}
-        if not common_nodes:
-            break
+    offending_labels = []
+    for label, text in uploaded.items():
+        nodes_in_this_doc = {n for n in node_names if n in text}
+        if not nodes_in_this_doc:
+            offending_labels.append(label)
+        common_nodes &= nodes_in_this_doc
+    return (not bool(common_nodes)), offending_labels
     return not bool(common_nodes)
 
 
