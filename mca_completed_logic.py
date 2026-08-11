@@ -1557,6 +1557,30 @@ def _hardware_component_state(post_text, component_prefix):
     return out
 
 
+def detect_site_mismatch(mm_objs, *texts):
+    """New safety check: confirmed requirement — at least ONE node ID must appear
+    across ALL uploaded documents together (not just some overlap independently per
+    document, which could hide a sneaker mismatch — e.g. CIQ has nodes A+B,
+    Pre-checks has A, Post-checks has B, but A and B never co-occur in the same
+    document). Finds the set of CIQ node names present in EVERY non-empty text
+    passed in; if that set is empty, this is a hard-block mismatch. Texts that are
+    empty/not uploaded are skipped (not a mismatch condition on their own — this
+    only validates what's actually been uploaded). Returns True if a mismatch is
+    detected (should hard-block), False otherwise."""
+    node_names = [row.get("Node to be built as") for row in mm_objs if row.get("Node to be built as")]
+    if not node_names:
+        return False
+    uploaded_texts = [t for t in texts if t]
+    if not uploaded_texts:
+        return False
+    common_nodes = set(node_names)
+    for text in uploaded_texts:
+        common_nodes &= {n for n in node_names if n in text}
+        if not common_nodes:
+            break
+    return not bool(common_nodes)
+
+
 def xmu_sup_locked_warning(postcheck_text, integrated_nodes):
     """New NSB check: flags any XMU or SUP found in Post-checks with admin state
     LOCKED — separate from sup_capacity_warning (which checks capacity/counts, not
