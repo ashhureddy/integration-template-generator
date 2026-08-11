@@ -3073,6 +3073,8 @@ if st.session_state.qkx_page == "home":
         st.caption("Pre-existing sites — MCA, CENM, or CRAN rehome")
         if st.button("MCA", use_container_width=True, key="qkx_card_mca"):
             _qkx_go("family")
+        if st.button("\U0001F4CB  MCA - Generate Report", use_container_width=True, key="qkx_card_mca_report"):
+            _qkx_go("input", "MCA", report_only=True)
     with c2:
         st.caption("Nokia to Ericsson site integration")
         if st.button("N2E", use_container_width=True, key="qkx_card_n2e"):
