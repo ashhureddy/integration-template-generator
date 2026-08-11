@@ -1557,37 +1557,57 @@ def _hardware_component_state(post_text, component_prefix):
     return out
 
 
-def detect_site_mismatch(mm_objs, **labeled_texts):
+def detect_site_mismatch(mm_objs, controller_objs=None, **labeled_texts):
     """New safety check: confirmed requirement — at least ONE node ID must appear
     across ALL uploaded documents together (not just some overlap independently per
     document, which could hide a sneaker mismatch — e.g. CIQ has nodes A+B,
     Pre-checks has A, Post-checks has B, but A and B never co-occur in the same
-    document). Confirmed fix: accepts labeled documents (e.g.
-    postcheck_text="...", controller_checks_text="...") rather than positional
-    texts, so a detected mismatch can name exactly which document(s) don't contain
-    any of the CIQ's node names — not just a generic "something's wrong".
-    Documents that are empty/not uploaded are skipped entirely (not a mismatch
-    condition on their own — this only validates what's actually been uploaded).
+    document). Confirmed fix: "controller_checks_text" is validated separately
+    against the CIQ's "6610 Controller" tab (controller_objs, Controller=="6610" ->
+    Controller ID) rather than the radio node names — a Controller-checks file is
+    tied to a controller ID (e.g. "AZPC102030_C001"), which would never genuinely
+    appear in a radio node's Pre/Post-checks text, so validating it against the same
+    node-name set as everything else would always incorrectly flag a mismatch even
+    on a genuinely correct file. Every OTHER labeled document (Pre-checks,
+    Post-checks) still validates against radio node names as before, requiring one
+    common node across all of them together.
     Returns (is_mismatch, offending_labels) — offending_labels lists every uploaded
-    document that individually contains none of the CIQ's node names. Note:
-    offending_labels can be empty even when is_mismatch is True, if each document
-    individually has SOME CIQ node but no single node is common to all of them —
-    in that case the mismatch is about the documents not agreeing with EACH OTHER,
-    not any one document being wrong on its own."""
+    document that individually contains none of its expected identifiers. Note:
+    offending_labels can be empty even when is_mismatch is True, if each
+    radio-node document individually has SOME CIQ node but no single node is common
+    to all of them — in that case the mismatch is about the documents not agreeing
+    with EACH OTHER, not any one document being wrong on its own."""
     node_names = [row.get("Node to be built as") for row in mm_objs if row.get("Node to be built as")]
-    if not node_names:
-        return False, []
+    controller_ids = [row.get("Controller ID") for row in (controller_objs or [])
+                       if str(row.get("Controller", "")).strip() == "6610" and row.get("Controller ID")]
+
     uploaded = {label: text for label, text in labeled_texts.items() if text}
     if not uploaded:
         return False, []
-    common_nodes = set(node_names)
+
     offending_labels = []
-    for label, text in uploaded.items():
-        nodes_in_this_doc = {n for n in node_names if n in text}
-        if not nodes_in_this_doc:
-            offending_labels.append(label)
-        common_nodes &= nodes_in_this_doc
-    return (not bool(common_nodes)), offending_labels
+    is_mismatch = False
+
+    controller_text = uploaded.pop("controller_checks_text", None)
+    if controller_text is not None:
+        if controller_ids:
+            if not any(cid in controller_text for cid in controller_ids):
+                offending_labels.append("controller_checks_text")
+                is_mismatch = True
+        # else: no controller IDs in the CIQ at all — nothing to validate against,
+        # not treated as a mismatch on its own.
+
+    if uploaded and node_names:
+        common_nodes = set(node_names)
+        for label, text in uploaded.items():
+            nodes_in_this_doc = {n for n in node_names if n in text}
+            if not nodes_in_this_doc:
+                offending_labels.append(label)
+            common_nodes &= nodes_in_this_doc
+        if not common_nodes:
+            is_mismatch = True
+
+    return is_mismatch, offending_labels
     return not bool(common_nodes)
 
 
