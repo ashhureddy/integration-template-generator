@@ -198,6 +198,26 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         elif label:
             moved_bands_by_tech["lte"].add(label)
 
+    # Confirmed fix: PSAP was reporting the whole band even when only some sectors
+    # move (e.g. Beta/Gamma/Epsilon), since moved_bands_by_tech only tracked band
+    # labels. Reusing the same per-band sector tracking + whole-band detection
+    # already proven in app.py's "Moved Sectors:" line generation, rather than
+    # touching call_test_lines() itself (shared with N2E/NSB).
+    _WHOLE_BAND_SET = {"Alpha", "Beta", "Gamma"}
+    _moved_lte_per_label = {}
+    for mv in classification.get("moved", []):
+        label, sector = app.band_label(mv["cell"])
+        if label and label not in ("CBAND", "DOD", "DOD_BWE") and not label.startswith("5G_") and sector:
+            _moved_lte_per_label.setdefault(label, set()).add(sector)
+    moved_bands_by_tech["lte"] = set()
+    for label, sset in _moved_lte_per_label.items():
+        is_whole = _WHOLE_BAND_SET <= sset
+        if is_whole:
+            moved_bands_by_tech["lte"].add(label)
+        else:
+            sector_names = sorted(sset, key=lambda s: app.SECTOR_ORDER.index(s) if s in app.SECTOR_ORDER else 99)
+            moved_bands_by_tech["lte"].add(f"{label} {', '.join(sector_names)}")
+
     calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
     market = None
     if calltest_path.exists() and mm_objs:
