@@ -681,7 +681,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     locked_ports_list = [p for p in (controller_checks_data.get("alarm_ports", []) if controller_checks_data else [])
                           if p["admin"] == "LOCKED" and p["slogan"]]
-    locked_ports_exist = bool(locked_ports_list)
+    # Confirmed fix, same pattern as NSB: when EVERY scripted port is locked (NEA
+    # pending), the simple "All external alarms are kept locked, due to NEA is
+    # pending." note already covers this completely — asking the engineer to
+    # individually classify all of them (Pre-existing, active alarm, loops, etc.) is
+    # redundant and unnecessary busywork in that specific case.
+    locked_ports_exist = bool(locked_ports_list) and testing_section != "Pending"
 
     bucket_pre_existing, bucket_pending, bucket_notes = [], [], []
     if locked_ports_exist:
