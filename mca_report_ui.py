@@ -422,8 +422,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         with c[0]: st.markdown(f"MIC\n\n**MIC**")
         with c[1]: market_subject_input = st.selectbox("\U0001F4DD Market", ["\u2014 Select \u2014", "MNS", "AT&T"], key="rpt_market")
         with c[2]:
-            status = st.selectbox("\U0001F4DD Status", ["IX-STF", "IX-ATP"],
-                                   index=["IX-STF", "IX-ATP"].index(default_status), key="rpt_status")
+            status = st.selectbox("\U0001F4DD Status", ["\u2014 Select \u2014", "IX-STF", "IX-ATP"],
+                                   index=["\u2014 Select \u2014", "IX-STF", "IX-ATP"].index(default_status), key="rpt_status")
+        status = "" if status == "\u2014 Select \u2014" else status
         market_subject_input = "" if market_subject_input == "\u2014 Select \u2014" else market_subject_input
         with c[3]: site_name = st.text_input("\U0001F4DD Site Name", key="rpt_site_name")
         with c[4]: st.markdown(f"FA CODE\n\n**{fa_code or '(not found)'}**")
