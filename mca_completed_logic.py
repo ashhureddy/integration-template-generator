@@ -1578,7 +1578,7 @@ def sup_capacity_warning(postcheck_text, integrated_nodes):
     for node in integrated_nodes:
         base = qx.extract_pre_hw(postcheck_text, node)
         xmu_count = len(re.findall(
-            re.escape(node) + r"\s+XMU\S*\s+UNLOCKED\s+OFF\s+(?:(?:true|false)\s+)?STEADY_ON\s+(?:ENABLED|DISABLED)",
+            re.escape(node) + r"\s+XMU\S*\s+(?:UNLOCKED|LOCKED)\s+OFF\s+(?:(?:true|false)\s+)?STEADY_ON\s+(?:ENABLED|DISABLED)",
             postcheck_text, re.I))
         node_boards = xmu_count + (1 if base == "5216" else 0)
         if node_boards:
@@ -1587,7 +1587,7 @@ def sup_capacity_warning(postcheck_text, integrated_nodes):
     if not total_boards:
         return []
     total_sup_found = sum(
-        len(re.findall(re.escape(node) + r"\s+SUP\S*\s+UNLOCKED\s+OFF\s+(?:(?:true|false)\s+)?STEADY_ON\s+ENABLED",
+        len(re.findall(re.escape(node) + r"\s+SUP\S*\s+(?:UNLOCKED|LOCKED)\s+OFF\s+(?:(?:true|false)\s+)?STEADY_ON\s+ENABLED",
                        postcheck_text, re.I))
         for node in integrated_nodes)
     required_sup = -(-total_boards // 2)  # ceil without importing math
