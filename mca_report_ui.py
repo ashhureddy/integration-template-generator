@@ -210,13 +210,20 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if label and label not in ("CBAND", "DOD", "DOD_BWE") and not label.startswith("5G_") and sector:
             _moved_lte_per_label.setdefault(label, set()).add(sector)
     moved_bands_by_tech["lte"] = set()
+    # Confirmed grouping fix: bands sharing the exact same moved-sector set get
+    # combined into one entry "[band1/band2/...] sector" rather than each band
+    # producing its own separate "{band} {sector}" string.
+    _sectorset_to_labels = {}
     for label, sset in _moved_lte_per_label.items():
         is_whole = _WHOLE_BAND_SET <= sset
         if is_whole:
             moved_bands_by_tech["lte"].add(label)
         else:
-            sector_names = sorted(sset, key=lambda s: app.SECTOR_ORDER.index(s) if s in app.SECTOR_ORDER else 99)
-            moved_bands_by_tech["lte"].add(f"{label} {', '.join(sector_names)}")
+            _sectorset_to_labels.setdefault(frozenset(sset), []).append(label)
+    for sset, labels in _sectorset_to_labels.items():
+        sector_names = sorted(sset, key=lambda s: app.SECTOR_ORDER.index(s) if s in app.SECTOR_ORDER else 99)
+        labels_fmt = "/".join(sorted(labels))
+        moved_bands_by_tech["lte"].add(f"[{labels_fmt}] {', '.join(sector_names)}")
 
     calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
     market = None
@@ -620,6 +627,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         isinstance(board_swaps[0], tuple) else set()
     sfp_trigger_nodes = sorted(set(new_nodes) | set(port_conv_nodes) | board_swap_node_set)
     sfp_models_by_node = {}
+    # Confirmed fix: transport_sfp_data moved ahead of the UI block below so BBU End
+    # can auto-fetch from it (ericssonprod column, matched per node) — same pattern
+    # already confirmed and working for N2E/NSB. SIAD End stays fully manual.
+    transport_sfp_data = {}
+    if postcheck_text:
+        transport_sfp_data = mcl.extract_transport_sfp(postcheck_text)
     if sfp_trigger_nodes:
         with st.container(border=True):
             st.markdown(f"**Transport SFP Installation** \u2014 {len(sfp_trigger_nodes)} node(s). SFP models are manual:")
@@ -628,16 +641,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 with c1:
                     st.caption(node)
                 with c2:
-                    bbu = st.text_input("BBU End", key=f"sfp_bbu_{node}", label_visibility="collapsed", placeholder="SFP Model (BBU End)")
+                    _bbu_auto = transport_sfp_data.get(node, {}).get("ericssonprod", "")
+                    bbu = st.text_input("BBU End", value=_bbu_auto, key=f"sfp_bbu_{node}", label_visibility="collapsed", placeholder="SFP Model (BBU End)")
                 with c3:
                     siad = st.text_input("SIAD End", key=f"sfp_siad_{node}", label_visibility="collapsed", placeholder="SFP Model (SIAD End)")
                 sfp_models_by_node[node] = (bbu, siad)
     transport_sfp_lines = mcl.transport_sfp_installation_lines(sfp_trigger_nodes, sfp_models_by_node) if sfp_trigger_nodes else []
 
     sfp_pending_extra, sfp_pre_existing_extra = [], []
-    transport_sfp_data = {}
     if postcheck_text:
-        transport_sfp_data = mcl.extract_transport_sfp(postcheck_text)
         board_swap_names = [n for n, _p, _q in board_swaps] if board_swaps else []
         sfp_pending_extra, sfp_warnings, sfp_pre_existing_extra = mcl.transport_sfp_verification(
             ciq_wb, mm_objs, new_nodes, board_swap_names, postcheck_text, transport_sfp_data)
@@ -827,28 +839,38 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         with st.container(border=True):
             st.markdown("**Call Test requirements detected (per CT sheet):**")
             for _k, _l, _lbl in _ct_detected:
-                st.caption(_l)
+                _display = _l.replace(" PSAP Schedule ID: ", "").rstrip() if _k == "psap" else _l
+                st.caption(_display)
             _ct_status = st.selectbox("Call Test status", ["\u2014 Select \u2014", "Completed", "Pending", "Partially Completed"], key="rpt_ct_status")
             _psap_applies = any(k == "psap" for k, _l, _lbl in _ct_detected)
 
             if _ct_status == "Completed":
                 if _psap_applies:
                     _ct_psap_sched_id = st.text_input("PSAP Schedule ID", key="rpt_ct_psap_sched")
+                _ct_text_lines = []
                 for _k, _l, _lbl in _ct_detected:
                     _comp_row, _pend_row, _row_key = _ct_row_map[_k]
                     _val = _l.split(": ", 1)[-1].replace(" PSAP Schedule ID: ", "").rstrip()
                     _extra = [(5, _ct_psap_sched_id.strip())] if (_k == "psap" and _ct_psap_sched_id.strip()) else []
                     _ct_row_writes.append((_comp_row, True, [(3, _val)] + _extra))
                     _ct_row_writes.append((_pend_row, False, []))
-                    st.caption(f"\u2705 {_l}")
+                    _display_l = _l + (f" (PSAP Schedule ID: {_ct_psap_sched_id.strip()})" if (_k == "psap" and _ct_psap_sched_id.strip()) else "")
+                    _ct_text_lines.append(_display_l)
+                    st.caption(f"\u2705 {_display_l}")
+                choices["additional_completed"]["text"] = "\n".join(
+                    [choices["additional_completed"]["text"] or ""] + _ct_text_lines).strip()
             elif _ct_status == "Pending":
+                _ct_text_lines = []
                 for _k, _l, _lbl in _ct_detected:
                     _comp_row, _pend_row, _row_key = _ct_row_map[_k]
                     _val = _l.split(": ", 1)[-1].replace(" PSAP Schedule ID: ", "").rstrip()
                     _ct_row_writes.append((_comp_row, False, []))
                     _ct_row_writes.append((_pend_row, True, [(3, _val)]))
                     _line = f"{_lbl}: {_val} (MIC PM)"
+                    _ct_text_lines.append(_line)
                     st.caption(_line)
+                choices["additional_pending"]["text"] = "\n".join(
+                    [choices["additional_pending"]["text"] or ""] + _ct_text_lines).strip()
             elif _ct_status == "Partially Completed":
                 col_c, col_p = st.columns(2)
                 with col_c:
@@ -878,6 +900,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                         _ct_result_lines.append(("pending", f"{_lbl}: {_p_val} (MIC PM)"))
                 if _ct_result_lines:
                     st.markdown("**Result:**")
+                    _ct_c_texts = [l for k, l in _ct_result_lines if k == "completed"]
+                    _ct_p_texts = [l for k, l in _ct_result_lines if k == "pending"]
+                    if _ct_c_texts:
+                        choices["additional_completed"]["text"] = "\n".join(
+                            [choices["additional_completed"]["text"] or ""] + _ct_c_texts).strip()
+                    if _ct_p_texts:
+                        choices["additional_pending"]["text"] = "\n".join(
+                            [choices["additional_pending"]["text"] or ""] + _ct_p_texts).strip()
                     for _kind, _line in _ct_result_lines:
                         st.caption(f"\u2705 {_line}" if _kind == "completed" else _line)
 
