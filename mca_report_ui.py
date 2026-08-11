@@ -33,13 +33,13 @@ def _get_controller_id(controller_objs):
     return ctrl_rows[0].get("Controller ID") if ctrl_rows else ""
 
 
-def _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp):
+def _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp, testing_section=None):
     new_nodes, board_swaps = report_detect.detect_node_board_changes(app, ciq_wb, mm_objs, precheck_text)
     fdd_renames = report_detect.detect_fdd_renaming(app, ciq_wb)
     return {
         "scope_lines": scope_lines, "new_nodes": new_nodes, "board_swaps": board_swaps,
         "fdd_renames": fdd_renames, "controller_id": controller_id, "controller_in_edp": controller_in_edp,
-        "idl_build_type": idl_build_type,
+        "idl_build_type": idl_build_type, "testing_section": testing_section,
         "moved_lte_bands": None, "fnet_moved_or_new": False, "new_lte_bands": None,
         "moving_5g_bands_incl_cband": None, "new_5g_bands_excl_cband": None, "new_cband_dod": None,
     }
@@ -292,7 +292,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # tuples — confirmed gap, built this pass. ----
     fdd_lines_fixed = mcl.fdd_renaming_lines(ciq_wb)
 
-    ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp)
+    ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp, testing_section)
     results = mca_checklist.evaluate_checklist(ctx)
 
     if cascade_fires:
