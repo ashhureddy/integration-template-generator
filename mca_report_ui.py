@@ -558,11 +558,27 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             elif idl_choice == "Pending":
                 idl_pending_line = "IDL connections (MIC PM)"
                 st.caption(f"Added to Pending: {idl_pending_line}")
+            # Confirmed: auto-derive IDLe/IDLy cable part numbers + real node substitution
+            # from the reference table, keyed off the detected/selected Build Type letter —
+            # same "auto-fill + still-editable manual field" pattern as Switch/Sidehaul below.
+            _bt_letter = (idl_build_type_final or "").replace("Type ", "").strip()
+            auto_idle_lines, auto_idly_lines = app.idl_cable_lines_for_build_type(ciq_wb, mm_objs, _bt_letter) \
+                if _bt_letter else ([], [])
             c1, c2 = st.columns(2)
             with c1:
-                idle = st.text_area("\U0001F4DD IDLe cable details (manual)", key="rpt_idle", height=60)
+                if auto_idle_lines:
+                    st.caption("Auto-derived (IDLe):")
+                    for l in auto_idle_lines:
+                        st.caption(l)
+                idle = st.text_area("\U0001F4DD IDLe cable details (additional/manual)", key="rpt_idle", height=60)
+                idle = "\n".join([l for l in auto_idle_lines] + ([idle] if idle else [])).strip()
             with c2:
-                idly = st.text_area("\U0001F4DD IDLy cable details (manual)", key="rpt_idly", height=60)
+                if auto_idly_lines:
+                    st.caption("Auto-derived (IDLy):")
+                    for l in auto_idly_lines:
+                        st.caption(l)
+                idly = st.text_area("\U0001F4DD IDLy cable details (additional/manual)", key="rpt_idly", height=60)
+                idly = "\n".join([l for l in auto_idly_lines] + ([idly] if idly else [])).strip()
 
             sidehaul_rows = mcl.sidehaul_display_rows(ciq_wb)
             if sidehaul_rows:
