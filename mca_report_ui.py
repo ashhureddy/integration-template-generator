@@ -530,9 +530,23 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     idl_completed_line, idl_pending_line = None, None
     idle = idly = switch = slot_port = ""
+    idl_build_type_final = idl_build_type
     if len(mm_objs) > 1:
         with st.container(border=True):
-            st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type or '(not detected)'}**")
+            idl_build_type_options = [t.strip() for t in (idl_build_type or "").split("/") if t.strip()]
+            if len(idl_build_type_options) > 1:
+                # Confirmed: more than one possible Build Type (e.g. a combo with both a
+                # Preferred and Alternate variant) — which physical ports are actually free
+                # on the board can't be known from the CIQ alone, so let the engineer pick
+                # one instead of silently joining both into one string in the report.
+                idl_build_type_final = st.selectbox(
+                    "IDL Build Type \u2014 more than one option detected, pick one",
+                    ["\u2014 Select \u2014"] + idl_build_type_options, key="mca_idl_buildtype")
+                if idl_build_type_final == "\u2014 Select \u2014":
+                    idl_build_type_final = None
+                st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type_final or '(pick one above)'}**")
+            else:
+                st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type or '(not detected)'}**")
             # Confirmed same as NSB/N2E: IDL connections status is a real user choice
             # (Completed/Pending), not auto-detected — the generic checklist item's
             # detect() only ever knew the build type, never actually asked this.
@@ -1192,7 +1206,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             "pre_configuration": pre_line, "current_configuration": current_config,
             "post_configuration": post_line, "wll_node": wll_node, "controller_id": controller_id,
             "software_version": software_version, "gs_version": gs_version,
-            "idl_build_type": idl_build_type, "idle": idle, "idly": idly, "switch": switch, "slot_port": slot_port,
+            "idl_build_type": idl_build_type_final, "idle": idle, "idly": idly, "switch": switch, "slot_port": slot_port,
         }
         report_text = mca_report_text.build_mca_report_text(mm_objs, results, choices, header_fields, stakeholder_by_key=stakeholders)
         st.success("Report generated.")
@@ -1213,7 +1227,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         row_writes.append((14, bool(controller_id), [(3, controller_id)] if controller_id else []))
         row_writes.append((15, bool(software_version.strip()), [(3, software_version)] if software_version.strip() else []))
         row_writes.append((16, bool(gs_version.strip()), [(3, gs_version)] if gs_version.strip() else []))
-        row_writes.append((19, bool(idl_build_type), [(3, idl_build_type)] if idl_build_type else []))
+        row_writes.append((19, bool(idl_build_type_final), [(3, idl_build_type_final)] if idl_build_type_final else []))
 
         # IDLe / IDLy (rows 20/21) — same confirmed bug: never written before this fix, so
         # the template's default (checked=True, placeholder text) always leaked through
