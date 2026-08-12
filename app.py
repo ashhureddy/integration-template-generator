@@ -1132,6 +1132,88 @@ TDIR_N2E_IDL = Path(__file__).parent / "templates" / "N2E" / "IDL"
 
 DU_TYPE_TO_GEN = {"6630": "G2", "5216": "G2", "6648": "G3", "6651": "G3", "6672": "G4"}
 
+# Confirmed real reference table (uploaded IDL_Connections.xlsx, "IDL Connections_MCA" tab) —
+# Build Type letter -> combination pattern + IDLe/IDLy cable part number(s) with their own
+# combination pattern. Patterns use bare "G2"/"G3"/"G4" for a single node of that generation,
+# or "G2(1)"/"G2(2)" etc. when more than one node shares the same generation (e.g. Build Type D
+# has three separate G2 nodes) — each substituted with that specific node's own real label.
+IDL_CABLE_REFERENCE = {
+    "A": {"idle": [("RPM 777 417", "G2(1)+G2(2)")], "idly": []},
+    "B": {"idle": [], "idly": [("RPM 777 098", "G2+G3")]},
+    "BB": {"idle": [], "idly": [("RPM 777 544", "G2+G3")]},
+    "C": {"idle": [("RPM 777 052", "G3(1)+G3(2)")], "idly": []},
+    "CC": {"idle": [("RPM 777 053", "G3(1)+G3(2)")], "idly": []},
+    "R": {"idle": [("RPM 777 052", "G4(1)+G4(2)")], "idly": []},
+    "S": {"idle": [("RPM 777 543", "G4+G2")], "idly": []},
+    "T": {"idle": [("RPM 777 052", "G4+G3")], "idly": []},
+    "D": {"idle": [("RPM 777 417", "G2(1)+G2(2)"), ("RPM 777 417", "G2(2)+G2(3)"), ("RPM 777 417", "G2(3)+G2(1)")], "idly": []},
+    "E": {"idle": [("RPM 777 417", "G2(1)+G2(2)")], "idly": [("RPM 777 098", "G2(1)+G2(2)+G3")]},
+    "EE": {"idle": [("RPM 777 417", "G2(1)+G2(2)")], "idly": [("RPM 777 098", "G2(2)+G3")]},
+    "F": {"idle": [("RPM 777 053", "G3(1)+G3(2)")], "idly": [("RPM 777 544", "G2+G3(1)"), ("RPM 777 544", "G2+G3(2)")]},
+    "FF": {"idle": [("RPM 777 053", "G3(1)+G3(2)")], "idly": [("RPM 777 544", "G2+G3(1)")]},
+    "G": {"idle": [("RPM 777 053", "G3(1)+G3(2)")], "idly": [("RPM 777 054", "G3(1)+G3(2)+G3(3)")]},
+    "GG": {"idle": [("RPM 777 052", "G3(1)+G3(2)"), ("RPM 777 052", "G3(2)+G3(3)"), ("RPM 777 052", "G3(3)+G3(1)")], "idly": []},
+    "RR": {"idle": [("RPM 777 052", "G4(1)+G4(2)"), ("RPM 777 052", "G4(2)+G4(3)"), ("RPM 777 052", "G4(3)+G4(1)")], "idly": []},
+    "TT": {"idle": [("RPM 777 052", "G3+G4(1)"), ("RPM 777 052", "G4(1)+G4(2)"), ("RPM 777 052", "G3+G4(2)")], "idly": []},
+    "U": {"idle": [("RPM 777 053", "G4(1)+G4(2)"), ("RPM 777 543", "G2+G4(1)"), ("RPM 777 543", "G2+G4(2)")], "idly": []},
+    "UU": {"idle": [("RPM 777 052", "G3+G4"), ("RPM 777 543", "G2+G3"), ("RPM 777 543", "G2+G4")], "idly": []},
+}
+
+
+def _idl_cable_node_label(ciq_wb, row):
+    """Confirmed format for IDL cable substitution — same (P)/(S) dual-identity tagging and
+    hardware as Post Configuration, but WITHOUT the BBU mode tag (TMBB/SMBB/etc.): just
+    "{primary}(P)/{secondary}(S)({hw})" or "{primary}({hw})" for a single-identity node."""
+    primary = row.get("Node to be built as")
+    e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+    is_lte_primary = str(primary).strip().upper() == str(e_name or "").strip().upper()
+    r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) if is_lte_primary else \
+        find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+    if not r:
+        r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or \
+            find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+    hw = hw_string(r) or "NOT FOUND"
+    if is_populated(e_name) and is_populated(g_name):
+        secondary = g_name if is_lte_primary else e_name
+        return f"{primary}(P)/{secondary}(S)({hw})"
+    return f"{primary}({hw})"
+
+
+def idl_cable_lines_for_build_type(ciq_wb, mm_objs, build_type_letter):
+    """Confirmed rule: match nodes to each combination pattern's generation slots using
+    get_node_generation() — same mapping already used for Build Type detection — then
+    substitute each slot with that specific real node's own label (_idl_cable_node_label).
+    Bare "G2" means the single node of that generation; "G2(1)"/"G2(2)" means the 1st/2nd
+    node of that generation, in CIQ row order. Returns (idle_lines, idly_lines), each a list
+    of "{part number} : {substituted combination}" strings."""
+    entry = IDL_CABLE_REFERENCE.get(str(build_type_letter or "").strip().upper())
+    if not entry:
+        return [], []
+
+    nodes_by_gen = {}
+    for row in mm_objs:
+        gen = get_node_generation(ciq_wb, row)
+        if gen:
+            nodes_by_gen.setdefault(gen, []).append(row)
+
+    def substitute(pattern):
+        parts = []
+        used_counts = {}
+        for gen, idx in re.findall(r"(G\d)(?:\((\d+)\))?", pattern):
+            candidates = nodes_by_gen.get(gen, [])
+            pos = (int(idx) - 1) if idx else used_counts.get(gen, 0)
+            used_counts[gen] = used_counts.get(gen, 0) + 1
+            if 0 <= pos < len(candidates):
+                parts.append(_idl_cable_node_label(ciq_wb, candidates[pos]))
+            else:
+                parts.append(f"{gen} (node not found)")
+        return " + ".join(parts)
+
+    idle_lines = [f"{part} : {substitute(combo)}" for part, combo in entry["idle"]]
+    idly_lines = [f"{part} : {substitute(combo)}" for part, combo in entry["idly"]]
+    return idle_lines, idly_lines
+
+
 # combo (sorted tuple of generations) -> list of (filename, variant label)
 IDL_TEMPLATE_REGISTRY = {
     ("G2", "G2"): [("G2+G2_Buildtype_A.txt", "")],
@@ -1151,11 +1233,16 @@ IDL_TEMPLATE_REGISTRY = {
     # falls through to the "IDL Template not found" branch below.
 }
 
-# N2E confirmed to support only these 2 combinations (not the full 15) — reuses the same
-# file content/naming as the shared set, just from its own templates/N2E/IDL/ folder.
+# N2E confirmed to support these combinations — reuses the same file content/naming as the
+# shared set, just from its own templates/N2E/IDL/ folder. Originally just C/CC/R; T, G, GG,
+# RR, TT added this session (files copied into templates/N2E/IDL/ to match).
 N2E_IDL_TEMPLATE_REGISTRY = {
     ("G3", "G3"): [("G3+G3_Buildtype_C.txt", "Preferred"), ("G3+G3_Buildtype_CC.txt", "Alternate")],
     ("G4", "G4"): [("G4+G4_Buildtype_R.txt", "Preferred")],
+    ("G3", "G4"): [("G4+G3_Buildtype_T.txt", "IDLe")],
+    ("G3", "G3", "G3"): [("G3+ G3+ G3_Buildtype_GG.txt", "Preferred"), ("G3+ G3+ G3_Buildtype_G.txt", "Alternate")],
+    ("G4", "G4", "G4"): [("G4+G4+G4_Buildtype_RR.txt", "")],
+    ("G3", "G4", "G4"): [("G3 + G4 + G4_Buildtype_TT.txt", "")],
     # every other combination -> "IDL Template not found" for N2E specifically, even though
     # MCA/CENM/NSB support it via the full registry above.
 }
