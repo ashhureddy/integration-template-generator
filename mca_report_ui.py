@@ -33,13 +33,13 @@ def _get_controller_id(controller_objs):
     return ctrl_rows[0].get("Controller ID") if ctrl_rows else ""
 
 
-def _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp, testing_section=None):
+def _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp, testing_section=None, sau_placement=None):
     new_nodes, board_swaps = report_detect.detect_node_board_changes(app, ciq_wb, mm_objs, precheck_text)
     fdd_renames = report_detect.detect_fdd_renaming(app, ciq_wb)
     return {
         "scope_lines": scope_lines, "new_nodes": new_nodes, "board_swaps": board_swaps,
         "fdd_renames": fdd_renames, "controller_id": controller_id, "controller_in_edp": controller_in_edp,
-        "idl_build_type": idl_build_type, "testing_section": testing_section,
+        "idl_build_type": idl_build_type, "testing_section": testing_section, "sau_placement": sau_placement,
         "moved_lte_bands": None, "fnet_moved_or_new": False, "new_lte_bands": None,
         "moving_5g_bands_incl_cband": None, "new_5g_bands_excl_cband": None, "new_cband_dod": None,
     }
@@ -319,7 +319,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # tuples — confirmed gap, built this pass. ----
     fdd_lines_fixed = mcl.fdd_renaming_lines(ciq_wb)
 
-    ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp, testing_section)
+    ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp, testing_section, sau_placement)
     results = mca_checklist.evaluate_checklist(ctx)
 
     if cascade_fires:
@@ -337,10 +337,24 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             if item["key"] == "sau_connections":
                 item["section"] = "completed" if sau_placement == "Completed" else "pending"
                 item["checked_by_default"] = True
+    sau_disabled_on_6610 = (sau_placement == "Pending") and not cascade_fires
     if testing_section and not cascade_fires:
         for item in results:
             if item["key"] == "alarm_testing":
                 item["section"] = "completed" if testing_section == "Completed" else "pending"
+                item["checked_by_default"] = True
+    # SAU disabled on the 6610 specifically (per Controller-checks) — a narrower case than
+    # the full cascade above (alarm scripting itself may still be confirmed, and the
+    # External alarms table above may independently say Completed). Per confirmed rule:
+    # a disabled SAU alone still pushes External alarm testing and Area test to Pending,
+    # since it means testing/area verification can't have genuinely happened via the
+    # controller — SAU may still be enabled on the node instead, tracked separately in
+    # Notes ("SAU enabled on : {Node ID}"). Applied AFTER the testing_section block above
+    # so it wins regardless of what that block set.
+    if sau_disabled_on_6610:
+        for item in results:
+            if item["key"] in {"alarm_testing", "area_test"}:
+                item["section"] = "pending"
                 item["checked_by_default"] = True
     if edp_publish_text:
         # Suppress the checklist's own 6610 Controller Integration item entirely when the
@@ -980,12 +994,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # "not monitored" when the cascade fires, SAU is Pending/disabled, or External alarm
         # testing is Pending; manual Monitored/Not monitored choice otherwise). MCA had the
         # node-level version above but was missing the controller-level one.
-        _ctrl_sau_disabled = sau_placement == "Pending"
         ctrl_mon_checked, ctrl_mon_text = False, ""
         if controller_id:
-            if cascade_fires or _ctrl_sau_disabled or testing_section == "Pending":
+            if cascade_fires or sau_disabled_on_6610 or testing_section == "Pending":
                 _ctrl_mon_reason = ("no 6610 checks" if cascade_fires
-                                     else ("SAU disabled" if _ctrl_sau_disabled else "External alarm testing Pending"))
+                                     else ("SAU disabled" if sau_disabled_on_6610 else "External alarm testing Pending"))
                 st.caption(f"{controller_id} is in not monitored state. (auto \u2014 {_ctrl_mon_reason})")
                 ctrl_mon_checked = True
                 ctrl_mon_text = f"{controller_id} is in not monitored state."
@@ -999,6 +1012,22 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                     ctrl_mon_checked = True
                     ctrl_mon_text = f"{controller_id} is in not monitored state."
         choices["notes_ctrl_monitored"] = {"checked": ctrl_mon_checked, "text": ctrl_mon_text}
+
+        # SAU enabled on point — MCA: SAU can be enabled on either the 6610 or the node.
+        # When SAU is confirmed disabled on the 6610 specifically (not the full cascade),
+        # it may instead be enabled on the node — no auto-detection exists for node-level
+        # SAU state yet (Post-checks doesn't carry a distinct per-node SAU field the way
+        # Controller-checks does for the 6610), so this stays a manual Node ID entry, shown
+        # only when the condition applies.
+        sau_node_checked, sau_node_text = False, ""
+        if sau_disabled_on_6610:
+            sau_node_on = st.checkbox("SAU enabled on the node instead", key="mca_sau_node_chk")
+            if sau_node_on:
+                sau_node_id = st.text_input("\U0001F4DD Node ID", key="mca_sau_node_id")
+                if sau_node_id.strip():
+                    sau_node_checked = True
+                    sau_node_text = f"SAU enabled on : {sau_node_id.strip()}."
+        choices["notes_sau_enabled"] = {"checked": sau_node_checked, "text": sau_node_text}
 
         emergency_unlock_lines = [f"Emergency unlock activated on the node {n}." for n in emergency_unlock_notes]
         notes_generic = st.text_area("\U0001F4DD Enter Notes that need to be reported or addressed to Market",
@@ -1159,6 +1188,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             notes_buffer_lines.append(f"{'|'.join(new_nodes)} is in not monitored state.")
         if ctrl_mon_checked and ctrl_mon_text:
             notes_buffer_lines.append(ctrl_mon_text)
+        if sau_node_checked and sau_node_text:
+            notes_buffer_lines.append(sau_node_text)
         notes_buffer_lines += [l for l in (notes_generic or "").split("\n") if l.strip()]
         notes_buffer_lines += emergency_unlock_lines + ngs_notes_lines + bucket_notes + scripted_locked_lines
 
