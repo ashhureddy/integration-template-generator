@@ -167,21 +167,6 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     classification = app.classify_carriers(ciq_wb, mm_objs, precheck_text)
     new_nodes, board_swaps = report_detect.detect_node_board_changes(app, ciq_wb, mm_objs, precheck_text)
 
-    # ---- WLL nodes appearing ONLY in Post-checks (not Pre-checks or CIQ) still need to be
-    # flagged as deleted from ENM — classify_carriers already handles Pre-checks/CIQ WLL
-    # nodes (has no Post-checks visibility, since it runs during template generation,
-    # before Post-checks exists), so this catches what it can't, merging into the same
-    # single pipe-joined "Deleted Node from ENM:" line before the checklist ever sees it. ----
-    if postcheck_text:
-        _, _post_nodes_for_wll = app.extract_precheck_sectors(postcheck_text)
-        _post_only_wll = {n for n in _post_nodes_for_wll if app.is_wll_node_name(n)}
-        if _post_only_wll:
-            _existing_line = next((l for l in scope_lines if l.startswith("Deleted Node from ENM:")), None)
-            _existing_nodes = set(_existing_line.split("\t", 1)[1].split("|")) if _existing_line else set()
-            _all_deleted = sorted(_existing_nodes | _post_only_wll)
-            scope_lines = [l for l in scope_lines if not l.startswith("Deleted Node from ENM:")]
-            scope_lines.append(f"Deleted Node from ENM:\t{'|'.join(_all_deleted)}")
-
     # ---- Retune fix: replace the old sector-dropping "Retune on:" lines with the
     # corrected, sector-tracked version before the checklist ever sees them — this way
     # mca_checklist.py's existing "_scope_lines_matching(ctx, 'Retune on:')" mechanism
