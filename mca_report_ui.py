@@ -398,6 +398,44 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     for item in results:
         if item["key"] == "transport_sfp":
             item["checked_by_default"] = False
+    # Same confirmed mechanism as NSB/N2E, ported here — MCA's own checklist items for
+    # these two ("sup_connections"/"xmu_installation") were plain manual toggles with no
+    # auto-detection at all. Suppressed in favor of the auto-detected group built below.
+    for item in results:
+        if item["key"] in {"sup_connections", "xmu_installation"}:
+            item["checked_by_default"] = False
+
+    # ---- SUP / XMU auto-detection — confirmed same mechanism as NSB/N2E, reusing the
+    # same shared helpers (nodes_expecting_sup/xmu, _hardware_component_state) rather than
+    # re-deriving anything. SUP Connections is expected per-node (5216 or XMU present in
+    # that node's own CIQ target hardware, not site-wide). XMU Installation is Completed
+    # only when BOTH the CIQ target confirms XMU AND Post-checks' Hardware Status shows it
+    # ENABLED; a node expected to have XMU but missing from Post-checks entirely (not just
+    # DISABLED) still reports Pending rather than being silently dropped. ----
+    xmu_present_in_ciq = mcl.xmu_in_ciq(post_line)
+    all_site_nodes = {row.get("Node to be built as") for row in mm_objs if row.get("Node to be built as")}
+    sup_completed_lines, sup_pending_lines = [], []
+    xmu_completed_lines, xmu_pending_lines = [], []
+    if postcheck_text:
+        sup_expecting_nodes = mcl.nodes_expecting_sup(mm_objs, ciq_wb) & all_site_nodes
+        if sup_expecting_nodes:
+            sup_found = mcl._hardware_component_state(postcheck_text, "SUP")
+            sup_state = {n: s for n, s in sup_found.items() if n in sup_expecting_nodes}
+            sup_missing = sup_expecting_nodes - set(sup_found.keys())
+            for node, state in sup_state.items():
+                (sup_completed_lines if state == "ENABLED" else sup_pending_lines).append(
+                    f"SUP Connections: {node}" + ("" if state == "ENABLED" else " (MIC PM)"))
+            for node in sorted(sup_missing):
+                sup_pending_lines.append(f"SUP Connections: {node} (MIC PM)")
+
+        if xmu_present_in_ciq:
+            xmu_state = mcl._hardware_component_state(postcheck_text, "XMU")
+            for node, state in xmu_state.items():
+                (xmu_completed_lines if state == "ENABLED" else xmu_pending_lines).append(
+                    f"XMU Installation: {node}" + ("" if state == "ENABLED" else " (MIC PM)"))
+            xmu_expected_nodes = mcl.nodes_expecting_xmu(mm_objs, ciq_wb) & all_site_nodes
+            for node in sorted(xmu_expected_nodes - set(xmu_state.keys())):
+                xmu_pending_lines.append(f"XMU Installation: {node} (MIC PM)")
 
     # ---- Warnings tab collection: every verification function feeds here. Confirmed
     # design: warning-only for most items (never touches report placement), except
@@ -693,6 +731,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         fdd_c_checked, fdd_c_lines = _checked_group("FDD Renaming on", fdd_lines_fixed, "chk_fdd_c")
         lkf_c_group_lines = [lkf_lines_by_section["Completed"]] if lkf_lines_by_section.get("Completed") else []
         lkf_c_checked, lkf_c_lines = _checked_group("LKF Installation", lkf_c_group_lines, "chk_lkf_c")
+        sup_c_checked, sup_c_lines = _checked_group("SUP Connections", sup_completed_lines, "chk_sup_c")
+        xmu_c_checked, xmu_c_lines = _checked_group("XMU Installation", xmu_completed_lines, "chk_xmu_c")
 
         florida_checked = False
         if florida_rows:
@@ -722,6 +762,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         edp_checked, edp_lines = _checked_group("EDP Publish", edp_group_lines, "chk_edp")
         lkf_p_group_lines = [lkf_lines_by_section["Pending"]] if lkf_lines_by_section.get("Pending") else []
         lkf_p_checked, lkf_p_lines = _checked_group("LKF Installation (Pending)", lkf_p_group_lines, "chk_lkf_p")
+        sup_p_checked, sup_p_lines = _checked_group("SUP Connections (Pending)", sup_pending_lines, "chk_sup_p")
+        xmu_p_checked, xmu_p_lines = _checked_group("XMU Installation (Pending)", xmu_pending_lines, "chk_xmu_p")
 
         additional_pending = st.text_area("\U0001F4DD Enter any additional pending information that needs to be reported to Market",
                                            key="rpt_add_pending", height=100)
@@ -802,11 +844,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     dss_pending_lines = [dss_pending_line] if dss_pending_line else []
     choices["additional_completed"]["text"] = "\n".join(
         [choices["additional_completed"]["text"] or ""] + gps_c_lines + sfp_c_lines + rs_c_display
-        + fdd_c_lines + lkf_c_lines + ngs_completed_lines + florida_active_rows + dss_completed_lines
+        + fdd_c_lines + lkf_c_lines + sup_c_lines + xmu_c_lines + ngs_completed_lines + florida_active_rows + dss_completed_lines
     ).strip()
     choices["additional_pending"]["text"] = "\n".join(
         [choices["additional_pending"]["text"] or ""] + gps_p_lines + sfp_p_lines + rs_p_display
-        + edp_lines + lkf_p_lines + ngs_pending_lines + dss_pending_lines
+        + edp_lines + lkf_p_lines + sup_p_lines + xmu_p_lines + ngs_pending_lines + dss_pending_lines
     ).strip()
 
     with st.expander("Pre-Existing Issues"):
