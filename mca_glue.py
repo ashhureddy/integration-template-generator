@@ -100,6 +100,35 @@ def _result_to_column_values(item_key, detect_result, manual_extra=None):
     return values
 
 
+def _line_to_column_values(line):
+    """Extract one 'lines'-style scope line's own tab-separated column values — same
+    parsing _result_to_column_values already does for lines[0], factored out so every
+    instance (not just the first) can be extracted correctly."""
+    parts = [p for p in line.split("\t")]
+    parts = parts[1:]  # drop the leading label token
+    return [p for p in parts if p.strip().rstrip(":").lower() not in ("from", "to")]
+
+
+def _combine_overflow_lines(lines):
+    """Combine multiple 'lines'-style instances into ONE set of column values, joining
+    each column position across instances with '|' (position-paired) — used for the LAST
+    available .xlsm row when there are more instances than reserved rows (e.g. Integration
+    with 4+ newly-added nodes but only 3 template rows: rows/cols beyond the buffer get
+    folded into the final row rather than dropped, matching the same overflow convention
+    already used elsewhere (GPS/Transport SFP/deleted_node). The separate plain-text report
+    is unaffected — it already lists every instance individually with no row limit."""
+    per_instance = [_line_to_column_values(ln) for ln in lines]
+    per_instance = [v for v in per_instance if v]
+    if not per_instance:
+        return []
+    n_cols = max(len(v) for v in per_instance)
+    combined = []
+    for col_i in range(n_cols):
+        col_vals = [v[col_i] for v in per_instance if col_i < len(v) and v[col_i]]
+        combined.append("|".join(col_vals))
+    return combined
+
+
 def build_xlsm_row_writes(checklist_results, choices, row_map):
     """checklist_results: output of evaluate_checklist(). choices: dict of item key ->
     {"section": "completed"|"pending", "checked": bool, "manual_extra": [...]} — the engineer's
@@ -157,11 +186,22 @@ def build_xlsm_row_writes(checklist_results, choices, row_map):
         # events), each instance uses the next available slot in order.
         instances = item.get("result", {}).get("lines") if item.get("result") else None
         if instances and len(target_rows) > 1:
+            # Confirmed real bug found: every reserved row was writing the SAME first
+            # instance's values (col_value_pairs computed once, outside this loop) —
+            # rows beyond the first never got their own instance's data at all. Each row
+            # now gets its own instance; when there are more instances than reserved rows,
+            # the overflow instances combine into the LAST row via _combine_overflow_lines
+            # (per-column "|" join) instead of being silently dropped or duplicating row 1.
+            n_rows = len(target_rows)
             for i, row_num in enumerate(target_rows):
-                if i < len(instances):
-                    row_writes.append((row_num, checked, col_value_pairs))
-                else:
+                if i >= len(instances):
                     row_writes.append((row_num, False, []))
+                elif i == n_rows - 1 and len(instances) > n_rows:
+                    overflow_values = _combine_overflow_lines(instances[i:])
+                    row_writes.append((row_num, checked, list(zip(cols, overflow_values))))
+                else:
+                    row_values = _line_to_column_values(instances[i])
+                    row_writes.append((row_num, checked, list(zip(cols, row_values))))
         else:
             row_writes.append((target_rows[0], checked, col_value_pairs))
             for extra_row in target_rows[1:]:
