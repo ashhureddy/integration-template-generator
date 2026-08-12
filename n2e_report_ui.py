@@ -914,7 +914,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_notes += bucket_notes
 
     # ==================== Report text + xlsm ====================
-    report_lines = ["Subject", f"MIC | MNS | N2E | IX-STF | {site_name} | {fa_code} | {site_ids}",
+    _fa_display = f"FA {fa_code}" if fa_code else ""
+    report_lines = ["Subject", f"MIC | MNS | N2E | IX-STF | {site_name} | {_fa_display} | {site_ids}",
                     "", "IWM Details", iwm_details,
                     "", "Configuration", f"Pre Configuration : Nokia", f"Post Configuration : {post_line}",
                     f"6610 Controller : {controller_id or ''}"]
