@@ -531,22 +531,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     idl_completed_line, idl_pending_line = None, None
     idle = idly = switch = slot_port = ""
     idl_build_type_final = idl_build_type
+    has_cran_node = any(str(row.get("Node to be built as", "")).strip().upper().endswith("F") for row in mm_objs)
     if len(mm_objs) > 1:
         with st.container(border=True):
-            idl_build_type_options = [t.strip() for t in (idl_build_type or "").split("/") if t.strip()]
-            if len(idl_build_type_options) > 1:
-                # Confirmed: more than one possible Build Type (e.g. a combo with both a
-                # Preferred and Alternate variant) — which physical ports are actually free
-                # on the board can't be known from the CIQ alone, so let the engineer pick
-                # one instead of silently joining both into one string in the report.
-                idl_build_type_final = st.selectbox(
-                    "IDL Build Type \u2014 more than one option detected, pick one",
-                    ["\u2014 Select \u2014"] + idl_build_type_options, key="mca_idl_buildtype")
-                if idl_build_type_final == "\u2014 Select \u2014":
-                    idl_build_type_final = None
-                st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type_final or '(pick one above)'}**")
-            else:
-                st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type or '(not detected)'}**")
             # Confirmed same as NSB/N2E: IDL connections status is a real user choice
             # (Completed/Pending), not auto-detected — the generic checklist item's
             # detect() only ever knew the build type, never actually asked this.
@@ -558,44 +545,100 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             elif idl_choice == "Pending":
                 idl_pending_line = "IDL connections (MIC PM)"
                 st.caption(f"Added to Pending: {idl_pending_line}")
-            # Confirmed: auto-derive IDLe/IDLy cable part numbers + real node substitution
-            # from the reference table, keyed off the detected/selected Build Type letter —
-            # same "auto-fill + still-editable manual field" pattern as Switch/Sidehaul below.
-            _bt_letter = (idl_build_type_final or "").replace("Type ", "").strip()
-            auto_idle_lines, auto_idly_lines = app.idl_cable_lines_for_build_type(ciq_wb, mm_objs, _bt_letter) \
-                if _bt_letter else ([], [])
-            c1, c2 = st.columns(2)
-            with c1:
-                if auto_idle_lines:
-                    st.caption("Auto-derived (IDLe):")
-                    for l in auto_idle_lines:
-                        st.caption(l)
-                idle = st.text_area("\U0001F4DD IDLe cable details (additional/manual)", key="rpt_idle", height=60)
-                idle = "\n".join([l for l in auto_idle_lines] + ([idle] if idle else [])).strip()
-            with c2:
-                if auto_idly_lines:
-                    st.caption("Auto-derived (IDLy):")
-                    for l in auto_idly_lines:
-                        st.caption(l)
-                idly = st.text_area("\U0001F4DD IDLy cable details (additional/manual)", key="rpt_idly", height=60)
-                idly = "\n".join([l for l in auto_idly_lines] + ([idly] if idly else [])).strip()
 
-            sidehaul_rows = mcl.sidehaul_display_rows(ciq_wb)
-            if sidehaul_rows:
-                st.caption("Switch / Slot-Port — auto-filled from Sidehaul Info, Cable part number is manual:")
-                cable_pns = {}
-                for i, srow in enumerate(sidehaul_rows):
-                    sc1, sc2, sc3, sc4, sc5 = st.columns([1, 1, 1, 1, 1])
-                    with sc1: st.caption(f"**{srow['switch_type']}**")
-                    with sc2: st.caption(srow["switch_id"])
-                    with sc3: st.caption(srow["slot_port"])
-                    with sc4: cable_pns[i] = st.text_input("Cable P/N", key=f"cable_pn_{i}", label_visibility="collapsed", placeholder="Cable part number")
-                    with sc5: st.caption(srow["node_id"])
-                switch = "\n".join(mcl.format_sidehaul_lines(sidehaul_rows, cable_pns))
-                slot_port = ""  # folded into the switch lines above — same source, one combined display
-            # Confirmed: switch details only show when Sidehaul Info actually has a switch
-            # row (extract_sidehaul_info() already filters to rows where "Switch" is
-            # populated) — no manual fallback entry when it's genuinely absent.
+            if has_cran_node:
+                # ---- CRAN-styled MCA site (a node ending in "F") — confirmed real gap: this
+                # was always falling through to the generic Sidehaul Info dump below instead
+                # of the CRAN-specific Build Type / IDLe / Switch / Slot-Port format. Build
+                # Type itself is fully derivable from the CIQ (cran_build_type) — only the
+                # hub's cable type (the "-1" suffix: RPM coax vs SM fiber jumper) genuinely
+                # can't be, so that stays a required pick. ----
+                cran_base_type, hub_row = app.cran_build_type(ciq_wb, mm_objs)
+                if not cran_base_type:
+                    st.markdown("**IDL Connections** \u2014 CRAN-styled node detected, but Build "
+                                "Type could not be determined from the CIQ (unrecognized generation/mode combo).")
+                else:
+                    hub_choice = st.selectbox(
+                        f"CRAN Build Type detected: **{cran_base_type}** \u2014 pick the hub connection type",
+                        ["\u2014 Select \u2014", f"{cran_base_type} (RPM coax)", f"{cran_base_type}-1 (SM fiber jumper)"],
+                        key="mca_cran_dash1")
+                    if hub_choice == "\u2014 Select \u2014":
+                        idl_build_type_final = None
+                    else:
+                        is_dash1 = hub_choice.endswith("(SM fiber jumper)")
+                        idl_build_type_final = f"{cran_base_type}-1" if is_dash1 else cran_base_type
+                        st.markdown(f"**IDL Connections** \u2014 Build type : **{idl_build_type_final}**")
+                        auto_idle_lines, auto_idly_lines = app.cran_idl_cable_lines(ciq_wb, mm_objs, cran_base_type)
+                        idle = "\n".join(auto_idle_lines).strip()
+                        idly = "\n".join(auto_idly_lines).strip()
+                        if auto_idle_lines:
+                            st.caption("Auto-derived (IDLe):")
+                            for l in auto_idle_lines:
+                                st.caption(l)
+                        if auto_idly_lines:
+                            st.caption("Auto-derived (IDLy):")
+                            for l in auto_idly_lines:
+                                st.caption(l)
+                        switch_lines, slot_port_lines = app.cran_slot_port_lines(ciq_wb, mm_objs, cran_base_type, is_dash1)
+                        switch = "\n".join(switch_lines).strip()
+                        slot_port = "\n".join(slot_port_lines).strip()
+                        if switch_lines or slot_port_lines:
+                            st.caption("Auto-derived (Switch / Slot-Port):")
+                            for l in switch_lines + slot_port_lines:
+                                st.caption(l)
+            else:
+                idl_build_type_options = [t.strip() for t in (idl_build_type or "").split("/") if t.strip()]
+                if len(idl_build_type_options) > 1:
+                    # Confirmed: more than one possible Build Type (e.g. a combo with both a
+                    # Preferred and Alternate variant) — which physical ports are actually free
+                    # on the board can't be known from the CIQ alone, so let the engineer pick
+                    # one instead of silently joining both into one string in the report.
+                    idl_build_type_final = st.selectbox(
+                        "IDL Build Type \u2014 more than one option detected, pick one",
+                        ["\u2014 Select \u2014"] + idl_build_type_options, key="mca_idl_buildtype")
+                    if idl_build_type_final == "\u2014 Select \u2014":
+                        idl_build_type_final = None
+                    st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type_final or '(pick one above)'}**")
+                else:
+                    st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type or '(not detected)'}**")
+                # Confirmed: auto-derive IDLe/IDLy cable part numbers + real node substitution
+                # from the reference table, keyed off the detected/selected Build Type letter —
+                # same "auto-fill + still-editable manual field" pattern as Switch/Sidehaul below.
+                _bt_letter = (idl_build_type_final or "").replace("Type ", "").strip()
+                auto_idle_lines, auto_idly_lines = app.idl_cable_lines_for_build_type(ciq_wb, mm_objs, _bt_letter) \
+                    if _bt_letter else ([], [])
+                c1, c2 = st.columns(2)
+                with c1:
+                    if auto_idle_lines:
+                        st.caption("Auto-derived (IDLe):")
+                        for l in auto_idle_lines:
+                            st.caption(l)
+                    idle = st.text_area("\U0001F4DD IDLe cable details (additional/manual)", key="rpt_idle", height=60)
+                    idle = "\n".join([l for l in auto_idle_lines] + ([idle] if idle else [])).strip()
+                with c2:
+                    if auto_idly_lines:
+                        st.caption("Auto-derived (IDLy):")
+                        for l in auto_idly_lines:
+                            st.caption(l)
+                    idly = st.text_area("\U0001F4DD IDLy cable details (additional/manual)", key="rpt_idly", height=60)
+                    idly = "\n".join([l for l in auto_idly_lines] + ([idly] if idly else [])).strip()
+
+                sidehaul_rows = mcl.sidehaul_display_rows(ciq_wb)
+                if sidehaul_rows:
+                    st.caption("Switch / Slot-Port — auto-filled from Sidehaul Info, Cable part number is manual:")
+                    cable_pns = {}
+                    for i, srow in enumerate(sidehaul_rows):
+                        sc1, sc2, sc3, sc4, sc5 = st.columns([1, 1, 1, 1, 1])
+                        with sc1: st.caption(f"**{srow['switch_type']}**")
+                        with sc2: st.caption(srow["switch_id"])
+                        with sc3: st.caption(srow["slot_port"])
+                        with sc4: cable_pns[i] = st.text_input("Cable P/N", key=f"cable_pn_{i}", label_visibility="collapsed", placeholder="Cable part number")
+                        with sc5: st.caption(srow["node_id"])
+                    switch = "\n".join(mcl.format_sidehaul_lines(sidehaul_rows, cable_pns))
+                    slot_port = ""  # folded into the switch lines above — same source, one combined display
+                # Confirmed: switch details only show when Sidehaul Info actually has a switch
+                # row (extract_sidehaul_info() already filters to rows where "Switch" is
+                # populated) — no manual fallback entry when it's genuinely absent.
 
     # ---- RET configuration: Completed/Pending choice, confirmed same as NSB — the
     # generic checklist item was "manual": True with no way to actually select it at
