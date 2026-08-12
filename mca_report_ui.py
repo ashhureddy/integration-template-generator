@@ -555,9 +555,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                     with sc5: st.caption(srow["node_id"])
                 switch = "\n".join(mcl.format_sidehaul_lines(sidehaul_rows, cable_pns))
                 slot_port = ""  # folded into the switch lines above — same source, one combined display
-            else:
-                switch = st.text_area("\U0001F4DD Switch details (manual)", key="rpt_switch", height=60)
-                slot_port = st.text_area("\U0001F4DD Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
+            # Confirmed: switch details only show when Sidehaul Info actually has a switch
+            # row (extract_sidehaul_info() already filters to rows where "Switch" is
+            # populated) — no manual fallback entry when it's genuinely absent.
 
     # ---- RET configuration: Completed/Pending choice, confirmed same as NSB — the
     # generic checklist item was "manual": True with no way to actually select it at
