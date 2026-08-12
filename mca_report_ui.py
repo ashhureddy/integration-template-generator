@@ -235,11 +235,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 classification, market, calltest_rules,
                 moved_bands_by_tech["lte"], added_bands_by_tech, moved_bands_by_tech)
 
-    # ---- Florida-only: newly added CBAND/DOD/DOD_BWE cells, one per row (93-104), overflow
-    # appended to the last row with '|' (confirmed this session — previously untouched).
-    # Rendered as a proper Completed checklist checkbox below, not a standalone block. ----
+    # ---- Florida-only: newly added CBAND/DOD/DOD_BWE cells. Confirmed: the on-screen
+    # checkbox preview and the report/text preview should always show every cell
+    # individually, one per line — no buffer limit, no combining. Only the .xlsm write
+    # (12 template rows, 93-104) has a real row limit, so the buffer/overflow combining
+    # (florida_cells_to_rows, capacity=12, overflow "|"-joined onto the last row) is
+    # applied later, right at the xlsm row_writes step — not here. ----
     florida_cells = mcl.florida_newly_added_cells(market, classification)
-    florida_rows = mcl.florida_cells_to_rows(florida_cells)
 
     # ---- Radio Swap: remove the old single toggle-based line entirely (it can no longer
     # represent "some swaps done, some not" correctly) and compute the real split instead.
@@ -770,13 +772,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         xmu_c_checked, xmu_c_lines = _checked_group("XMU Installation", xmu_completed_lines, "chk_xmu_c")
 
         florida_checked = False
-        if florida_rows:
+        if florida_cells:
             florida_checked = st.checkbox(f"Newly added Cells (Florida market) \u2014 {len(florida_cells)} cell(s)",
                                             value=True, key="chk_florida_cells")
             if florida_checked:
-                for r in florida_rows:
+                for r in florida_cells:
                     st.caption(r)
-        florida_active_rows = florida_rows if florida_checked else []
+        florida_active_rows = florida_cells if florida_checked else []
         additional_completed = st.text_area("\U0001F4DD Enter any additional completed information that needs to be added in report",
                                              key="rpt_add_completed", height=100)
         choices["additional_completed"] = {"text": additional_completed}
@@ -1380,11 +1382,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # pattern as Pre-Existing Issues rows — not the label:detail buffer format).
         # Gated on the checkbox — unchecked means excluded from the .xlsm entirely.
         # Row 92 ("Newly added Cells" sub-header) matches the same checkbox state.
+        # florida_active_rows is the full individual cell list (same one shown on-screen
+        # and in the report text) — the 12-row buffer/overflow combining only applies here,
+        # at the actual .xlsm write, since that's the only place with a real row limit.
         row_writes.append((92, bool(florida_checked), []))
+        florida_xlsm_values = mcl.florida_cells_to_rows(florida_active_rows)
         florida_xlsm_rows = list(range(93, 105))
         for i, row_num in enumerate(florida_xlsm_rows):
-            if i < len(florida_active_rows):
-                row_writes.append((row_num, True, [(2, florida_active_rows[i])]))
+            if i < len(florida_xlsm_values):
+                row_writes.append((row_num, True, [(2, florida_xlsm_values[i])]))
             else:
                 row_writes.append((row_num, False, []))
 
