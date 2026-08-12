@@ -540,8 +540,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                                         key="mca_idlconn")
             if idl_choice == "Completed":
                 idl_completed_line = "IDL connections"
+                st.caption(f"Added to Completed: {idl_completed_line}")
             elif idl_choice == "Pending":
                 idl_pending_line = "IDL connections (MIC PM)"
+                st.caption(f"Added to Pending: {idl_pending_line}")
             c1, c2 = st.columns(2)
             with c1:
                 idle = st.text_area("\U0001F4DD IDLe cable details (manual)", key="rpt_idle", height=60)
@@ -573,8 +575,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     ret_choice = st.selectbox("RET configuration", ["\u2014 Select \u2014", "Completed", "Pending"], key="mca_ret")
     if ret_choice == "Completed":
         ret_completed_line = "RET configuration"
+        st.caption(f"Added to Completed: {ret_completed_line}")
     elif ret_choice == "Pending":
         ret_pending_line = "RET configuration (Tower Crew)"
+        st.caption(f"Added to Pending: {ret_pending_line}")
 
     # ---- DSS Activation: Completed/Pending choice, stakeholder (AT&T/MIC) prompt only if
     # Pending — confirmed real gap, restoring the original spec exactly. No default —
@@ -876,6 +880,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # Pending's text_area already rendered above this point in the page — can't inject
         # into its initial value, so append onto the already-collected choices dict instead
         # (dicts are mutable; build_mca_report_text reads this at button-click time, later).
+        # Confirmed real gap: this content was correctly reaching the report but had NO
+        # on-screen preview anywhere (unlike bucket_pre_existing/bucket_notes, which already
+        # show captions) — the engineer had no way to see it would be included without
+        # generating the report first. Shown here since the Pending expander itself is
+        # already closed by this point.
+        st.caption("Added to Pending (locked-port classification):")
+        for l in bucket_pending:
+            st.caption(l)
         choices["additional_pending"]["text"] = (
             (choices["additional_pending"]["text"] or "") + "\n" + "\n".join(bucket_pending)).strip()
 
