@@ -313,7 +313,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     # ---- Current Configuration: only populated when Post-checks actually differs from
     # the CIQ target (equipment still missing) — confirmed rule, built this pass. ----
-    current_config_auto = mcl.current_configuration_line(ciq_wb, mm_objs, postcheck_text) if postcheck_text else ""
+    current_config_auto = mcl.current_configuration_line(
+        ciq_wb, mm_objs, postcheck_text, derive_identity_from_checks=True) if postcheck_text else ""
 
     # ---- FDD Renaming, corrected: band-label grouping instead of raw ungrouped cell
     # tuples — confirmed gap, built this pass. ----
