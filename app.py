@@ -2157,20 +2157,34 @@ def classify_radio_swaps(precheck_text, ciq_wb):
 # ============================================================
 
 def pre_node_label(precheck_text, node_name):
-    """Determine a node's (P)/(S) identity pairing as it existed in Pre-checks — independent from
-    the CIQ, since a node can genuinely convert LTE-only <-> MMBB/TMBB between Pre and Post (5G
-    sectors moving onto or off of it as part of the same scope)."""
+    """Determine a node's (P)/(S) identity pairing AND its BBU mode tag as they existed in
+    Pre-checks — independent from the CIQ, since a node can genuinely convert LTE-only <->
+    MMBB/TMBB between Pre and Post (5G sectors moving onto or off of it as part of the same
+    scope). Confirmed real rule, derived purely from which cells are actually present in
+    Pre-checks (not from the CIQ's BBU Mode column, which only reflects the Post-side state):
+    LTE cells only -> SMBB. 5G cells only -> SMBB. LTE + 5G (no CBAND/DOD) -> MMBB.
+    LTE + 5G + CBAND/DOD -> TMBB. CBAND/DOD 5G cells share band code 077 (_N077[A-F]_n,
+    covering CBAND/DOD/DOD_BWE alike), same pattern nr_band_label() already uses."""
     pre_pairs, _ = extract_precheck_sectors(precheck_text)
     node_cells = [cell for (node, cell) in pre_pairs if node == node_name]
     if not node_cells:
         return node_name
     fiveg_cells = [c for c in node_cells if is_5g_cell(c)]
     lte_cells = [c for c in node_cells if not is_5g_cell(c)]
+    has_cband_dod = any(re.search(r'_N077[A-F]_\d+$', c) for c in fiveg_cells)
+
+    if lte_cells and fiveg_cells:
+        mode_tag = "(TMBB)" if has_cband_dod else "(MMBB)"
+    elif lte_cells or fiveg_cells:
+        mode_tag = "(SMBB)"
+    else:
+        mode_tag = ""
+
     if fiveg_cells and lte_cells:
         m = re.match(r"^(.+?)_N\d{3}[A-F]_\d+$", fiveg_cells[0])
         secondary = m.group(1) if m else fiveg_cells[0]
-        return f"{node_name}(P)/{secondary}(S)"
-    return node_name
+        return f"{node_name}(P)/{secondary}(S){mode_tag}"
+    return f"{node_name}{mode_tag}"
 
 def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_names):
     """Pre = nodes actually found in Pre-checks. Post = nodes actually found in CIQ Mixed Mode Info.
