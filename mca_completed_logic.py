@@ -1213,7 +1213,38 @@ def detect_missing_nodes(postcheck_text, candidate_nodes):
     return missing
 
 
-def current_configuration_line(ciq_wb, mm_objs, postcheck_text, missing_nodes=None, dual_identity=False):
+def _identity_tag_from_checks(check_text, node_name):
+    """Confirmed same real rule as Pre Configuration's pre_node_label(): derived purely from
+    which cells are actually present in the checks text (works for Pre- or Post-checks alike,
+    same 'Summary Status' table format either way — already reused this way elsewhere in this
+    file, e.g. verify_integration_against_postcheck() against post_text). NOT from the CIQ's
+    row structure or BBU Mode column, since that only reflects the CIQ's target/declared
+    state, not what's actually deployed. LTE only -> SMBB. 5G only -> SMBB. LTE + 5G (no
+    CBAND/DOD) -> MMBB. LTE + 5G + CBAND/DOD -> TMBB. CBAND/DOD share 5G band code 077
+    (_N077[A-F]_n), same pattern app.py's nr_band_label() uses. Returns
+    (secondary_name_or_None, mode_tag_or_empty)."""
+    pairs, _ = qx.extract_precheck_sectors(check_text)
+    node_cells = [cell for (n, cell) in pairs if n == node_name]
+    if not node_cells:
+        return None, ""
+    fiveg_cells = [c for c in node_cells if qx.is_5g_cell(c)]
+    lte_cells = [c for c in node_cells if not qx.is_5g_cell(c)]
+    has_cband_dod = any(re.search(r'_N077[A-F]_\d+$', c) for c in fiveg_cells)
+    if lte_cells and fiveg_cells:
+        mode_tag = "TMBB" if has_cband_dod else "MMBB"
+    elif lte_cells or fiveg_cells:
+        mode_tag = "SMBB"
+    else:
+        mode_tag = ""
+    secondary = None
+    if fiveg_cells and lte_cells:
+        m = re.match(r"^(.+?)_N\d{3}[A-F]_\d+$", fiveg_cells[0])
+        secondary = m.group(1) if m else fiveg_cells[0]
+    return secondary, mode_tag
+
+
+def current_configuration_line(ciq_wb, mm_objs, postcheck_text, missing_nodes=None, dual_identity=False,
+                                derive_identity_from_checks=False):
     """Returns the Current Configuration string, or "" if Post-checks already matches the
     CIQ target for every node (nothing missing, field should stay blank/not triggered).
     Confirmed: when any node is missing from Post-checks entirely (missing_nodes
@@ -1223,15 +1254,37 @@ def current_configuration_line(ciq_wb, mm_objs, postcheck_text, missing_nodes=No
     Confirmed dual_identity=True (N2E/NSB only, not MCA): matches Post Configuration's
     own "{node}(P)/{secondary}(S)({bbu_mode})({hw})" format exactly, for co-located
     LTE+5G nodes — but using the ACTUAL hardware from Post-checks, not the CIQ target,
-    since this field reflects what's really deployed now."""
+    since this field reflects what's really deployed now.
+    Confirmed derive_identity_from_checks=True (MCA only, separate from dual_identity):
+    same output format, but the (P)/(S) pairing AND mode tag come from
+    _identity_tag_from_checks() against Post-checks itself, not the CIQ row's
+    eNodeB/gNodeB Name fields or BBU Mode column — this is what "current configuration"
+    should mean (what's actually deployed right now). Also robust to whichever CIQ Mixed
+    Mode Info convention is in play (one combined row per site, or two separate rows, one
+    per identity) — Post-checks always lists a dual-identity node's cells under the same
+    primary Node column regardless, so a row whose OWN node name turns out to be some
+    other row's derived secondary is skipped, rather than appearing as a spurious extra
+    entry with no pairing."""
     if not postcheck_text:
         return ""
     missing_nodes = missing_nodes or []
     lines = []
+
+    secondary_of, mode_tag_of = {}, {}
+    if derive_identity_from_checks:
+        for row in mm_objs:
+            n = row.get("Node to be built as")
+            if not n:
+                continue
+            secondary_of[n], mode_tag_of[n] = _identity_tag_from_checks(postcheck_text, n)
+    secondary_node_names = {v for v in secondary_of.values() if v}
+
     for row in mm_objs:
         node = row.get("Node to be built as")
         if not node:
             continue
+        if derive_identity_from_checks and node in secondary_node_names:
+            continue  # already covered by its primary's combined entry, below
         e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
         is_lte_primary = str(node).strip().upper() == str(e_name or "").strip().upper()
         target_row = qx.find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) if is_lte_primary else \
@@ -1246,7 +1299,13 @@ def current_configuration_line(ciq_wb, mm_objs, postcheck_text, missing_nodes=No
         if not include:
             continue
 
-        if dual_identity and qx.is_populated(e_name) and qx.is_populated(g_name):
+        if derive_identity_from_checks:
+            secondary, mode_tag = secondary_of.get(node), mode_tag_of.get(node)
+            if secondary and mode_tag:
+                lines.append(f"{node}(P)/{secondary}(S)({mode_tag})({actual_hw})")
+            else:
+                lines.append(f"{node}({actual_hw})")
+        elif dual_identity and qx.is_populated(e_name) and qx.is_populated(g_name):
             secondary = g_name if is_lte_primary else e_name
             bbu_mode = row.get("BBU Mode")
             lines.append(f"{node}(P)/{secondary}(S)({bbu_mode})({actual_hw})")
@@ -1254,7 +1313,7 @@ def current_configuration_line(ciq_wb, mm_objs, postcheck_text, missing_nodes=No
             lines.append(f"{node}({actual_hw})")
     if not lines:
         return ""
-    return " + ".join(lines) if dual_identity else "/".join(lines)
+    return " + ".join(lines) if (dual_identity or derive_identity_from_checks) else "/".join(lines)
 
 
 # ============================================================
