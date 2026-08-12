@@ -956,7 +956,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.caption(f"Auto-added: {alarm_notes_line}")
 
     # ==================== Report text + xlsm ====================
-    report_lines = ["Subject", f"MIC | {market} | {status} | {site_name} | {fa_code} | {site_ids} | NSB",
+    _fa_display = f"FA {fa_code}" if fa_code else ""
+    report_lines = ["Subject", f"MIC | {market} | {status} | {site_name} | {_fa_display} | {site_ids} | NSB",
                     "", "IWM Details", iwm_details,
                     "", "Configuration", "Pre Configuration : NSB", f"Post Configuration : {post_line}",
                     f"6610 Controller : {controller_id or ''}"]
