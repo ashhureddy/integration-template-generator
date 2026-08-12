@@ -703,7 +703,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                               | {r["node"] for r in port_conv_swap_completed})
     board_swap_node_set = {n for n, _p, _q in board_swaps} if board_swaps and \
         isinstance(board_swaps[0], tuple) else set()
-    sfp_trigger_nodes = sorted(set(new_nodes) | set(port_conv_nodes) | board_swap_node_set)
+    _raw_sfp_nodes = sorted(set(new_nodes) | set(port_conv_nodes) | board_swap_node_set)
+    # Confirmed real duplication (WLL/co-located pairs, e.g. FSL00703/FSL05703 — two
+    # separate CIQ Mixed Mode Info rows, cross-referenced via Connected To Node): some
+    # detection path can produce both the individual node names AND a pipe-joined combined
+    # "A|B" label for the same pair, showing 3 SFP entries for what's really 2 nodes. Drop
+    # any pipe-joined entry whose split parts are ALL already present individually — it's
+    # a redundant duplicate of nodes already listed on their own, not a genuinely distinct
+    # node. A pipe-joined entry with no individual match stays, so nothing real is lost.
+    sfp_trigger_nodes = [n for n in _raw_sfp_nodes
+                         if not ("|" in n and all(part in _raw_sfp_nodes for part in n.split("|")))]
     sfp_models_by_node = {}
     # Confirmed fix: transport_sfp_data moved ahead of the UI block below so BBU End
     # can auto-fetch from it (ericssonprod column, matched per node) — same pattern
