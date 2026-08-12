@@ -572,8 +572,9 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
         sectors_str = "" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
         lines.append(f"Moved Sectors:\t{label_str}{sectors_str}\tFrom:\t{from_node}\tTo:\t{to_node}")
 
-    for node in classification.get("deleted_nodes", []):
-        lines.append(f"Deleted Node from ENM:\t{node}")
+    deleted_nodes = classification.get("deleted_nodes", [])
+    if deleted_nodes:
+        lines.append(f"Deleted Node from ENM:\t{'|'.join(deleted_nodes)}")
 
     for node, cells in classification.get("deleted_sectors", {}).items():
         labels = dedupe_labels(cells)
