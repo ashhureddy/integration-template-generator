@@ -560,12 +560,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 else:
                     hub_choice = st.selectbox(
                         f"CRAN Build Type detected: **{cran_base_type}** \u2014 pick the hub connection type",
-                        ["\u2014 Select \u2014", f"{cran_base_type} (RPM coax)", f"{cran_base_type}-1 (SM fiber jumper)"],
+                        ["\u2014 Select \u2014", cran_base_type, f"{cran_base_type}-1"],
                         key="mca_cran_dash1")
                     if hub_choice == "\u2014 Select \u2014":
                         idl_build_type_final = None
                     else:
-                        is_dash1 = hub_choice.endswith("(SM fiber jumper)")
+                        is_dash1 = (hub_choice == f"{cran_base_type}-1")
                         idl_build_type_final = f"{cran_base_type}-1" if is_dash1 else cran_base_type
                         st.markdown(f"**IDL Connections** \u2014 Build type : **{idl_build_type_final}**")
                         auto_idle_lines, auto_idly_lines = app.cran_idl_cable_lines(ciq_wb, mm_objs, cran_base_type)
