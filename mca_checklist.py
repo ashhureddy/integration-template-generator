@@ -107,9 +107,13 @@ CHECKLIST = [
     # spacing) so the pipe-join produces the confirmed exact format with no extra
     # spaces: "Area test: {node}|{controller}." when a node is present, or just
     # "Area test: {controller}." when testing is Pending with no new node at all.
+    # Second trigger, same fill shape: SAU disabled on the 6610 itself (per
+    # Controller-checks) — independent of whether the External alarms table shows
+    # testing as Pending, since SAU and the alarm-scripting table are separate
+    # FRUs/checks on the controller.
     {"key": "area_test", "label": "Area test", "section": "pending", "stakeholder": "MIC PM",
-     "detect": lambda ctx: {"fill": {"nodes": ctx["new_nodes"] + ([ctx["controller_id"]] if ctx.get("testing_section") == "Pending" and ctx.get("controller_id") else [])}}
-               if (ctx["new_nodes"] or (ctx.get("testing_section") == "Pending" and ctx.get("controller_id"))) else None},
+     "detect": lambda ctx: {"fill": {"nodes": ctx["new_nodes"] + ([ctx["controller_id"]] if ((ctx.get("testing_section") == "Pending" or ctx.get("sau_placement") == "Pending") and ctx.get("controller_id")) else [])}}
+               if (ctx["new_nodes"] or ((ctx.get("testing_section") == "Pending" or ctx.get("sau_placement") == "Pending") and ctx.get("controller_id"))) else None},
 
     # ---------------- Pending: default-pending items ----------------
     {"key": "radio_swap", "label": "Radio Swap on:", "section": "pending", "stakeholder": "Tower Crew",
