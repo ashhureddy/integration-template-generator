@@ -1015,18 +1015,30 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
         # SAU enabled on point — MCA: SAU can be enabled on either the 6610 or the node.
         # When SAU is confirmed disabled on the 6610 specifically (not the full cascade),
-        # it may instead be enabled on the node — no auto-detection exists for node-level
-        # SAU state yet (Post-checks doesn't carry a distinct per-node SAU field the way
-        # Controller-checks does for the 6610), so this stays a manual Node ID entry, shown
-        # only when the condition applies.
+        # it may instead be enabled on the node. Post-checks' Hardware Status table carries
+        # a distinct per-node SAU row (e.g. "FCL05583 SAU-1 ... ENABLED"), so this is now
+        # auto-detected via sau_enabled_nodes() the same way SUP/XMU already are — manual
+        # entry stays available underneath as an override/fallback for whatever the
+        # detector doesn't confidently find.
         sau_node_checked, sau_node_text = False, ""
         if sau_disabled_on_6610:
-            sau_node_on = st.checkbox("SAU enabled on the node instead", key="mca_sau_node_chk")
-            if sau_node_on:
-                sau_node_id = st.text_input("\U0001F4DD Node ID", key="mca_sau_node_id")
-                if sau_node_id.strip():
+            auto_sau_nodes = mcl.sau_enabled_nodes(postcheck_text) if postcheck_text else []
+            if auto_sau_nodes:
+                auto_sau_str = "|".join(auto_sau_nodes)
+                sau_node_on = st.checkbox(
+                    f"SAU enabled on the node instead (auto-detected: {auto_sau_str})",
+                    value=True, key="mca_sau_node_chk")
+                if sau_node_on:
                     sau_node_checked = True
-                    sau_node_text = f"SAU enabled on : {sau_node_id.strip()}."
+                    sau_node_text = f"SAU enabled on : {auto_sau_str}."
+            else:
+                sau_node_on = st.checkbox("SAU enabled on the node instead", key="mca_sau_node_chk")
+                if sau_node_on:
+                    st.caption("(Not auto-detected in Post-checks \u2014 enter manually)")
+                    sau_node_id = st.text_input("\U0001F4DD Node ID", key="mca_sau_node_id")
+                    if sau_node_id.strip():
+                        sau_node_checked = True
+                        sau_node_text = f"SAU enabled on : {sau_node_id.strip()}."
         choices["notes_sau_enabled"] = {"checked": sau_node_checked, "text": sau_node_text}
 
         emergency_unlock_lines = [f"Emergency unlock activated on the node {n}." for n in emergency_unlock_notes]
