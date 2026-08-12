@@ -227,9 +227,16 @@ def extract_controller_checks(text):
         # "N (DISABLED)" — the one distinctive value type among the intermediate
         # fields (UNLOCKED/LOCKED, OFF/ON, STEADY_ON, NOT_APPLICABLE, etc.) — instead
         # of a hardcoded field count that breaks whenever the format varies.
+        # Confirmed real gap (FCWC138613_C001_controller_checks.pdf, FCL05583): the fault
+        # field isn't always ON/OFF — some sites' SAU row has "0 (LOCKED) 1 (NOT_AVAILABLE)
+        # 0 (DISABLED)" instead, which the old ON|OFF-only match silently failed on,
+        # returning None (and, downstream, made sau_connections_placement never detect a
+        # disabled 6610 SAU at all for that site). Widened to any \w+ value; fault_ok stays
+        # conservative (only literal "OFF" counts as no-fault, matching prior behavior for
+        # every already-passing case).
         mm = re.search(
             re.escape(f"FieldReplaceableUnit={fru_name}") +
-            r'\s+\d+\s+\((UNLOCKED|LOCKED)\)\s+\d+\s+\((ON|OFF)\)'
+            r'\s+\d+\s+\((UNLOCKED|LOCKED)\)\s+\d+\s+\((\w+)\)'
             r'(?:\s+\d+\s+\(\w+\))*?\s+\d+\s+\((ENABLED|DISABLED)\)',
             text)
         if not mm:
@@ -706,6 +713,27 @@ def sau_connections_placement(controller_checks_data, controller_id):
     if not sau:
         return None
     return "Completed" if sau["oper"] == "ENABLED" else "Pending"
+
+
+def sau_node_state(postcheck_text):
+    """Node-level SAU state, parsed from Post-checks' Hardware Status Information table
+    (MO 'SAU-1', operationalState ENABLED/DISABLED) — reuses the same generic
+    _hardware_component_state parser already used for SUP/XMU (SECTION further below).
+    Confirmed real row: 'FCL05583 SAU-1 UNLOCKED OFF STEADY_ON ENABLED SAU 02 01 ...'.
+    Returns {node: 'ENABLED'|'DISABLED'}."""
+    return _hardware_component_state(postcheck_text, "SAU")
+
+
+def sau_enabled_nodes(postcheck_text):
+    """Confirmed MCA rule: SAU can be enabled on either the 6610 controller or the node
+    itself. When the 6610's own SAU is confirmed disabled (via controller-checks), this
+    auto-detects which node(s) Post-checks shows SAU as ENABLED on instead, so the
+    'SAU enabled on : {Node ID}' Notes line no longer needs a fully manual entry.
+    Returns a sorted list of node names (usually 0 or 1, but returns every match)."""
+    if not postcheck_text:
+        return []
+    states = sau_node_state(postcheck_text)
+    return sorted(node for node, oper in states.items() if oper == "ENABLED")
 
 
 def external_alarm_scripting_confirmed(controller_checks_data):
