@@ -446,12 +446,12 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
     if pre_nodes:
         result["deleted_nodes"] = sorted(pre_nodes - ciq_nodes)
 
-    # Confirmed WLL rule: any node ending in "L" (Pre-checks or CIQ) is a WLL node — not a
-    # real radio node, so it never counts as a genuine deleted-vs-kept node via the normal
-    # pre_nodes/ciq_nodes diff above. It's always treated as deleted from ENM regardless.
-    wll_nodes_here = {n for n in (pre_nodes | ciq_nodes) if is_wll_node_name(n)}
-    if wll_nodes_here:
-        result["deleted_nodes"] = sorted(set(result["deleted_nodes"]) | wll_nodes_here)
+    # Confirmed WLL rule: any node ending in "L" is a WLL node, not a real radio node — it
+    # must NEVER appear in "Deleted Node from ENM" (only in the "WLL node :" field,
+    # elsewhere). Without this, a WLL node found only in Pre-checks would naturally fall
+    # into the pre_nodes-ciq_nodes diff above and get flagged as deleted, so it's actively
+    # filtered back out here rather than just not being added.
+    result["deleted_nodes"] = [n for n in result["deleted_nodes"] if not is_wll_node_name(n)]
 
     delmove_objs = sheet_objs(ciq_wb["Sector Del_Movement"]) if "Sector Del_Movement" in ciq_wb.sheetnames else []
     handled_cells = set()
