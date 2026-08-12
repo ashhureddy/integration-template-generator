@@ -1173,6 +1173,9 @@ def _idl_cable_node_label(ciq_wb, row):
         r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or \
             find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
     hw = hw_string(r) or "NOT FOUND"
+    # Confirmed: XMU presence isn't relevant for IDL cable reporting — hw_string() appends
+    # " + XMU"/" + N XMU" when XMU boards are present, strip that here specifically.
+    hw = re.sub(r"\s*\+\s*\d*\s*XMU\s*$", "", hw).strip()
     if is_populated(e_name) and is_populated(g_name):
         secondary = g_name if is_lte_primary else e_name
         return f"{primary}(P)/{secondary}(S)({hw})"
