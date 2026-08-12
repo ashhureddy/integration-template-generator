@@ -1209,8 +1209,8 @@ def idl_cable_lines_for_build_type(ciq_wb, mm_objs, build_type_letter):
                 parts.append(f"{gen} (node not found)")
         return " + ".join(parts)
 
-    idle_lines = [f"{part} : {substitute(combo)}" for part, combo in entry["idle"]]
-    idly_lines = [f"{part} : {substitute(combo)}" for part, combo in entry["idly"]]
+    idle_lines = [f"IDLe : {part} : {substitute(combo)}" for part, combo in entry["idle"]]
+    idly_lines = [f"IDLy : {part} : {substitute(combo)}" for part, combo in entry["idly"]]
     return idle_lines, idly_lines
 
 
@@ -1378,8 +1378,8 @@ def cran_idl_cable_lines(ciq_wb, mm_objs, base_build_type):
             parts.append(_idl_cable_node_label(ciq_wb, cands[pos]) if 0 <= pos < len(cands) else f"{gen} (node not found)")
         return " + ".join(parts)
 
-    idle_lines = [f"{part} : {substitute(combo)}" for part, combo in entry["idle"]]
-    idly_lines = [f"{part} : {substitute(combo)}" for part, combo in entry["idly"]]
+    idle_lines = [f"IDLe : {part} : {substitute(combo)}" for part, combo in entry["idle"]]
+    idly_lines = [f"IDLy : {part} : {substitute(combo)}" for part, combo in entry["idly"]]
     return idle_lines, idly_lines
 
 
@@ -1406,7 +1406,7 @@ def cran_slot_port_lines(ciq_wb, mm_objs, base_build_type, is_dash1):
             nodes_by_gen.setdefault(gen, []).append(row)
 
     switch_ids = sorted({str(r["switch_id"]) for r in sidehaul_rows if r.get("switch_id")})
-    switch_lines = [f"Switch Node-> {sid}." for sid in switch_ids]
+    switch_lines = [f"Switch : {sid}" for sid in switch_ids]
 
     slot_port_lines = []
 
