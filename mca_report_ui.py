@@ -167,6 +167,21 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     classification = app.classify_carriers(ciq_wb, mm_objs, precheck_text)
     new_nodes, board_swaps = report_detect.detect_node_board_changes(app, ciq_wb, mm_objs, precheck_text)
 
+    # ---- WLL nodes appearing ONLY in Post-checks (not Pre-checks or CIQ) still need to be
+    # flagged as deleted from ENM — classify_carriers already handles Pre-checks/CIQ WLL
+    # nodes (has no Post-checks visibility, since it runs during template generation,
+    # before Post-checks exists), so this catches what it can't, merging into the same
+    # single pipe-joined "Deleted Node from ENM:" line before the checklist ever sees it. ----
+    if postcheck_text:
+        _, _post_nodes_for_wll = app.extract_precheck_sectors(postcheck_text)
+        _post_only_wll = {n for n in _post_nodes_for_wll if app.is_wll_node_name(n)}
+        if _post_only_wll:
+            _existing_line = next((l for l in scope_lines if l.startswith("Deleted Node from ENM:")), None)
+            _existing_nodes = set(_existing_line.split("\t", 1)[1].split("|")) if _existing_line else set()
+            _all_deleted = sorted(_existing_nodes | _post_only_wll)
+            scope_lines = [l for l in scope_lines if not l.startswith("Deleted Node from ENM:")]
+            scope_lines.append(f"Deleted Node from ENM:\t{'|'.join(_all_deleted)}")
+
     # ---- Retune fix: replace the old sector-dropping "Retune on:" lines with the
     # corrected, sector-tracked version before the checklist ever sees them — this way
     # mca_checklist.py's existing "_scope_lines_matching(ctx, 'Retune on:')" mechanism
@@ -512,11 +527,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 value=current_config_auto, key="rpt_current_config")
         else:
             current_config = ""
-        # Confirmed: auto-fill WLL node from the CIQ when detectable (same convention
-        # as N2E — node name ending in "L"), but stays a fully editable manual field
-        # otherwise — engineer can always override/clear it regardless of detection.
-        _mca_wll_detected = [row.get("Node to be built as") for row in mm_objs
-                              if row.get("Node to be built as") and str(row.get("Node to be built as")).strip().upper().endswith("L")]
+        # Confirmed WLL rule: any node ending in "L" is a WLL node — checked across CIQ,
+        # Pre-checks, AND Post-checks (not just CIQ as before), since a WLL node can show
+        # up in any of the three even if it's absent from the others.
+        _, _wll_pre_nodes = app.extract_precheck_sectors(precheck_text) if precheck_text else (set(), set())
+        _, _wll_post_nodes = app.extract_precheck_sectors(postcheck_text) if postcheck_text else (set(), set())
+        _mca_wll_detected = sorted({
+            row.get("Node to be built as") for row in mm_objs if row.get("Node to be built as")
+        } | _wll_pre_nodes | _wll_post_nodes, key=lambda n: str(n))
+        _mca_wll_detected = [n for n in _mca_wll_detected if str(n).strip().upper().endswith("L")]
         c1, c2 = st.columns(2)
         with c1:
             wll_node = st.text_input("\U0001F4DD WLL node (if applicable)", value="|".join(_mca_wll_detected), key="rpt_wll")
