@@ -367,6 +367,15 @@ def band_label(cell_name):
 def is_5g_cell(cell_name):
     return bool(re.search(r'_N\d{3}[A-F]_\d+$', str(cell_name or '')))
 
+def is_wll_node_name(name):
+    """Confirmed rule: any node name ending in 'L' (Pre-checks, Post-checks, or CIQ alike)
+    is a WLL node — a co-located logical entity, not a real radio node. Reused everywhere
+    a node needs to be recognized as WLL: excluded from Pre/Post Configuration's node
+    lists, folded into "WLL node :" in the report header, and treated as deleted from ENM
+    rather than a genuine site node."""
+    return bool(name) and str(name).strip().upper().endswith("L")
+
+
 def dedupe_labels(cell_names, lte_first=True):
     """Classify a list of cell names into unique band labels, LTE group first then 5G group,
     preserving first-seen order within each group."""
@@ -437,6 +446,13 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
     if pre_nodes:
         result["deleted_nodes"] = sorted(pre_nodes - ciq_nodes)
 
+    # Confirmed WLL rule: any node ending in "L" (Pre-checks or CIQ) is a WLL node — not a
+    # real radio node, so it never counts as a genuine deleted-vs-kept node via the normal
+    # pre_nodes/ciq_nodes diff above. It's always treated as deleted from ENM regardless.
+    wll_nodes_here = {n for n in (pre_nodes | ciq_nodes) if is_wll_node_name(n)}
+    if wll_nodes_here:
+        result["deleted_nodes"] = sorted(set(result["deleted_nodes"]) | wll_nodes_here)
+
     delmove_objs = sheet_objs(ciq_wb["Sector Del_Movement"]) if "Sector Del_Movement" in ciq_wb.sheetnames else []
     handled_cells = set()
 
@@ -481,6 +497,8 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
     target_band_sectors = {}
     for r in mm_objs:
         node = r.get("Node to be built as")
+        if is_wll_node_name(node):
+            continue  # WLL node — not a real radio node, never gets Integration/added-cell entries
         e_name, g_name = r.get("eNodeB Name"), r.get("gNodeB Name")
         added_here = []
         for row in eutran_objs:
@@ -2243,6 +2261,8 @@ def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_name
     ciq_order = []
     for row in mm_objs:
         primary = row.get('Node to be built as')
+        if is_wll_node_name(primary):
+            continue  # WLL node — not a real node, excluded from Post Configuration entirely
         ciq_order.append(primary)
         labels[primary] = node_label(row)
         e_name, g_name = row.get('eNodeB Name'), row.get('gNodeB Name')
@@ -2255,7 +2275,7 @@ def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_name
     # order: CIQ order first (so Pre and Post always list shared nodes in the same sequence),
     # then any Pre-only nodes (e.g. a fully vacated node) appended after
     _, pre_nodes_set = extract_precheck_sectors(precheck_text)
-    ordered_names = list(ciq_order) + [n for n in precheck_node_names if n not in ciq_order]
+    ordered_names = list(ciq_order) + [n for n in precheck_node_names if n not in ciq_order and not is_wll_node_name(n)]
 
     pre_nodes = {}
     for name in ordered_names:
