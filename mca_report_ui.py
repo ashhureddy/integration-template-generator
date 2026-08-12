@@ -854,7 +854,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                     _extra = [(5, _ct_psap_sched_id.strip())] if (_k == "psap" and _ct_psap_sched_id.strip()) else []
                     _ct_row_writes.append((_comp_row, True, [(3, _val)] + _extra))
                     _ct_row_writes.append((_pend_row, False, []))
-                    _display_l = _l + (f" (PSAP Schedule ID: {_ct_psap_sched_id.strip()})" if (_k == "psap" and _ct_psap_sched_id.strip()) else "")
+                    _base_l = _l.replace(" PSAP Schedule ID: ", "").rstrip() if _k == "psap" else _l
+                    _display_l = _base_l + (f" (PSAP Schedule ID: {_ct_psap_sched_id.strip()})" if (_k == "psap" and _ct_psap_sched_id.strip()) else "")
                     _ct_text_lines.append(_display_l)
                     st.caption(f"\u2705 {_display_l}")
                 choices["additional_completed"]["text"] = "\n".join(
