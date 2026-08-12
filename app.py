@@ -1251,6 +1251,198 @@ N2E_IDL_TEMPLATE_REGISTRY = {
 # CRAN rehome) use this SEPARATE registry entirely, replacing the standard IDL_TEMPLATE_REGISTRY
 # for that site — confirmed. Every combo here includes exactly one G3 node (the "F" node).
 # Filenames confirmed against actual GitHub uploads.
+# Confirmed real rule (uploaded IDL_Connections.xlsx, "CRAN TRACKING" tab) — CRAN Build
+# Type is fully derivable from the CIQ, no ambiguity/dropdown needed. Each non-hub node
+# contributes (generation, mode) where mode is "M" (MMBB/TMBB — dual LTE+5G identity) or
+# "L" (SMBB — single identity), sourced from the CIQ's own "BBU Mode" column. The hub is
+# the node ending in "F" (always G3-class hardware), excluded from the signature — its own
+# connection type (RPM coax vs SM fiber jumper) is a separate, independent choice (the "-1"
+# suffix), not derivable from the CIQ. Keyed by the SORTED tuple of (gen, mode) pairs, since
+# the reference sheet's own column order isn't a reliable real-node ordering to match against.
+CRAN_BUILD_TYPE_REGISTRY = {
+    (("G2", "M"),): "L-1",
+    (("G2", "M"), ("G2", "M")): "L-2",
+    (("G2", "L"), ("G2", "M")): "L-2B",
+    (("G2", "M"), ("G2", "M"), ("G2", "M")): "L-3B",
+    (("G3", "M"),): "L-4",
+    (("G2", "M"), ("G3", "M")): "L-5",
+    (("G2", "L"), ("G3", "M")): "L-5B",
+    (("G3", "M"), ("G3", "M")): "L-6",
+    (("G2", "M"), ("G2", "M"), ("G2", "M"), ("G2", "M")): "L-8",
+    (("G4", "M"),): "L-9",
+    (("G2", "L"), ("G4", "M")): "L-10",
+    (("G4", "M"), ("G4", "M")): "L-11",
+    (("G2", "L"), ("G4", "M"), ("G4", "M")): "L-12",
+}
+
+
+def cran_build_type(ciq_wb, mm_objs):
+    """Returns (base_build_type_letter_or_None, hub_row_or_None). The hub node is identified
+    by its name ending in "F" (same convention already used elsewhere to detect a CRAN-styled
+    node present in an MCA site) — confirmed to be excluded from the tech signature, since its
+    own hub-cable type is chosen separately (the "-1" variant), not part of what determines
+    which Build Type letter applies."""
+    hub_row = None
+    regular_pairs = []
+    for row in mm_objs:
+        name = row.get("Node to be built as")
+        if str(name or "").strip().upper().endswith("F"):
+            hub_row = row
+            continue
+        gen = get_node_generation(ciq_wb, row)
+        if not gen:
+            continue
+        bbu_mode = str(row.get("BBU Mode") or "").strip().upper()
+        mode = "L" if bbu_mode == "SMBB" else "M"
+        regular_pairs.append((gen, mode))
+    signature = tuple(sorted(regular_pairs))
+    return CRAN_BUILD_TYPE_REGISTRY.get(signature), hub_row
+
+
+# Confirmed real reference tables (uploaded IDL_Connections.xlsx, "CRAN" tab) — one entry per
+# BASE build type (the "-1" suffix only ever changes the hub cable, handled separately below).
+# CRAN_SLOT_CABLE_REFERENCE: (generation, position-index-among-same-generation) -> cable
+# description for that node's DIRECT hub connection. A generation/index NOT present here means
+# that node connects via IDL instead (see CRAN_IDL_CABLE_REFERENCE) — confirmed real pattern,
+# e.g. L-10's SMBB G2 node has no direct hub slot (all "NA" in the sheet), reaching the hub only
+# via the G2+G4 IDL connection.
+CRAN_SLOT_CABLE_REFERENCE = {
+    "L-1": {("G2", 1): "RPM 777 811 + 8300 DaFi"},
+    "L-2": {("G2", 1): "RPM 777 811 + 8300 DaFi", ("G2", 2): "RPM 777 811 + 8300 DaFi"},
+    "L-2B": {("G2", 1): "RPM 777 811 + 8300 DaFi"},
+    "L-3B": {("G2", 1): "RPM 777 811 + 8300 DaFi", ("G2", 2): "RPM 777 811 + 8300 DaFi", ("G2", 3): "RPM 777 811 + 8300 DaFi"},
+    "L-4": {("G3", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-5": {("G2", 1): "RPM 777 811 + 8300 DaFi", ("G3", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-5B": {("G3", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-6": {("G3", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi", ("G3", 2): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-8": {("G2", 1): "RPM 777 811 + 8300 DaFi", ("G2", 2): "RPM 777 811 + 8300 DaFi", ("G2", 3): "RPM 777 811 + 8300 DaFi", ("G2", 4): "RPM 777 811 + 8300 DaFi"},
+    "L-9": {("G4", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-10": {("G4", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-11": {("G4", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi", ("G4", 2): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-12": {("G4", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi", ("G4", 2): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+}
+
+# Hub's own cable, keyed by (base_build_type, is_dash1_variant) — the ONLY thing the "-1"
+# suffix actually changes.
+CRAN_HUB_CABLE_REFERENCE = {
+    ("L-1", False): "RPM 777 052", ("L-1", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-2", False): "RPM 777 052", ("L-2", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-2B", False): "RPM 777 052", ("L-2B", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-3B", False): "RPM 777 052", ("L-3B", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-4", False): "RPM 777 052", ("L-4", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-5", False): "RPM 777 052", ("L-5", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-5B", False): "RPM 777 052", ("L-5B", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-6", False): "RPM 777 052", ("L-6", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-8", False): "RPM 777 052", ("L-8", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-9", False): "RPM 777 052", ("L-9", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-10", False): "RPM 777 052", ("L-10", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-11", False): "RPM 777 052", ("L-11", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-12", False): "RPM 777 052", ("L-12", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+}
+
+# IDLe/IDLy cross-node connections, same shape as MCA's IDL_CABLE_REFERENCE — only build
+# types that actually need one appear here (most CRAN combos don't).
+CRAN_IDL_CABLE_REFERENCE = {
+    "L-2": {"idle": [("RPM 777 417", "G2(1)+G2(2)")], "idly": []},
+    "L-2B": {"idle": [("RPM 777 417", "G2(1)+G2(2)")], "idly": []},
+    "L-5": {"idle": [], "idly": [("RPM 777 098", "G2+G3")]},
+    "L-5B": {"idle": [], "idly": [("RPM 777 098", "G2+G3")]},
+    "L-6": {"idle": [("RPM 777 053", "G3(1)+G3(2)")], "idly": []},
+    "L-10": {"idle": [("RPM 777 543", "G2+G4")], "idly": []},
+    "L-11": {"idle": [("RPM 777 052", "G4(1)+G4(1)")], "idly": []},
+    "L-12": {"idle": [("RPM 777 543", "G2+G4(1)"), ("RPM 777 543", "G2+G4(2)")], "idly": []},
+}
+
+
+def cran_idl_cable_lines(ciq_wb, mm_objs, base_build_type):
+    """Same substitution mechanism as idl_cable_lines_for_build_type() (MCA), reused here
+    with CRAN's own reference table."""
+    entry = CRAN_IDL_CABLE_REFERENCE.get(base_build_type)
+    if not entry:
+        return [], []
+    nodes_by_gen = {}
+    for row in mm_objs:
+        name = row.get("Node to be built as")
+        if str(name or "").strip().upper().endswith("F"):
+            continue  # hub excluded — it's never part of an inter-node IDL connection
+        gen = get_node_generation(ciq_wb, row)
+        if gen:
+            nodes_by_gen.setdefault(gen, []).append(row)
+
+    def substitute(pattern):
+        parts, used = [], {}
+        for gen, idx in re.findall(r"(G\d)(?:\((\d+)\))?", pattern):
+            cands = nodes_by_gen.get(gen, [])
+            pos = (int(idx) - 1) if idx else used.get(gen, 0)
+            used[gen] = used.get(gen, 0) + 1
+            parts.append(_idl_cable_node_label(ciq_wb, cands[pos]) if 0 <= pos < len(cands) else f"{gen} (node not found)")
+        return " + ".join(parts)
+
+    idle_lines = [f"{part} : {substitute(combo)}" for part, combo in entry["idle"]]
+    idly_lines = [f"{part} : {substitute(combo)}" for part, combo in entry["idly"]]
+    return idle_lines, idly_lines
+
+
+def cran_slot_port_lines(ciq_wb, mm_objs, base_build_type, is_dash1):
+    """Builds the Switch + Slot/Port report lines for a CRAN site. Each non-hub node gets its
+    own line only if CRAN_SLOT_CABLE_REFERENCE has an entry for its (generation, position)
+    slot — nodes without one (e.g. an SMBB node reached only via IDL) are skipped here, since
+    they're already covered by cran_idl_cable_lines(). The hub always gets its own line, using
+    CRAN_HUB_CABLE_REFERENCE keyed by the "-1" variant. Switch ID/Slot-Port come directly from
+    the CIQ's Sidehaul Info (extract_sidehaul_info) — matched to each node by its own node_id
+    ("Basebands" column), not re-derived. Returns (switch_lines, slot_port_lines)."""
+    sidehaul_rows = extract_sidehaul_info(ciq_wb)
+    sidehaul_by_node = {str(r["node_id"]).strip().upper(): r for r in sidehaul_rows if r.get("node_id")}
+
+    hub_row = None
+    nodes_by_gen = {}
+    for row in mm_objs:
+        name = row.get("Node to be built as")
+        if str(name or "").strip().upper().endswith("F"):
+            hub_row = row
+            continue
+        gen = get_node_generation(ciq_wb, row)
+        if gen:
+            nodes_by_gen.setdefault(gen, []).append(row)
+
+    switch_ids = sorted({str(r["switch_id"]) for r in sidehaul_rows if r.get("switch_id")})
+    switch_lines = [f"Switch Node-> {sid}." for sid in switch_ids]
+
+    slot_port_lines = []
+
+    def sidehaul_match(row):
+        primary = str(row.get("Node to be built as") or "").strip().upper()
+        e_name = str(row.get("eNodeB Name") or "").strip().upper()
+        g_name = str(row.get("gNodeB Name") or "").strip().upper()
+        for key in (primary, e_name, g_name):
+            if key and key in sidehaul_by_node:
+                return sidehaul_by_node[key]
+        return None
+
+    for gen, rows in nodes_by_gen.items():
+        for idx, row in enumerate(rows, start=1):
+            cable = CRAN_SLOT_CABLE_REFERENCE.get(base_build_type, {}).get((gen, idx))
+            if not cable:
+                continue  # reaches the hub via IDL instead, not a direct slot connection
+            cable = re.sub(r"\s+", " ", cable).strip()
+            sh = sidehaul_match(row)
+            slot_port = sh["slot_port"] if sh else "Slot/Port not found in Sidehaul Info"
+            node_display = _idl_cable_node_label(ciq_wb, row)
+            # Strip the trailing "(hw)" tag here — confirmed format for this line uses (P)/(S)
+            # only, hardware isn't shown (unlike the IDLe/IDLy line, which always includes it).
+            node_display = re.sub(r"\([^()]*\)$", "", node_display).rstrip()
+            slot_port_lines.append(f"{slot_port} -> {cable} -> {node_display}")
+
+    if hub_row:
+        hub_cable = CRAN_HUB_CABLE_REFERENCE.get((base_build_type, bool(is_dash1)))
+        hub_cable = re.sub(r"\s+", " ", hub_cable).strip() if hub_cable else hub_cable
+        sh = sidehaul_match(hub_row)
+        slot_port = sh["slot_port"] if sh else "Slot/Port not found in Sidehaul Info"
+        slot_port_lines.append(f"{slot_port} -> {hub_cable} -> {hub_row.get('Node to be built as')}")
+
+    return switch_lines, slot_port_lines
+
+
 MCA_CRAN_IDL_REGISTRY = {
     ("G2", "G3"): [("G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-1) and (L-1-1).txt", "")],
     ("G2", "G2", "G3"): [
@@ -2998,6 +3190,19 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     outputs += dss_outputs
     summary_rows += dss_summary
 
+    # Confirmed: CRAN sites never had any IDL Connections generation at all — reuses the
+    # SAME registry/templates already built for MCA sites with a CRAN-styled node
+    # (MCA_CRAN_IDL_REGISTRY / templates/MCA/IDL_CRAN), since CRAN's own reference sheet
+    # (uploaded IDL_Connections.xlsx, "CRAN" tab) confirms the exact same combos/templates
+    # apply here — this covers Build Types L-1, L-2, L-2B, L-3B, L-10, L-11, L-12. Six other
+    # documented Build Types (L-4, L-5, L-5B, L-6, L-8, L-9) have no template file in the
+    # repo yet, so those combos still fall through to "IDL Template not found" until the
+    # actual template content is available.
+    idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(
+        ciq_wb, mm_objs, user_id, date_str, log, template_dir=TDIR_MCA_IDL_CRAN, registry=MCA_CRAN_IDL_REGISTRY)
+    outputs += idl_outputs
+    summary_rows += idl_summary
+
     binary_outputs = [(f"Final_Connections_{target.get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))]
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
     if pre_fibers_bytes:
@@ -3010,6 +3215,7 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
     classification["deleted_nodes"] = []  # every CRAN rehome vacates a source node — not a noteworthy anomaly here, unlike MCA/CENM
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
+    scope_of_work_lines += idl_scope_lines
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
     summary_rows += ngs_summary
     scope_of_work_lines += ngs_scope_lines
@@ -3033,7 +3239,7 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
 # ============================================================
 
 SCOPE_CHECKLIST = {
-    "CRAN": ["Carrier ADD", "Carrier delete", "Carrier moving", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
+    "CRAN": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
     "MCA": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
     "CENM": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
     "N2E": ["Carrier ADD", "IDL Connections", "DSS checks", "6610 Present", "SA Conversion", "NGS Checks"],
