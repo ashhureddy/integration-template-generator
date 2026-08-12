@@ -614,15 +614,20 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                         st.caption("Auto-derived (IDLe):")
                         for l in auto_idle_lines:
                             st.caption(l)
-                    idle = st.text_area("\U0001F4DD IDLe cable details (additional/manual)", key="rpt_idle", height=60)
-                    idle = "\n".join([l for l in auto_idle_lines] + ([idle] if idle else [])).strip()
+                        idle = "\n".join(auto_idle_lines).strip()
+                    else:
+                        # Confirmed: manual entry only shown as a fallback when nothing
+                        # could be auto-derived — not alongside successfully auto-derived
+                        # content, same as the earlier Switch details fix.
+                        idle = st.text_area("\U0001F4DD IDLe cable details (manual)", key="rpt_idle", height=60)
                 with c2:
                     if auto_idly_lines:
                         st.caption("Auto-derived (IDLy):")
                         for l in auto_idly_lines:
                             st.caption(l)
-                    idly = st.text_area("\U0001F4DD IDLy cable details (additional/manual)", key="rpt_idly", height=60)
-                    idly = "\n".join([l for l in auto_idly_lines] + ([idly] if idly else [])).strip()
+                        idly = "\n".join(auto_idly_lines).strip()
+                    else:
+                        idly = st.text_area("\U0001F4DD IDLy cable details (manual)", key="rpt_idly", height=60)
 
                 sidehaul_rows = mcl.sidehaul_display_rows(ciq_wb)
                 if sidehaul_rows:
