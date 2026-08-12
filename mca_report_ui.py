@@ -579,7 +579,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                             st.caption("Auto-derived (IDLy):")
                             for l in auto_idly_lines:
                                 st.caption(l)
-                        switch_lines, slot_port_lines = app.cran_slot_port_lines(ciq_wb, mm_objs, cran_base_type, is_dash1)
+                        switch_lines, slot_port_lines = app.cran_slot_port_lines(
+                            ciq_wb, mm_objs, cran_base_type, is_dash1, mcl.sidehaul_display_rows(ciq_wb))
                         switch = "\n".join(switch_lines).strip()
                         slot_port = "\n".join(slot_port_lines).strip()
                         if switch_lines or slot_port_lines:
