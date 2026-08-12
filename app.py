@@ -469,19 +469,41 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
     # ADD: any CIQ cell (LTE or 5G) not present in Pre-checks and not already accounted for as moved/deleted
     eutran_objs = sheet_objs(ciq_wb["eUtran Parameters"]) if "eUtran Parameters" in ciq_wb.sheetnames else []
     fiveg_objs = sheet_objs(ciq_wb["5G Info"]) if "5G Info" in ciq_wb.sheetnames else []
+    # Confirmed real rule: Integration should reflect actual sectors, not just the band —
+    # if a band's full CIQ target sector set (Alpha/Beta/Gamma/... whichever this node
+    # actually has for that band) is ALL newly added, show just the band label; if only
+    # some of that band's target sectors are new (the rest already pre-existing/untouched),
+    # show the band label plus the specific newly-added sector name(s). target_band_sectors
+    # is the FULL target inventory per (node, band label) — every sector this node has for
+    # that band in the CIQ, added or not — the same "whole vs partial" pattern
+    # node_band_sectors already uses for Moved Sectors, just sourced from the CIQ target
+    # instead of Pre-checks.
+    target_band_sectors = {}
     for r in mm_objs:
         node = r.get("Node to be built as")
         e_name, g_name = r.get("eNodeB Name"), r.get("gNodeB Name")
         added_here = []
         for row in eutran_objs:
             cell = row.get("EutranCellFDDId")
-            if not cell or cell in handled_cells or cell in pre_cells:
+            if not cell:
+                continue
+            if e_name and str(cell).startswith(str(e_name)):
+                label, sector = band_label(cell)
+                if label and sector:
+                    target_band_sectors.setdefault((node, label), set()).add(sector)
+            if cell in handled_cells or cell in pre_cells:
                 continue
             if e_name and str(cell).startswith(str(e_name)):
                 added_here.append(cell)
         for row in fiveg_objs:
             cell = row.get("NRCellDU")
-            if not cell or cell in handled_cells or cell in pre_cells:
+            if not cell:
+                continue
+            if g_name and str(cell).startswith(str(g_name)):
+                label, sector = band_label(cell)
+                if label and sector:
+                    target_band_sectors.setdefault((node, label), set()).add(sector)
+            if cell in handled_cells or cell in pre_cells:
                 continue
             if g_name and str(cell).startswith(str(g_name)):
                 added_here.append(cell)
@@ -489,6 +511,7 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
             result["added"][node] = added_here
 
     result["node_band_sectors"] = node_band_sectors
+    result["target_band_sectors"] = target_band_sectors
     return result
 
 
@@ -497,9 +520,24 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
     controller_edp_found: dict of {controller_id: bool} — False means the 6610 shows in the CIQ
     but isn't published in EDP yet."""
     lines = []
+    target_band_sectors = classification.get("target_band_sectors", {})
     for node, cells in classification.get("added", {}).items():
         labels = dedupe_labels(cells)
-        lines.append(f"Integration:\t{'/'.join(labels)}\t{node}")
+        added_by_label = {}
+        for c in cells:
+            label, sector = band_label(c)
+            if label and sector:
+                added_by_label.setdefault(label, set()).add(sector)
+        parts = []
+        for label in labels:
+            added_sectors = added_by_label.get(label, set())
+            target_sectors = target_band_sectors.get((node, label))
+            if not target_sectors or added_sectors >= target_sectors:
+                parts.append(label)  # whole band added — target unknown or fully covered
+            else:
+                sector_names = sorted(added_sectors, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
+                parts.append(f"{label} {', '.join(sector_names)}")
+        lines.append(f"Integration:\t{'/'.join(parts)}\t{node}")
 
     ctrl_rows = [r for r in controller_objs if str(r.get("Controller", "")).strip() == "6610"]
     for r in ctrl_rows:
