@@ -976,6 +976,30 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 n_not_mon = False
             choices["notes_not_monitored"] = {"checked": n_not_mon, "text": f"{'|'.join(new_nodes)} is in not monitored state."}
 
+        # 6610 controller monitored/not-monitored state — same pattern as N2E/NSB (auto
+        # "not monitored" when the cascade fires, SAU is Pending/disabled, or External alarm
+        # testing is Pending; manual Monitored/Not monitored choice otherwise). MCA had the
+        # node-level version above but was missing the controller-level one.
+        _ctrl_sau_disabled = sau_placement == "Pending"
+        ctrl_mon_checked, ctrl_mon_text = False, ""
+        if controller_id:
+            if cascade_fires or _ctrl_sau_disabled or testing_section == "Pending":
+                _ctrl_mon_reason = ("no 6610 checks" if cascade_fires
+                                     else ("SAU disabled" if _ctrl_sau_disabled else "External alarm testing Pending"))
+                st.caption(f"{controller_id} is in not monitored state. (auto \u2014 {_ctrl_mon_reason})")
+                ctrl_mon_checked = True
+                ctrl_mon_text = f"{controller_id} is in not monitored state."
+            else:
+                ctrl_mon_choice = st.selectbox(f"{controller_id} monitored state",
+                                                 ["\u2014 Select \u2014", "Monitored", "Not monitored"], key="mca_ctrl_mon")
+                if ctrl_mon_choice == "Monitored":
+                    ctrl_mon_checked = True
+                    ctrl_mon_text = f"{controller_id} is in monitored state."
+                elif ctrl_mon_choice == "Not monitored":
+                    ctrl_mon_checked = True
+                    ctrl_mon_text = f"{controller_id} is in not monitored state."
+        choices["notes_ctrl_monitored"] = {"checked": ctrl_mon_checked, "text": ctrl_mon_text}
+
         emergency_unlock_lines = [f"Emergency unlock activated on the node {n}." for n in emergency_unlock_notes]
         notes_generic = st.text_area("\U0001F4DD Enter Notes that need to be reported or addressed to Market",
                                       key="rpt_notes_generic", height=70)
@@ -1133,6 +1157,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             notes_buffer_lines.append(f"{'|'.join(pre_existing_node_names)} is in monitored state.")
         if n_not_mon:
             notes_buffer_lines.append(f"{'|'.join(new_nodes)} is in not monitored state.")
+        if ctrl_mon_checked and ctrl_mon_text:
+            notes_buffer_lines.append(ctrl_mon_text)
         notes_buffer_lines += [l for l in (notes_generic or "").split("\n") if l.strip()]
         notes_buffer_lines += emergency_unlock_lines + ngs_notes_lines + bucket_notes + scripted_locked_lines
 
