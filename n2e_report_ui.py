@@ -270,16 +270,46 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     xmu_present_in_ciq = n2e.xmu_in_ciq(post_line)
 
     idl_build_type = None
+    idl_build_type_final = None
     idle = idly = switch = slot_port = ""
     if len(new_nodes) > 1:
         with st.container(border=True):
             idl_build_type = app.derive_idl_build_type_label(ciq_wb, mm_objs)
-            st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type or '(not detected)'}**")
+            idl_build_type_final = idl_build_type
+            idl_build_type_options = [t.strip() for t in (idl_build_type or "").split("/") if t.strip()]
+            if len(idl_build_type_options) > 1:
+                # Same confirmed gap as MCA: a combo can have both a Preferred and Alternate
+                # variant (e.g. G3+G3 -> Type C and Type CC) — which physical ports are
+                # actually free can't be known from the CIQ alone, so let the engineer pick.
+                idl_build_type_final = st.selectbox(
+                    "IDL Build Type \u2014 more than one option detected, pick one",
+                    ["\u2014 Select \u2014"] + idl_build_type_options, key="n2e_idl_buildtype")
+                if idl_build_type_final == "\u2014 Select \u2014":
+                    idl_build_type_final = None
+                st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type_final or '(pick one above)'}**")
+            else:
+                st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type or '(not detected)'}**")
+            # Confirmed: auto-derive IDLe/IDLy cable part numbers + real node substitution
+            # from the same reference table already built for MCA (uploaded reference sheet
+            # confirmed identical values for every N2E-supported build type: C/CC/R/T/G/GG/RR/TT).
+            _bt_letter = (idl_build_type_final or "").replace("Type ", "").strip()
+            auto_idle_lines, auto_idly_lines = app.idl_cable_lines_for_build_type(ciq_wb, mm_objs, _bt_letter) \
+                if _bt_letter else ([], [])
             c1, c2 = st.columns(2)
             with c1:
-                idle = st.text_area("\U0001F4DD IDLe cable details (manual)", key="n2e_idle", height=60)
+                if auto_idle_lines:
+                    st.caption("Auto-derived (IDLe):")
+                    for l in auto_idle_lines:
+                        st.caption(l)
+                idle = st.text_area("\U0001F4DD IDLe cable details (additional/manual)", key="n2e_idle", height=60)
+                idle = "\n".join([l for l in auto_idle_lines] + ([idle] if idle else [])).strip()
             with c2:
-                idly = st.text_area("\U0001F4DD IDLy cable details (manual)", key="n2e_idly", height=60)
+                if auto_idly_lines:
+                    st.caption("Auto-derived (IDLy):")
+                    for l in auto_idly_lines:
+                        st.caption(l)
+                idly = st.text_area("\U0001F4DD IDLy cable details (additional/manual)", key="n2e_idly", height=60)
+                idly = "\n".join([l for l in auto_idly_lines] + ([idly] if idly else [])).strip()
             sidehaul_rows = mcl.sidehaul_display_rows(ciq_wb)
             if sidehaul_rows:
                 st.caption("Switch / Slot-Port \u2014 auto-filled from Sidehaul Info:")
@@ -924,7 +954,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     if software_version.strip(): report_lines.append(f"Software version : {software_version}")
     if gs_version.strip(): report_lines.append(f"GS Version : {gs_version}")
     if len(new_nodes) > 1:
-        report_lines += ["", "IDL Connections", f"Build Type : {idl_build_type or ''}"]
+        report_lines += ["", "IDL Connections", f"Build Type : {idl_build_type_final or ''}"]
         if idle.strip(): report_lines.append(f"IDLe : {idle}")
         if idly.strip(): report_lines.append(f"IDLy : {idly}")
         if switch.strip(): report_lines.append(switch)
@@ -961,9 +991,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             row_writes.append((N2E_ROW_MAP["gs_version"], bool(gs_version.strip()), [(3, gs_version)] if gs_version.strip() else []))
 
             # IDL Connections — confirmed real gap: was never written to the .xlsm at all.
-            if len(new_nodes) > 1 and idl_build_type:
+            if len(new_nodes) > 1 and idl_build_type_final:
                 idle_rows = N2E_ROW_MAP["idle"]
-                row_writes.append((idle_rows[0], True, [(3, idl_build_type)]))
+                row_writes.append((idle_rows[0], True, [(3, idl_build_type_final)]))
                 row_writes.append((idle_rows[1], bool(idle.strip()), [(3, idle)] if idle.strip() else []))
             row_writes.append((N2E_ROW_MAP["idly"], bool(idly.strip()), [(3, idly)] if idly.strip() else []))
             row_writes.append((N2E_ROW_MAP["switch"], bool(switch.strip()), [(2, switch)] if switch.strip() else []))
