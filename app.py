@@ -1383,15 +1383,16 @@ def cran_idl_cable_lines(ciq_wb, mm_objs, base_build_type):
     return idle_lines, idly_lines
 
 
-def cran_slot_port_lines(ciq_wb, mm_objs, base_build_type, is_dash1):
+def cran_slot_port_lines(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows):
     """Builds the Switch + Slot/Port report lines for a CRAN site. Each non-hub node gets its
     own line only if CRAN_SLOT_CABLE_REFERENCE has an entry for its (generation, position)
     slot — nodes without one (e.g. an SMBB node reached only via IDL) are skipped here, since
     they're already covered by cran_idl_cable_lines(). The hub always gets its own line, using
-    CRAN_HUB_CABLE_REFERENCE keyed by the "-1" variant. Switch ID/Slot-Port come directly from
-    the CIQ's Sidehaul Info (extract_sidehaul_info) — matched to each node by its own node_id
-    ("Basebands" column), not re-derived. Returns (switch_lines, slot_port_lines)."""
-    sidehaul_rows = extract_sidehaul_info(ciq_wb)
+    CRAN_HUB_CABLE_REFERENCE keyed by the "-1" variant. sidehaul_rows: the CIQ's Sidehaul Info,
+    already extracted by the caller (mca_completed_logic.extract_sidehaul_info — that function
+    lives there, not in this module, so it's passed in rather than called from here) — matched
+    to each node by its own node_id ("Basebands" column), not re-derived. Returns
+    (switch_lines, slot_port_lines)."""
     sidehaul_by_node = {str(r["node_id"]).strip().upper(): r for r in sidehaul_rows if r.get("node_id")}
 
     hub_row = None
