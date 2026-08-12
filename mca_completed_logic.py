@@ -1443,7 +1443,11 @@ def loops_bridge_clips_notes(loops_ports, bridge_clips_ports, no_equip_ports, al
         notes_lines.append(f"No equipment connections on port {fmt} (Owner: AT&T).")
 
     all_ports_str = ",".join(p for p in (loops_ports, bridge_clips_ports, no_equip_ports) if p)
-    all_port_list = [p.strip() for p in all_ports_str.split(",") if p.strip()]
+    # Confirmed real bug: a port entered in more than one category (e.g. 16 in loops AND
+    # bridge clips AND no-equipment) was appearing that many times over in the combined
+    # "Active alarms observed on ports..." line — same port, same slogan, repeated. Dedupe
+    # while preserving first-seen order, since it's still the SAME port either way.
+    all_port_list = list(dict.fromkeys(p.strip() for p in all_ports_str.split(",") if p.strip()))
     active_ports = [p for p in all_port_list if port_active_map.get(p)]
 
     active_pending_line = None
