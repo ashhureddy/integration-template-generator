@@ -1393,8 +1393,13 @@ def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log, template_d
 
     for fname, variant in matches:
         tpl_path = template_dir / fname
+        if not tpl_path.exists() and template_dir != TDIR_IDL:
+            # Confirmed rule (N2E specifically): only C/CC/R have dedicated files in N2E's
+            # own folder — everything else (T, G, GG, RR, TT, etc.) falls back to the same
+            # shared templates/IDL/ folder MCA/CENM/NSB use, rather than needing its own copy.
+            tpl_path = TDIR_IDL / fname
         if not tpl_path.exists():
-            summary_rows.append({"Item": "IDL Connections", "Source": f"template {fname}", "Value": "NOT FOUND", "Note": f"expected file not in {template_dir}/: {fname}"})
+            summary_rows.append({"Item": "IDL Connections", "Source": f"template {fname}", "Value": "NOT FOUND", "Note": f"expected file not in {template_dir}/ or {TDIR_IDL}/: {fname}"})
             log(f"✗ IDL Connections: template file not found: {fname}")
             scope_lines.append(f"IDL Connections:\ttemplate file missing from repo\t{fname}")
             continue
