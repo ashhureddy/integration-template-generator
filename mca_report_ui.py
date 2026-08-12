@@ -404,6 +404,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     for item in results:
         if item["key"] in {"sup_connections", "xmu_installation"}:
             item["checked_by_default"] = False
+    # Same fix, same reason: these two never had a working way to actually be selected.
+    for item in results:
+        if item["key"] in {"ret_configuration", "idl_connections"}:
+            item["checked_by_default"] = False
 
     # ---- SUP / XMU auto-detection — confirmed same mechanism as NSB/N2E, reusing the
     # same shared helpers (nodes_expecting_sup/xmu, _hardware_component_state) rather than
@@ -517,10 +521,20 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             software_version = st.text_input("\U0001F4DD Software version", key="rpt_sw")
             gs_version = st.text_input("\U0001F4DD GS Version", key="rpt_gs")
 
+    idl_completed_line, idl_pending_line = None, None
     idle = idly = switch = slot_port = ""
     if len(mm_objs) > 1:
         with st.container(border=True):
             st.markdown(f"**IDL Connections** \u2014 Build Type: **{idl_build_type or '(not detected)'}**")
+            # Confirmed same as NSB/N2E: IDL connections status is a real user choice
+            # (Completed/Pending), not auto-detected — the generic checklist item's
+            # detect() only ever knew the build type, never actually asked this.
+            idl_choice = st.selectbox("IDL connections status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                        key="mca_idlconn")
+            if idl_choice == "Completed":
+                idl_completed_line = "IDL connections"
+            elif idl_choice == "Pending":
+                idl_pending_line = "IDL connections (MIC PM)"
             c1, c2 = st.columns(2)
             with c1:
                 idle = st.text_area("\U0001F4DD IDLe cable details (manual)", key="rpt_idle", height=60)
@@ -543,6 +557,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             else:
                 switch = st.text_area("\U0001F4DD Switch details (manual)", key="rpt_switch", height=60)
                 slot_port = st.text_area("\U0001F4DD Slot/Port/Cable/Node ID (manual)", key="rpt_slotport", height=60)
+
+    # ---- RET configuration: Completed/Pending choice, confirmed same as NSB — the
+    # generic checklist item was "manual": True with no way to actually select it at
+    # all (filtered out of both Completed/Pending lists entirely, since manual items
+    # never get checked_by_default=True). ----
+    ret_completed_line, ret_pending_line = None, None
+    ret_choice = st.selectbox("RET configuration", ["\u2014 Select \u2014", "Completed", "Pending"], key="mca_ret")
+    if ret_choice == "Completed":
+        ret_completed_line = "RET configuration"
+    elif ret_choice == "Pending":
+        ret_pending_line = "RET configuration (Tower Crew)"
 
     # ---- DSS Activation: Completed/Pending choice, stakeholder (AT&T/MIC) prompt only if
     # Pending — confirmed real gap, restoring the original spec exactly. No default —
@@ -842,13 +867,19 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # dict directly rather than relying on a widget's (staleness-prone) displayed value.
     dss_completed_lines = [dss_completed_line] if dss_completed_line else []
     dss_pending_lines = [dss_pending_line] if dss_pending_line else []
+    ret_completed_lines = [ret_completed_line] if ret_completed_line else []
+    ret_pending_lines = [ret_pending_line] if ret_pending_line else []
+    idl_completed_lines = [idl_completed_line] if idl_completed_line else []
+    idl_pending_lines = [idl_pending_line] if idl_pending_line else []
     choices["additional_completed"]["text"] = "\n".join(
         [choices["additional_completed"]["text"] or ""] + gps_c_lines + sfp_c_lines + rs_c_display
-        + fdd_c_lines + lkf_c_lines + sup_c_lines + xmu_c_lines + ngs_completed_lines + florida_active_rows + dss_completed_lines
+        + fdd_c_lines + lkf_c_lines + sup_c_lines + xmu_c_lines + ngs_completed_lines + florida_active_rows
+        + dss_completed_lines + ret_completed_lines + idl_completed_lines
     ).strip()
     choices["additional_pending"]["text"] = "\n".join(
         [choices["additional_pending"]["text"] or ""] + gps_p_lines + sfp_p_lines + rs_p_display
         + edp_lines + lkf_p_lines + sup_p_lines + xmu_p_lines + ngs_pending_lines + dss_pending_lines
+        + ret_pending_lines + idl_pending_lines
     ).strip()
 
     with st.expander("Pre-Existing Issues"):
