@@ -716,12 +716,23 @@ def sau_connections_placement(controller_checks_data, controller_id):
 
 
 def sau_node_state(postcheck_text):
-    """Node-level SAU state, parsed from Post-checks' Hardware Status Information table
-    (MO 'SAU-1', operationalState ENABLED/DISABLED) — reuses the same generic
-    _hardware_component_state parser already used for SUP/XMU (SECTION further below).
-    Confirmed real row: 'FCL05583 SAU-1 UNLOCKED OFF STEADY_ON ENABLED SAU 02 01 ...'.
-    Returns {node: 'ENABLED'|'DISABLED'}."""
-    return _hardware_component_state(postcheck_text, "SAU")
+    """Node-level SAU state, parsed from Post-checks' Hardware Status Information table.
+    Confirmed real component-name variants: 'SAU-1', 'SAU-2', 'SAU-3', or bare 'SAU'
+    (all matched by SAU\\S*). Deliberately does NOT reuse the generic
+    _hardware_component_state() helper: that function keeps only ONE oper-state per node
+    (last match in the text wins), which silently loses data whenever a node has more than
+    one SAU unit — e.g. SAU-1 ENABLED + SAU-2 DISABLED on the same node would collapse to
+    just 'DISABLED' and hide the genuinely-enabled unit. This parser instead returns
+    {node: [(component, oper), ...]} — every unit, unmerged."""
+    out = {}
+    if not postcheck_text:
+        return out
+    text = _normalize(postcheck_text)
+    for m in re.finditer(
+            r'(\S+) (SAU\S*) (UNLOCKED|LOCKED) (ON|OFF) (\S+) (ENABLED|DISABLED)', text):
+        node, comp, _admin, _fault, _steady, oper = m.groups()
+        out.setdefault(node, []).append((comp, oper))
+    return out
 
 
 def sau_enabled_nodes(postcheck_text):
@@ -729,11 +740,14 @@ def sau_enabled_nodes(postcheck_text):
     itself. When the 6610's own SAU is confirmed disabled (via controller-checks), this
     auto-detects which node(s) Post-checks shows SAU as ENABLED on instead, so the
     'SAU enabled on : {Node ID}' Notes line no longer needs a fully manual entry.
+    A node counts as enabled if ANY of its SAU units (SAU-1/SAU-2/SAU-3/bare SAU) shows
+    ENABLED — a site can have multiple SAU units per node, and only one needs to be live.
     Returns a sorted list of node names (usually 0 or 1, but returns every match)."""
     if not postcheck_text:
         return []
     states = sau_node_state(postcheck_text)
-    return sorted(node for node, oper in states.items() if oper == "ENABLED")
+    return sorted(node for node, units in states.items()
+                  if any(oper == "ENABLED" for _comp, oper in units))
 
 
 def external_alarm_scripting_confirmed(controller_checks_data):
