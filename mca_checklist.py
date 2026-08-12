@@ -196,9 +196,11 @@ def build_mca_report_text(mm_objs, checklist_results, choices, header_fields, st
     stakeholder_by_key: item key -> chosen stakeholder tag, for items placed in Pending."""
     lines = []
     lines.append("Subject")
+    _fa = header_fields.get('fa_code', '')
+    _fa_display = f"FA {_fa}" if _fa else ""
     lines.append(f"{header_fields.get('mic','MIC')} | {header_fields.get('market','')} | "
                   f"{header_fields.get('status','')} | {header_fields.get('site_name','')} | "
-                  f"{header_fields.get('fa_code','')} | {header_fields.get('site_ids','')} | "
+                  f"{_fa_display} | {header_fields.get('site_ids','')} | "
                   f"{header_fields.get('sow','')}")
     lines.append("")
     lines.append("IWM Details:")
