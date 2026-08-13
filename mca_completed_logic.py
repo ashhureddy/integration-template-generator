@@ -61,27 +61,37 @@ def extract_gps_status(check_text):
         ECL02586   GRU 05 01             NCD 901 89/1   R1D
 
     Returns {node: product_designation}. 'Product Designation' is what the person
-    referred to as 'GPS type'."""
+    referred to as 'GPS type'.
+
+    Confirmed real gap (multi-row real data: ALL01340/ABHN011340/ALL00640 all in one
+    table): the old block-boundary lookahead deciding where a table "ends"
+    (\\n[A-Z][\\w /]*\\n) also matches an ordinary data row, not just the start of the
+    next section — a data row is just capital-letter-node-name + word chars/spaces/
+    slashes, exactly what that lookahead allows. The lazy .*? stopped after the SECOND
+    row every time, mistaking it for a section boundary, silently dropping every row
+    from the 3rd onward in a single table. Rewritten to consume rows one at a time by
+    their own real shape instead of guessing where a block "ends"."""
     out = {}
     text = _normalize(check_text)
     if not text:
         return out
-    # Confirmed real gap: multi-node Post-/Pre-checks documents can have a SEPARATE "GPS
-    # Status" table per node section, not one combined table for the whole site — re.search
-    # (single match) only ever found the FIRST one, silently missing every other node's GPS
-    # entry. finditer() now merges every block found.
-    row_re = re.compile(
-        r'^(\S+) ((?:GPS|GRU) \d{2} \d{2}) (\S+(?: \S+)*?/\S+) (\S+)$', re.M)
-    for m in re.finditer(r'GPS Status\nNode Product Designation Product No\. Product Rev\.\n(.*?)(?=\n[A-Z][\w /]*\n|\Z)',
-                          text, re.S):
-        block = m.group(1)
-        # Row shape: "NODE  <product designation, 1-3 space-separated tokens>  <product no>  <rev>"
-        # Confirmed real values: "GRU 05 01", "GPS 02 01", "GPS 03 01", "GRU 04 01" — always
-        # a 2-letter prefix + two 2-digit groups. Product No. always contains a "/" (e.g.
-        # "NCD 901 89/1"); Product Rev. is the final bare token (e.g. "R1D").
-        for m2 in row_re.finditer(block):
-            node, designation, _prodno, _rev = m2.groups()
+    row_re = re.compile(r'^(\S+) ((?:GPS|GRU) \d{2} \d{2}) (\S+(?: \S+)*?/\S+) (\S+)$')
+    # Confirmed real values: "GRU 05 01", "GPS 02 01", "GPS 03 01", "GRU 04 01" — always
+    # a 2-letter prefix + two 2-digit groups. Product No. always contains a "/" (e.g.
+    # "NCD 901 89/1"); Product Rev. is the final bare token (e.g. "R1D").
+    for header_m in re.finditer(r'GPS Status\nNode Product Designation Product No\. Product Rev\.\n', text):
+        pos = header_m.end()
+        while True:
+            nl = text.find('\n', pos)
+            line = text[pos:nl] if nl != -1 else text[pos:]
+            row_m = row_re.match(line.strip())
+            if not row_m:
+                break
+            node, designation, _prodno, _rev = row_m.groups()
             out[node.strip()] = designation.strip()
+            if nl == -1:
+                break
+            pos = nl + 1
     return out
 
 
