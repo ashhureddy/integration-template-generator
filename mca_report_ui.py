@@ -1311,15 +1311,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         row_writes.append((19, bool(idl_build_type_final), [(3, idl_build_type_final)] if idl_build_type_final else []))
 
         # IDLe / IDLy (rows 20/21) — confirmed real gap: the template has separate columns
-        # (C=Cable P/N, D=1st Node ID, E=2nd Node ID), not one cell to dump the whole
-        # combined text line into. Multiple cable connections pipe-join per column.
+        # (C=Cable P/N, D=1st Node ID, E=2nd Node ID for IDLe; C/D/E/F — a genuine 3rd node
+        # column — for IDLy specifically, confirmed against the real template), not one cell
+        # to dump the whole combined text line into. Multiple cable connections pipe-join
+        # per column.
         _bt_letter_for_xlsm = cran_base_type if has_cran_node else (idl_build_type_final or "").replace("Type ", "").strip()
         if _bt_letter_for_xlsm and has_cran_node:
-            (idle_c, idle_d, idle_e), (idly_c, idly_d, idly_e) = app.cran_idl_cable_columns(ciq_wb, mm_objs, _bt_letter_for_xlsm)
+            (idle_c, idle_d, idle_e), (idly_c, idly_d, idly_e, idly_f) = app.cran_idl_cable_columns(ciq_wb, mm_objs, _bt_letter_for_xlsm)
         elif _bt_letter_for_xlsm:
-            (idle_c, idle_d, idle_e), (idly_c, idly_d, idly_e) = app.idl_cable_columns_for_build_type(ciq_wb, mm_objs, _bt_letter_for_xlsm)
+            (idle_c, idle_d, idle_e), (idly_c, idly_d, idly_e, idly_f) = app.idl_cable_columns_for_build_type(ciq_wb, mm_objs, _bt_letter_for_xlsm)
         else:
-            idle_c = idle_d = idle_e = idly_c = idly_d = idly_e = ""
+            idle_c = idle_d = idle_e = idly_c = idly_d = idly_e = idly_f = ""
         # Manual entry (only present when nothing was auto-derived) still has nowhere but
         # column C to go — same single-cell behavior as before for that fallback case.
         if not idle_c and idle.strip():
@@ -1327,7 +1329,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if not idly_c and idly.strip():
             idly_c = idly
         row_writes.append((20, bool(idle_c), [(3, idle_c), (4, idle_d), (5, idle_e)] if idle_c else []))
-        row_writes.append((21, bool(idly_c), [(3, idly_c), (4, idly_d), (5, idly_e)] if idly_c else []))
+        row_writes.append((21, bool(idly_c), [(3, idly_c), (4, idly_d), (5, idly_e), (6, idly_f)] if idly_c else []))
 
         # Switch / Slot-Port (rows 23/24 + overflow rows 25-39). CRAN-styled sites use the
         # Build-Type-aware cable/hub data (cran_slot_port_rows) — confirmed real gap: this
@@ -1419,6 +1421,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             notes_buffer_lines.append(ctrl_mon_text)
         if sau_node_checked and sau_node_text:
             notes_buffer_lines.append(sau_node_text)
+        # Confirmed real gap: notes_testing (external alarm testing placement note) shows
+        # in the report preview but had no .xlsm write at all — no dedicated row like
+        # notes_final_port_config/notes_nr_verified/notes_mme_config have, and never added
+        # to this buffer either.
+        if testing_note_checked and testing_note:
+            notes_buffer_lines.append(testing_note)
         notes_buffer_lines += [l for l in (notes_generic or "").split("\n") if l.strip()]
         notes_buffer_lines += emergency_unlock_lines + ngs_notes_lines + bucket_notes + scripted_locked_lines
 
@@ -1496,14 +1504,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # rows) — NOT the full lists, since those already go to their own dedicated rows via
         # build_new_xlsm_row_writes below; including them again here would double-count the
         # same content in two places.
-        buffer_completed_lines = gps_install_lines[1:] + gps_upgrade_lines_found + sfp_c_lines[3:] + rs_c_display[3:]
-        # Confirmed real gap: bucket_pending (locked-alarm-port classification going to
-        # Pending) only ever reached choices["additional_pending"]["text"] — used for the
-        # text report, but NEVER read by the .xlsm write, which pulls from this narrower
-        # buffer_pending_lines instead. Added here explicitly, same pattern already used
-        # correctly for bucket_pre_existing just below.
-        buffer_pending_lines = gps_p_lines[1:] + sfp_p_lines[4:] + rs_p_display[3:] + bucket_pending
-        buffer_pre_existing_lines = sfp_pre_existing_extra + bucket_pre_existing
+        # Confirmed real gap #1: the raw manual text typed into "additional completed/pending
+        # information" has its own dedicated .xlsm buffer rows (81-91 / 158-167), but nothing
+        # ever wrote to them — this only ever reached choices["additional_completed"/"_pending"]
+        # for the text report, never the .xlsm buffer computed here.
+        # Confirmed real gap #2: bucket_pending (locked-alarm-port -> Pending) had the same
+        # problem — only reached the text report, never this buffer.
+        buffer_completed_lines = gps_install_lines[1:] + gps_upgrade_lines_found + sfp_c_lines[3:] + rs_c_display[3:] \
+            + ([additional_completed.strip()] if additional_completed.strip() else [])
+        buffer_pending_lines = gps_p_lines[1:] + sfp_p_lines[4:] + rs_p_display[3:] + bucket_pending \
+            + ([additional_pending.strip()] if additional_pending.strip() else [])
+        buffer_pre_existing_lines = sfp_pre_existing_extra + bucket_pre_existing \
+            + ([pre_existing_text.strip()] if pre_existing_text.strip() else [])
 
         new_rw = mcl.build_new_xlsm_row_writes(
             ROW_MAP,
