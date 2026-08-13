@@ -565,6 +565,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if precheck_text:
             warnings += mcl.lte_pci_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text)
             warnings += mcl.nr_pci_cellrange_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text)
+            # RRU Cell Mapping (Serial Number + Radio Type): Pre-checks vs Post-checks per
+            # sector, ignoring differences that are explained by a COMPLETED radio swap
+            # (a different radio is genuinely expected there) or a moved sector (same
+            # reasoning — a physical move means a different radio too). A PENDING swap, or
+            # no tracked swap at all, means Pre and Post should still match.
+            warnings += mcl.rru_mapping_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text)
+        # SFP Mapping (BBU/XMU end vs Radio end, LT/HT grade) — HT-LT is always flagged
+        # regardless of CIQ (a real electrical/compatibility mismatch); both ends are also
+        # separately compared against the CIQ's own declared acceptable grade(s).
+        warnings += mcl.sfp_mapping_warnings(ciq_wb, postcheck_text)
         if edp_index:
             warnings += mcl.verify_port_conversion_against_postcheck(
                 ciq_wb, mm_objs, precheck_text, postcheck_text, edp_index)
