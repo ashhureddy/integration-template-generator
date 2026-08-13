@@ -1133,8 +1133,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     with st.expander("Notes"):
         has_5g = any(app.is_populated(row.get("gNBId")) for row in mm_objs)
 
-        # Final Port Configuration: always included, no longer optional.
-        choices["notes_final_port_config"] = {"checked": True, "text": "Final Port Configuration attached."}
+        # Final Port Configuration — confirmed real gap: hardcoded always-True with no UI
+        # control at all, unlike every other Notes item, which has its own checkbox.
+        final_port_config_checked = st.checkbox("Final Port Configuration attached.", value=True,
+                                                  key="chk_notes_final_port_config")
+        choices["notes_final_port_config"] = {"checked": final_port_config_checked, "text": "Final Port Configuration attached."}
 
         # NR configuration verified: auto-triggers when 5G is present at the site (checked
         # by default, still overridable — same pattern as every other auto-detected item).
@@ -1412,7 +1415,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # actual template text) — they route through the 8-row generic buffer (184-191)
         # alongside the free-text notes, emergency-unlock lines, NGS Pre-Existing notes,
         # and bucket-3 notes, first-come-first-served. Overflow beyond 8 -> Warnings tab. ----
-        row_writes.append((181, True, [(2, "Final Port Configuration attached.")]))
+        row_writes.append((181, final_port_config_checked, [(2, "Final Port Configuration attached.")] if final_port_config_checked else []))
         row_writes.append((182, nr_verified_checked, [(2, "NR configuration has been verified.")] if nr_verified_checked else []))
         row_writes.append((183, n_mme, [(2, f"Pre-Existing MME configuration left as it is on nodes: {mme_nodes}")] if n_mme else []))
 
