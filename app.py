@@ -1222,6 +1222,19 @@ def _idl_cable_columns(ciq_wb, nodes_by_gen, entries, third_col=False):
     return (c, d, e, "") if third_col else (c, d, e)
 
 
+def build_type_idl_slots(build_type_letter):
+    """Confirmed real UI gap: a build type can structurally have NO IDLe entry at all (e.g.
+    Type BB only ever uses IDLy) — that's different from "auto-derivation found nothing but
+    this build type could plausibly need one," and showing a manual IDLe fallback field in
+    the former case is just wrong, not merely unhelpful. Returns (has_idle, has_idly) —
+    whether IDL_CABLE_REFERENCE has ANY entries for that slot, regardless of whether
+    substitution later succeeds."""
+    entry = IDL_CABLE_REFERENCE.get(str(build_type_letter or "").strip().upper())
+    if not entry:
+        return True, True  # unknown build type — can't rule either slot out, so allow both
+    return bool(entry.get("idle")), bool(entry.get("idly"))
+
+
 def idl_cable_columns_for_build_type(ciq_wb, mm_objs, build_type_letter):
     """(C, D, E) column version of idl_cable_lines_for_build_type(), for the .xlsm write —
     see _idl_cable_columns() for the combination rule. Returns (idle_cols, idly_cols),
