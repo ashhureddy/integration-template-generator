@@ -1420,10 +1420,29 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if has_cran_node and cran_base_type:
             switch_ids, cran_entries = app.cran_slot_port_rows(
                 ciq_wb, mm_objs, cran_base_type, is_dash1, mcl.sidehaul_display_rows(ciq_wb))
-            row_writes.append((23, bool(switch_ids), [(3, "|".join(switch_ids))] if switch_ids else []))
-            slot_port_rows_available = [24] + list(range(25, 40))
-            slot_port_items = [f"{e['slot_port']} -> {e['cable']} -> {e['node_display']}" for e in cran_entries]
-            mcl.write_buffer_with_overflow(row_writes, slot_port_rows_available, slot_port_items, col=3)
+            # Confirmed real column mapping (differs from the generic Sidehaul path below):
+            # row 23 Switch ID goes in column D (not C, which is "Switch type" — left blank
+            # here since CRAN's switch type is implicitly always the 6673 DaFi switch). Row
+            # 24 is just the "Slot/Port" section heading — no data written there at all; the
+            # real per-connection data starts at row 25, three separate columns (B=Slot/Port,
+            # C=Cable part number, D=Node ID), not one combined "->" string.
+            row_writes.append((23, bool(switch_ids), [(4, "|".join(switch_ids))] if switch_ids else []))
+            row_writes.append((24, False, []))
+            slot_port_data_rows = list(range(25, 40))
+            n_rows = len(slot_port_data_rows)
+            for i, row_num in enumerate(slot_port_data_rows):
+                if i >= len(cran_entries):
+                    row_writes.append((row_num, False, []))
+                elif i == n_rows - 1 and len(cran_entries) > n_rows:
+                    overflow = cran_entries[i:]
+                    row_writes.append((row_num, True, [
+                        (2, "|".join(e["slot_port"] for e in overflow)),
+                        (3, "|".join(e["cable"] for e in overflow)),
+                        (4, "|".join(e["node_display"] for e in overflow)),
+                    ]))
+                else:
+                    e = cran_entries[i]
+                    row_writes.append((row_num, True, [(2, e["slot_port"]), (3, e["cable"]), (4, e["node_display"])]))
         else:
             sidehaul_rows_data = mcl.sidehaul_display_rows(ciq_wb)
             if sidehaul_rows_data:
