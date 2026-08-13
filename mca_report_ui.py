@@ -778,8 +778,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # dropdown. No default on either — leaving one untouched excludes just that entity. ----
     lkf_nodes = mcl.lkf_node_triggers(new_nodes, board_swaps, precheck_text, mm_objs)
     lkf_controller_needed = mcl.lkf_controller_triggered(controller_id)
+    # Confirmed real rule: if a 6610 controller is present per the CIQ (controller_id) but
+    # no controller-checks document was actually provided (controller_checks_text empty),
+    # there's no way to verify the LKF installation on the controller side at all — this
+    # should auto-go to Pending rather than asking the engineer to pick, same as the
+    # cascade_fires case below forces it. Node-side LKF choices are unaffected either way.
+    lkf_controller_checks_missing = lkf_controller_needed and not controller_checks_text
     lkf_choices = {}
-    lkf_controller_choice = None
+    lkf_controller_choice = "Pending" if lkf_controller_checks_missing else None
     emergency_unlock_notes = []
     if lkf_nodes or lkf_controller_needed:
         with st.container(border=True):
@@ -800,7 +806,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                                         ["\u2014 Select \u2014", "No", "Yes"], key=f"lkf_eu_{node}")
                     if eu == "Yes":
                         emergency_unlock_notes.append(node)
-            if lkf_controller_needed:
+            if lkf_controller_needed and lkf_controller_checks_missing:
+                st.caption(f"{controller_id} (controller) \u2014 auto-set to Pending: no controller-checks document provided")
+            elif lkf_controller_needed:
                 c1, c2 = st.columns([2, 1])
                 with c1:
                     st.caption(f"{controller_id} (controller)")
