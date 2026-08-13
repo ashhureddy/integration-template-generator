@@ -270,6 +270,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _bt_letter = (idl_build_type_final or "").replace("Type ", "").strip()
             auto_idle_lines, auto_idly_lines = app.idl_cable_lines_for_build_type(ciq_wb, mm_objs, _bt_letter) \
                 if _bt_letter else ([], [])
+            _has_idle_slot, _has_idly_slot = app.build_type_idl_slots(_bt_letter) if _bt_letter else (True, True)
             c1, c2 = st.columns(2)
             with c1:
                 if auto_idle_lines:
@@ -277,18 +278,24 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     for l in auto_idle_lines:
                         st.caption(l)
                     idle = "\n".join(auto_idle_lines).strip()
-                else:
+                elif _has_idle_slot:
                     # Confirmed: manual entry only shown as a fallback when nothing could be
                     # auto-derived — not alongside successfully auto-derived content.
                     idle = st.text_area("\U0001F4DD IDLe cable details (manual)", key="nsb_idle", height=60)
+                else:
+                    # Confirmed real gap: this build type structurally has no IDLe entry at
+                    # all (e.g. Type BB is IDLy-only) — no manual fallback belongs here either.
+                    idle = ""
             with c2:
                 if auto_idly_lines:
                     st.caption("Auto-derived (IDLy):")
                     for l in auto_idly_lines:
                         st.caption(l)
                     idly = "\n".join(auto_idly_lines).strip()
-                else:
+                elif _has_idly_slot:
                     idly = st.text_area("\U0001F4DD IDLy cable details (manual)", key="nsb_idly", height=60)
+                else:
+                    idly = ""
             sidehaul_rows = mcl.sidehaul_display_rows(ciq_wb)
             if sidehaul_rows:
                 st.caption("Switch / Slot-Port \u2014 auto-filled from Sidehaul Info:")
