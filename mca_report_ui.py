@@ -351,6 +351,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # disabled and a node genuinely does have it enabled instead. This one is intentionally
     # ungated, used only for the node-detection block further down.
     sau_actually_disabled_on_6610 = (sau_placement == "Pending")
+    # Confirmed real gap: a site can genuinely have no 6610 controller at all (not in the
+    # CIQ), in which case sau_placement is never "Pending" — it's just None, since
+    # sau_connections_placement() is only even called when a controller_id exists. There's
+    # no "6610 SAU" to compare against in that case, so the "SAU disabled on 6610, check
+    # the node instead" framing doesn't apply — but SAU being enabled on a node is still a
+    # real, reportable fact regardless of whether a 6610 exists. Node detection now also
+    # triggers whenever there's simply no controller present.
+    sau_node_detection_applies = sau_actually_disabled_on_6610 or not controller_id
     if testing_section and not cascade_fires:
         for item in results:
             if item["key"] == "alarm_testing":
@@ -1238,7 +1246,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # entry stays available underneath as an override/fallback for whatever the
         # detector doesn't confidently find.
         sau_node_checked, sau_node_text = False, ""
-        if sau_actually_disabled_on_6610:
+        if sau_node_detection_applies:
             auto_sau_nodes = mcl.sau_enabled_nodes(postcheck_text) if postcheck_text else []
             if auto_sau_nodes:
                 auto_sau_str = "|".join(auto_sau_nodes)
