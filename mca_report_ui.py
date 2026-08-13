@@ -1294,7 +1294,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         st.text_area("Report preview", report_text, height=400, key="rpt_preview")
         st.download_button("Download report (.txt)", report_text, file_name=f"{node_tag}_Integration_Report.txt", key="rpt_dl_txt")
 
-        row_writes = mca_glue.build_xlsm_row_writes(results, choices, ROW_MAP)
+        row_writes = mca_glue.build_xlsm_row_writes(results, choices, ROW_MAP, stakeholders=stakeholders)
         row_writes += _ct_row_writes
         row_writes.append((3, True, [(2, "MIC"), (3, market_subject_input), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, sow)]))
         row_writes.append((6, True, [(3, iwm_details)]))
