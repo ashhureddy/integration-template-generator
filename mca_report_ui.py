@@ -543,6 +543,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         warnings += mcl.verify_moved_sectors_against_postcheck(classification, postcheck_text, ciq_wb)
         warnings += mcl.verify_deleted_sectors_against_postcheck(classification, postcheck_text)
         warnings += mcl.verify_retune_against_checks(ciq_wb, retune_events, postcheck_text)
+        # Confirmed real gap: this already-built, more thorough function (dlChannelBandwidth,
+        # earfcndl/earfcnul, sectorCarrierRef->sectorId, ulChannelBandwidth, plus PCI and
+        # tac) was never actually wired into the Warnings tab at all — dead code. Returns
+        # plain strings (not dicts), unlike the other verify_* calls here, so each gets
+        # wrapped to match what the Warnings tab render loop expects (w["text"]).
+        warnings += [{"type": "eutran_param_mismatch", "text": s}
+                     for s in mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)]
         if edp_index:
             warnings += mcl.verify_port_conversion_against_postcheck(
                 ciq_wb, mm_objs, precheck_text, postcheck_text, edp_index)
