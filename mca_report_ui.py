@@ -341,6 +341,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 item["section"] = "completed" if sau_placement == "Completed" else "pending"
                 item["checked_by_default"] = True
     sau_disabled_on_6610 = (sau_placement == "Pending") and not cascade_fires
+    # Confirmed real bug: sau_disabled_on_6610 (above) is deliberately gated on "not
+    # cascade_fires" for ITS purpose (avoiding redundantly re-pushing alarm_testing/
+    # area_test to Pending when the broader cascade already did that) — but the SAU node
+    # auto-detection feature below got accidentally tied to that SAME gated flag, even
+    # though "is SAU actually disabled on the 6610" and "did the unrelated alarm-scripting
+    # cascade fire" are independent facts. If both happen to be true for the same site,
+    # the node detection was silently skipped even though the 6610's SAU genuinely is
+    # disabled and a node genuinely does have it enabled instead. This one is intentionally
+    # ungated, used only for the node-detection block further down.
+    sau_actually_disabled_on_6610 = (sau_placement == "Pending")
     if testing_section and not cascade_fires:
         for item in results:
             if item["key"] == "alarm_testing":
@@ -1228,7 +1238,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # entry stays available underneath as an override/fallback for whatever the
         # detector doesn't confidently find.
         sau_node_checked, sau_node_text = False, ""
-        if sau_disabled_on_6610:
+        if sau_actually_disabled_on_6610:
             auto_sau_nodes = mcl.sau_enabled_nodes(postcheck_text) if postcheck_text else []
             if auto_sau_nodes:
                 auto_sau_str = "|".join(auto_sau_nodes)
