@@ -1361,6 +1361,26 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if not idly_c and idly.strip():
             idly_c = idly
         row_writes.append((20, bool(idle_c), [(3, idle_c), (4, idle_d), (5, idle_e)] if idle_c else []))
+
+        # SUP Connections / XMU Installation (rows 74/75 Completed, 139/140 Pending) —
+        # confirmed real gap: sup_c_lines/xmu_c_lines/sup_p_lines/xmu_p_lines only ever
+        # fed choices["additional_completed"/"additional_pending"]["text"] (the text
+        # report) — never a dedicated .xlsm write, despite ROW_MAP having real dedicated
+        # rows for both. Multiple nodes pipe-join into the single available row, same
+        # overflow convention used elsewhere this session. The "SUP Connections: "/
+        # "XMU Installation: " label prefix is stripped (redundant with the row's own
+        # label column B); any "(MIC PM)" stakeholder tag on Pending lines is preserved.
+        def _strip_item_label(lines, label):
+            return [l[len(label):].strip() for l in lines if l.startswith(label)]
+
+        sup_c_nodes = _strip_item_label(sup_c_lines, "SUP Connections:")
+        xmu_c_nodes = _strip_item_label(xmu_c_lines, "XMU Installation:")
+        sup_p_nodes = _strip_item_label(sup_p_lines, "SUP Connections:")
+        xmu_p_nodes = _strip_item_label(xmu_p_lines, "XMU Installation:")
+        row_writes.append((74, bool(sup_c_nodes), [(3, "|".join(sup_c_nodes))] if sup_c_nodes else []))
+        row_writes.append((75, bool(xmu_c_nodes), [(3, "|".join(xmu_c_nodes))] if xmu_c_nodes else []))
+        row_writes.append((139, bool(sup_p_nodes), [(3, "|".join(sup_p_nodes))] if sup_p_nodes else []))
+        row_writes.append((140, bool(xmu_p_nodes), [(3, "|".join(xmu_p_nodes))] if xmu_p_nodes else []))
         row_writes.append((21, bool(idly_c), [(3, idly_c), (4, idly_d), (5, idly_e), (6, idly_f)] if idly_c else []))
 
         # Switch / Slot-Port (rows 23/24 + overflow rows 25-39). CRAN-styled sites use the
