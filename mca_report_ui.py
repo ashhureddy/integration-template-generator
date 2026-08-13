@@ -285,10 +285,24 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
 
     # ---- 6610 cascade: if a 6610 is present/EDP-published but the controller-checks file
     # doesn't confirm alarm scripting, 4 items move to Pending together, no warning. ----
-    controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
+    # Confirmed real gap: there's no way to indicate a 6610 was already pre-existing
+    # (present in Pre-checks too, not a new addition as part of THIS scope) — there's only
+    # a single controller-checks upload slot, no separate Pre-checks-equivalent for the
+    # controller. Every site with a controller_id + controller-checks data was being
+    # treated as if the 6610 integration/SAU Connections/External alarm Scripting/LKF
+    # Installation (6610 portion) all still needed verifying, even when the controller
+    # genuinely isn't part of this scope at all. Manual override: when checked, all four
+    # are suppressed together, same as if there were no controller present.
+    controller_pre_existing = st.checkbox(
+        "6610 Controller was already integrated pre-existing (present in Pre-checks too \u2014 not part of this scope)",
+        value=False, key="controller_pre_existing") if controller_id else False
+    controller_checks_data = mcl.extract_controller_checks(controller_checks_text) \
+        if (controller_checks_text and not controller_pre_existing) else {}
+    _effective_controller_id = None if controller_pre_existing else controller_id
     cascade_fires = mcl.controller_integration_cascade(
-        bool(controller_in_edp), controller_checks_data, controller_id)
-    sau_placement = mcl.sau_connections_placement(controller_checks_data, controller_id) if controller_id else None
+        bool(controller_in_edp), controller_checks_data, _effective_controller_id) if not controller_pre_existing else False
+    sau_placement = mcl.sau_connections_placement(controller_checks_data, _effective_controller_id) \
+        if _effective_controller_id else None
     testing_section, testing_note, _ = mcl.external_alarm_testing_placement(controller_checks_data) \
         if controller_checks_data else (None, None, None)
 
@@ -333,7 +347,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # tuples — confirmed gap, built this pass. ----
     fdd_lines_fixed = mcl.fdd_renaming_lines(ciq_wb)
 
-    ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type, controller_id, controller_in_edp, testing_section, sau_placement)
+    ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type,
+                      _effective_controller_id, controller_in_edp and not controller_pre_existing, testing_section, sau_placement)
     results = mca_checklist.evaluate_checklist(ctx)
 
     if cascade_fires:
@@ -403,6 +418,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             if item["key"] == "controller_integration":
                 item["checked_by_default"] = False
                 item["result"] = None  # confirmed fix: prevents a stale write leaking into the .xlsm even when unchecked
+    if controller_pre_existing:
+        # Confirmed real gap: controller_integration's own detect() reads from scope_lines
+        # (set at the earlier generate_mca()/format_scope_of_work() stage), not from
+        # ctx["controller_id"] — so clearing _effective_controller_id alone doesn't
+        # suppress it. Explicit suppression needed here too, same reason as the two
+        # existing suppressions above/below.
+        for item in results:
+            if item["key"] == "controller_integration":
+                item["checked_by_default"] = False
+                item["result"] = None
     if fdd_lines_fixed:
         # Suppress the checklist's own FDD Renaming item — it uses report_detect's
         # ungrouped per-cell tuples; the corrected, band-label-grouped version is
@@ -795,7 +820,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # (confirmed — one can be Completed while the other is Pending), so each gets its own
     # dropdown. No default on either — leaving one untouched excludes just that entity. ----
     lkf_nodes = mcl.lkf_node_triggers(new_nodes, board_swaps, precheck_text, mm_objs)
-    lkf_controller_needed = mcl.lkf_controller_triggered(controller_id)
+    lkf_controller_needed = mcl.lkf_controller_triggered(_effective_controller_id)
     # Confirmed real rule: if a 6610 controller is present per the CIQ (controller_id) but
     # no controller-checks document was actually provided (controller_checks_text empty),
     # there's no way to verify the LKF installation on the controller side at all — this
