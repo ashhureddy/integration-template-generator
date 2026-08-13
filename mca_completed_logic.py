@@ -66,20 +66,22 @@ def extract_gps_status(check_text):
     text = _normalize(check_text)
     if not text:
         return out
-    m = re.search(r'GPS Status\nNode Product Designation Product No\. Product Rev\.\n(.*?)(?=\n[A-Z][\w /]*\n|\Z)',
-                  text, re.S)
-    if not m:
-        return out
-    block = m.group(1)
-    # Row shape: "NODE  <product designation, 1-3 space-separated tokens>  <product no>  <rev>"
-    # Confirmed real values: "GRU 05 01", "GPS 02 01", "GPS 03 01", "GRU 04 01" — always
-    # a 2-letter prefix + two 2-digit groups. Product No. always contains a "/" (e.g.
-    # "NCD 901 89/1"); Product Rev. is the final bare token (e.g. "R1D").
+    # Confirmed real gap: multi-node Post-/Pre-checks documents can have a SEPARATE "GPS
+    # Status" table per node section, not one combined table for the whole site — re.search
+    # (single match) only ever found the FIRST one, silently missing every other node's GPS
+    # entry. finditer() now merges every block found.
     row_re = re.compile(
         r'^(\S+) ((?:GPS|GRU) \d{2} \d{2}) (\S+(?: \S+)*?/\S+) (\S+)$', re.M)
-    for m2 in row_re.finditer(block):
-        node, designation, _prodno, _rev = m2.groups()
-        out[node.strip()] = designation.strip()
+    for m in re.finditer(r'GPS Status\nNode Product Designation Product No\. Product Rev\.\n(.*?)(?=\n[A-Z][\w /]*\n|\Z)',
+                          text, re.S):
+        block = m.group(1)
+        # Row shape: "NODE  <product designation, 1-3 space-separated tokens>  <product no>  <rev>"
+        # Confirmed real values: "GRU 05 01", "GPS 02 01", "GPS 03 01", "GRU 04 01" — always
+        # a 2-letter prefix + two 2-digit groups. Product No. always contains a "/" (e.g.
+        # "NCD 901 89/1"); Product Rev. is the final bare token (e.g. "R1D").
+        for m2 in row_re.finditer(block):
+            node, designation, _prodno, _rev = m2.groups()
+            out[node.strip()] = designation.strip()
     return out
 
 
@@ -521,9 +523,12 @@ def classify_radio_swap_placement(precheck_text, postcheck_text, ciq_wb):
     return completed, pending
 
 
-def format_radio_swaps(swap_list, label_prefix="Radio Swap on:"):
+def format_radio_swaps(swap_list, label_prefix="Radio Swap on:", stakeholder=None):
     """Same two-step grouping as the confirmed-mature qx logic: physical radio group first,
-    then merge across sectors sharing an identical (from, to) signature."""
+    then merge across sectors sharing an identical (from, to) signature. Confirmed real gap:
+    this never appended a stakeholder tag at all — every other Pending item type gets a
+    "(Tower Crew)"/"(MIC PM)" suffix (ROW_MAP already declares "Tower Crew" for radio_swap),
+    Radio Swap never did. stakeholder is only meant to be passed for the Pending call."""
     merged = {}
     for r in swap_list:
         sig = (r["from"], r["to"])
@@ -539,7 +544,8 @@ def format_radio_swaps(swap_list, label_prefix="Radio Swap on:"):
         sector_names = sorted(sector_set, key=lambda s: qx.SECTOR_ORDER.index(s) if s in qx.SECTOR_ORDER else 99)
         is_whole = WHOLE_BAND_SET <= sector_set
         sectors_str = " sectors" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
-        lines.append(f"{label_prefix}\t{label_str}{sectors_str}\tFrom:\t{frm}\tTo:\t{to}")
+        stakeholder_str = f" ({stakeholder})" if stakeholder else ""
+        lines.append(f"{label_prefix}\t{label_str}{sectors_str}{stakeholder_str}\tFrom:\t{frm}\tTo:\t{to}")
     return lines
 
 
