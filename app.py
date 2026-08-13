@@ -1182,13 +1182,18 @@ def _idl_cable_node_label(ciq_wb, row):
     return f"{primary}({hw})"
 
 
-def _idl_cable_columns(ciq_wb, nodes_by_gen, entries):
+def _idl_cable_columns(ciq_wb, nodes_by_gen, entries, third_col=False):
     """Confirmed real .xlsm gap: the template has FIXED columns per row (C=Cable P/N,
-    D=1st Node ID, E=2nd Node ID) for IDLe/IDLy — not a place to dump the whole combined
-    text line, and only one row exists (no overflow rows like Integration/Transport SFP
-    have). Multiple cable connections for the same build type get pipe-joined per column
-    (C: part1|part2, D: node1a|node2a, E: node1b|node2b); within a single connection with
-    3+ nodes, D gets the first node and E gets the rest pipe-joined. Returns (C, D, E)."""
+    D=1st Node ID, E=2nd Node ID, [F=3rd Node ID for IDLy only]) -- not a place to dump the
+    whole combined text line, and only one row exists (no overflow rows like
+    Integration/Transport SFP have). Multiple cable connections for the same build type get
+    pipe-joined per column (C: part1|part2, D: node1a|node2a, E: node1b|node2b); within a
+    single connection with more nodes than there are columns, the excess pipe-joins into the
+    LAST available column. third_col=True (IDLy only -- confirmed real template difference:
+    row 21 has a genuine 4th value column F for a 3rd node, row 20/IDLe does not) uses D/E/F
+    directly for a single 3-node connection (e.g. Build Type G's "G3(1)+G3(2)+G3(3)") instead
+    of pipe-joining nodes 2+3 into E. Returns (C, D, E) normally, or (C, D, E, F) when
+    third_col=True."""
     def substitute_nodes(pattern):
         nodes, used = [], {}
         for gen, idx in re.findall(r"(G\d)(?:\((\d+)\))?", pattern):
@@ -1198,6 +1203,14 @@ def _idl_cable_columns(ciq_wb, nodes_by_gen, entries):
             nodes.append(_idl_cable_node_label(ciq_wb, candidates[pos]) if 0 <= pos < len(candidates) else f"{gen} (node not found)")
         return nodes
 
+    if third_col and len(entries) == 1:
+        part, combo = entries[0]
+        nodes = substitute_nodes(combo)
+        if len(nodes) == 3:
+            return part, nodes[0], nodes[1], nodes[2]
+        if len(nodes) > 3:
+            return part, nodes[0], nodes[1], "|".join(nodes[2:])
+
     parts, firsts, rests = [], [], []
     for part, combo in entries:
         nodes = substitute_nodes(combo)
@@ -1205,7 +1218,8 @@ def _idl_cable_columns(ciq_wb, nodes_by_gen, entries):
         firsts.append(nodes[0] if nodes else "")
         if len(nodes) > 1:
             rests.append("|".join(nodes[1:]))
-    return "|".join(parts), "|".join(firsts), "|".join(rests)
+    c, d, e = "|".join(parts), "|".join(firsts), "|".join(rests)
+    return (c, d, e, "") if third_col else (c, d, e)
 
 
 def idl_cable_columns_for_build_type(ciq_wb, mm_objs, build_type_letter):
@@ -1220,7 +1234,7 @@ def idl_cable_columns_for_build_type(ciq_wb, mm_objs, build_type_letter):
         gen = get_node_generation(ciq_wb, row)
         if gen:
             nodes_by_gen.setdefault(gen, []).append(row)
-    return _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idle"]), _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idly"])
+    return _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idle"]), _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idly"], third_col=True)
 
 
 def idl_cable_lines_for_build_type(ciq_wb, mm_objs, build_type_letter):
@@ -1441,7 +1455,7 @@ def cran_idl_cable_columns(ciq_wb, mm_objs, base_build_type):
         gen = get_node_generation(ciq_wb, row)
         if gen:
             nodes_by_gen.setdefault(gen, []).append(row)
-    return _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idle"]), _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idly"])
+    return _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idle"]), _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idly"], third_col=True)
 
 
 def _cran_slot_port_data(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows):
