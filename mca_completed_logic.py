@@ -495,6 +495,367 @@ def verify_moved_sectors_against_postcheck(classification, post_text, ciq_wb=Non
 # Moved Sectors - success = cell NOT present in Post-checks at all)
 # ============================================================
 
+def lte_pci_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text):
+    """Confirmed real rule: PCI verification uses a DIFFERENT baseline depending on the
+    cell's status this scope. Newly added cells already get CIQ-target-vs-Post-actual
+    verification via lte_sector_param_warnings() (unchanged, not duplicated here — this
+    function explicitly skips anything in classification['added']). Pre-existing cells
+    (present before this scope, not moved) and moved cells (present before, relocated to
+    a different node — sometimes with a renamed cell identity, e.g. "_7A_1" becoming
+    "_7A_2", not just a node-prefix swap, per the Sector Del_Movement tab — same
+    rename_map pattern verify_moved_sectors_against_postcheck() already uses) both get
+    PCI verified PRE-checks vs POST-checks instead — the question isn't "did we build it
+    to target," it's "did PCI unexpectedly change for something we didn't touch."
+    cellRange is NOT compared for LTE here (confirmed: no actual/observed cellRange value
+    exists anywhere in Pre- or Post-checks for LTE cells, only a CIQ target — nothing to
+    verify it against). Returns a list of warning dicts."""
+    if not precheck_text or not postcheck_text:
+        return []
+    pre_cells = extract_lte_cell_status(precheck_text)
+    post_cells = extract_lte_cell_status(postcheck_text)
+    if not pre_cells or not post_cells:
+        return []
+
+    added_cells = {c for cells in classification.get("added", {}).values() for c in cells}
+
+    rename_map = {}
+    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
+        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
+            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
+            tgt_node = r.get("Target Node name")
+            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
+                rename_map[src_sector] = tgt_sector
+
+    warnings = []
+    checked_pre_cells = set()
+
+    # Moved cells: Pre (source identity) vs Post (target/renamed identity).
+    for mv in classification.get("moved", []):
+        src_cell = mv["cell"]
+        if src_cell not in pre_cells:
+            continue
+        checked_pre_cells.add(src_cell)
+        tgt_cell = rename_map.get(src_cell, src_cell)
+        if tgt_cell not in post_cells:
+            continue  # absence already flagged by verify_moved_sectors_against_postcheck
+        pre_pci = pre_cells[src_cell].get("PCI")
+        post_pci = post_cells[tgt_cell].get("PCI")
+        if pre_pci and post_pci and pre_pci != post_pci:
+            label, sector = qx.band_label(src_cell)
+            warnings.append({
+                "type": "pci_prepost_mismatch",
+                "text": f"PCI changed on moved sector {label} {sector} ({src_cell} -> {tgt_cell}): "
+                        f"Pre-checks={pre_pci}, Post-checks={post_pci}.",
+            })
+
+    # Pre-existing, unmoved cells: Pre vs Post under the SAME name.
+    for cell, pre_vals in pre_cells.items():
+        if cell in checked_pre_cells or cell in added_cells or cell not in post_cells:
+            continue
+        pre_pci = pre_vals.get("PCI")
+        post_pci = post_cells[cell].get("PCI")
+        if pre_pci and post_pci and pre_pci != post_pci:
+            label, sector = qx.band_label(cell)
+            warnings.append({
+                "type": "pci_prepost_mismatch",
+                "text": f"PCI changed on pre-existing sector {label} {sector} ({cell}): "
+                        f"Pre-checks={pre_pci}, Post-checks={post_pci}.",
+            })
+    return warnings
+
+
+def nr_pci_cellrange_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text):
+    """Same rule as lte_pci_prepost_warnings(), for 5G — but BOTH nRPCI and cellRange are
+    compared here (unlike LTE, where cellRange has no actual/observed value to compare
+    against at all — 5G's Pre-/Post-checks '5G NR Cell DU Status' table genuinely reports
+    both). Returns a list of warning dicts."""
+    if not precheck_text or not postcheck_text:
+        return []
+    pre_cells = extract_5g_cell_du_status(precheck_text)
+    post_cells = extract_5g_cell_du_status(postcheck_text)
+    if not pre_cells or not post_cells:
+        return []
+
+    added_cells = {c for cells in classification.get("added", {}).values() for c in cells}
+
+    rename_map = {}
+    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
+        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
+            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
+            tgt_node = r.get("Target Node name")
+            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
+                rename_map[src_sector] = tgt_sector
+
+    field_labels = [("nRPCI", "nRPCI"), ("cellRange", "cellRange")]
+    warnings = []
+    checked_pre_cells = set()
+
+    for mv in classification.get("moved", []):
+        src_cell = mv["cell"]
+        if src_cell not in pre_cells:
+            continue
+        checked_pre_cells.add(src_cell)
+        tgt_cell = rename_map.get(src_cell, src_cell)
+        if tgt_cell not in post_cells:
+            continue
+        for field, label in field_labels:
+            pre_val = pre_cells[src_cell].get(field)
+            post_val = post_cells[tgt_cell].get(field)
+            if pre_val and post_val and pre_val != post_val:
+                warnings.append({
+                    "type": "nr_prepost_mismatch",
+                    "text": f"{label} changed on moved 5G sector ({src_cell} -> {tgt_cell}): "
+                            f"Pre-checks={pre_val}, Post-checks={post_val}.",
+                })
+
+    for cell, pre_vals in pre_cells.items():
+        if cell in checked_pre_cells or cell in added_cells or cell not in post_cells:
+            continue
+        for field, label in field_labels:
+            pre_val = pre_vals.get(field)
+            post_val = post_cells[cell].get(field)
+            if pre_val and post_val and pre_val != post_val:
+                warnings.append({
+                    "type": "nr_prepost_mismatch",
+                    "text": f"{label} changed on pre-existing 5G sector ({cell}): "
+                            f"Pre-checks={pre_val}, Post-checks={post_val}.",
+                })
+    return warnings
+
+
+def extract_rru_cell_mapping(text):
+    """Parses the real 'RRU Cell Mapping' table (LTE):
+
+        RRU Cell Mapping
+        Cells SC SEF RRU OpState Product Name Serial Conf Power Tx Rx usedTx usedRx availablePower
+        FCL05583_7A_1 1 1 RRU-1 ENABLED Radio 4449 B5 B12A CF88379121 160000 4 4 4 4 400000
+
+    'Product Name' (the radio type) is variable-width (2-4 tokens: "Radio" + model +
+    optional band codes) — confirmed real data. Anchored positionally from the FRONT
+    (Cells/SC/SEF/RRU-N/OpState, 5 fixed tokens) and from the BACK (6 fixed trailing
+    fields: Conf Power/Tx/Rx/usedTx/usedRx/availablePower, with Serial the 7th-from-end)
+    rather than a fixed field count, so the variable-width Product Name in between parses
+    correctly regardless of length. Section-scoped to start right after this table's own
+    header line and stop at the first non-matching line, since '5G Cell to RRU Mapping'
+    uses a near-identical row shape (RRU-N/ENABLED) with a DIFFERENT trailing field count
+    — confirmed real cross-contamination bug when not scoped this way. Locked/inactive
+    cells with no real RRU assignment (a much shorter row shape) are naturally excluded.
+    Returns {cell: {"serial": ..., "radio_type": ...}}."""
+    out = {}
+    in_section = False
+    for line in (text or "").splitlines():
+        if line.strip() == "RRU Cell Mapping":
+            in_section = True
+            continue
+        if not in_section:
+            continue
+        tokens = line.split()
+        if len(tokens) < 4 or not re.match(r"^RRU-\d+$", tokens[3]):
+            if tokens and tokens[0] == "Cells":
+                continue  # header row
+            in_section = False
+            continue
+        if len(tokens) < 5 or tokens[4] not in ("ENABLED", "DISABLED") or len(tokens) < 12:
+            continue
+        cell = tokens[0]
+        serial = tokens[-7]
+        radio_type = " ".join(tokens[5:-7])
+        out[cell] = {"serial": serial, "radio_type": radio_type}
+    return out
+
+
+def extract_5g_rru_cell_mapping(text):
+    """Same table, 5G side ('5G Cell to RRU Mapping'):
+
+        Cells SC SEF RRU OpState Product Name Serial ConfPower txdirection
+        FCWN095583_N005A_1 FCWN095583_N005A_1 1 RRU-1 ENABLED Radio 4449 B5 B12A CF88379121 160000 DL_AND_UL
+
+    Only 3 trailing fields here (Serial/ConfPower/txdirection), not 6 like the LTE table
+    — see extract_rru_cell_mapping()'s docstring for why this must be section-scoped
+    separately rather than sharing one parser. Returns {cell: {"serial": ...,
+    "radio_type": ...}}."""
+    out = {}
+    in_section = False
+    for line in (text or "").splitlines():
+        if line.strip() == "5G Cell to RRU Mapping":
+            in_section = True
+            continue
+        if not in_section:
+            continue
+        tokens = line.split()
+        if len(tokens) < 4 or not re.match(r"^RRU-\d+$", tokens[3]):
+            if tokens and tokens[0] == "Cells":
+                continue
+            in_section = False
+            continue
+        if len(tokens) < 5 or tokens[4] not in ("ENABLED", "DISABLED") or len(tokens) < 9:
+            continue
+        cell = tokens[0]
+        serial = tokens[-3]
+        radio_type = " ".join(tokens[5:-3])
+        out[cell] = {"serial": serial, "radio_type": radio_type}
+    return out
+
+
+def rru_mapping_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text):
+    """RRU Cell Mapping (Serial Number + Radio Type) verification, Pre-checks vs
+    Post-checks, per sector — confirmed real rule: if a sector's radio swap is COMPLETED
+    (per classify_radio_swap_placement — real Post-checks-verified completion, not just
+    the CIQ's intent), a different serial/radio type is EXPECTED, since the physical
+    radio genuinely changed — differences there are ignored. If the swap is PENDING (not
+    yet done) or there's no tracked swap for that sector at all, Pre and Post should
+    match — the physical radio hasn't changed, so any mismatch is a real discrepancy.
+    A radio serves multiple co-located cells at once (same physical unit) — group_key
+    from classify_radio_swaps() already tracks every cell sharing that radio, not just
+    the one cell used to detect the swap, so ALL of them are treated as "completed"
+    together. Moved sectors are resolved through the same Sector Del_Movement rename map
+    verify_moved_sectors_against_postcheck() already uses (Pre source identity vs Post
+    target identity) — and, like a completed swap, a genuinely different radio after a
+    physical move is expected, so moved sectors are never flagged here either."""
+    if not precheck_text or not postcheck_text:
+        return []
+
+    rename_map = {}
+    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
+        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
+            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
+            tgt_node = r.get("Target Node name")
+            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
+                rename_map[src_sector] = tgt_sector
+
+    rs_completed, _ = classify_radio_swap_placement(precheck_text, postcheck_text, ciq_wb)
+    completed_cells = set()
+    for sw in rs_completed:
+        completed_cells.update(sw.get("group_key", ()))
+
+    moved_source_cells = {mv["cell"] for mv in classification.get("moved", [])}
+
+    def _check(pre_map, post_map, tech_label):
+        warnings = []
+        for cell, pre_vals in pre_map.items():
+            if cell in completed_cells or cell in moved_source_cells:
+                continue
+            if cell not in post_map:
+                continue  # a different check's concern (deleted/moved-away)
+            post_vals = post_map[cell]
+            if pre_vals.get("serial") != post_vals.get("serial") or pre_vals.get("radio_type") != post_vals.get("radio_type"):
+                warnings.append({
+                    "type": "rru_mapping_mismatch",
+                    "text": f"{tech_label} RRU mapping changed on {cell} with no completed radio "
+                            f"swap on record: Pre-checks={pre_vals.get('radio_type')} "
+                            f"({pre_vals.get('serial')}), Post-checks={post_vals.get('radio_type')} "
+                            f"({post_vals.get('serial')}).",
+                })
+        return warnings
+
+    warnings = []
+    warnings += _check(extract_rru_cell_mapping(precheck_text), extract_rru_cell_mapping(postcheck_text), "LTE")
+    warnings += _check(extract_5g_rru_cell_mapping(precheck_text), extract_5g_rru_cell_mapping(postcheck_text), "5G")
+    return warnings
+
+
+_SFP_MODEL_MAP = {"47": "SFP3", "65": "SFP7", "75": "SFP28"}
+
+
+def sfp_part_info(part_number):
+    """Given a raw ERICSSONPROD code like 'RDH10247/25', returns (sfp_model, temp_grade),
+    e.g. ('SFP3', 'HT'). Confirmed real reference mapping: RDH102{47,65,75}/{3,25} ->
+    SFP3/SFP7/SFP28 model; the trailing /3 = LT (low temperature), /25 = HT (high
+    temperature) — the model number prefix (47/65/75) identifies which SFP, independent
+    of temperature grade. Returns (None, None) if the part number doesn't match."""
+    if not part_number:
+        return None, None
+    m = re.search(r"(47|65|75)/(3|25)$", str(part_number).strip())
+    if not m:
+        return None, None
+    model_num, temp_code = m.groups()
+    return _SFP_MODEL_MAP.get(model_num), ("LT" if temp_code == "3" else "HT")
+
+
+def extract_sfp_mapping(text):
+    """Parses the real 'SFP Mapping' table:
+
+        SFP Mapping
+        Cells RiL BBU/XMU (S.No) SERIAL1 ERICSSONPROD1 RRU SERIAL2 ERICSSONPROD2
+        FCL05583_3C_1 15 XMU1 (E96A01G119), Port 7 HC210400782612 RDH10247/25 RRU-18, Port D1 HC210400782603 RDH10247/25
+
+    'BBU/XMU (S.No)' and 'RRU' descriptions are variable-width free text with embedded
+    commas — anchored instead on the fact that ERICSSONPROD1/ERICSSONPROD2 always start
+    with "RDH" (confirmed real values), exactly 2 such tokens per row: first is the
+    BBU/XMU end, second is the RRU (radio) end. Section-scoped to this table's own
+    header. Returns {cell: {"bbu_prod": ..., "rru_prod": ...}}."""
+    out = {}
+    in_section = False
+    for line in (text or "").splitlines():
+        if line.strip() == "SFP Mapping":
+            in_section = True
+            continue
+        if not in_section:
+            continue
+        tokens = line.split()
+        if not tokens:
+            continue
+        if tokens[0] == "Cells":
+            continue  # header row
+        rdh_tokens = [t for t in tokens if t.startswith("RDH")]
+        if len(rdh_tokens) != 2:
+            in_section = False  # first non-matching line -> table's done
+            continue
+        cell = tokens[0]
+        out[cell] = {"bbu_prod": rdh_tokens[0], "rru_prod": rdh_tokens[1]}
+    return out
+
+
+def sfp_mapping_warnings(ciq_wb, post_text):
+    """Confirmed real rule: BBU/XMU-end and Radio(RRU)-end SFPs are LT (low temperature)
+    or HT (high temperature) grade, identified from the Ericsson product code via
+    sfp_part_info(). LT-LT, HT-HT, and LT-HT combinations are all valid; HT-LT (BBU/XMU
+    end HT feeding a LT radio end) is always flagged, regardless of what the CIQ
+    declares — a real electrical/compatibility mismatch, not just a deviation from
+    target. Separately, both ends are ALSO compared against the CIQ's own declared
+    acceptable SFP type(s) ('BBU/XMU End SFP'/'Radio End SFP' in eUtran Parameters,
+    "/"-separated when more than one grade is acceptable — same convention already used
+    by lte_sector_param_warnings/fiveg_sector_param_warnings). Returns a list of warning
+    dicts."""
+    warnings = []
+    sfp_data = extract_sfp_mapping(post_text)
+    if not sfp_data or ciq_wb is None or "eUtran Parameters" not in ciq_wb.sheetnames:
+        return warnings
+    ciq_rows = {r.get("EutranCellFDDId"): r for r in qx.sheet_objs(ciq_wb["eUtran Parameters"])
+                if r.get("EutranCellFDDId")}
+
+    for cell, vals in sfp_data.items():
+        bbu_model, bbu_temp = sfp_part_info(vals["bbu_prod"])
+        rru_model, rru_temp = sfp_part_info(vals["rru_prod"])
+        if bbu_temp == "HT" and rru_temp == "LT":
+            warnings.append({
+                "type": "sfp_mapping_invalid_combo",
+                "text": f"Invalid SFP combination on {cell}: BBU/XMU end is HT ({vals['bbu_prod']}) "
+                        f"but Radio end is LT ({vals['rru_prod']}).",
+            })
+
+        ciq_row = ciq_rows.get(cell)
+        if not ciq_row:
+            continue
+
+        def _check_end(ciq_field, model, temp, prod, end_label):
+            ciq_val = str(ciq_row.get(ciq_field, "") or "").strip()
+            if not ciq_val or not model or not temp:
+                return
+            actual_label = f"{model} {temp}"
+            acceptable = [p.strip().upper() for p in ciq_val.split("/")]
+            if actual_label.upper() not in acceptable:
+                warnings.append({
+                    "type": "sfp_mapping_ciq_mismatch",
+                    "text": f"{end_label} SFP mismatch on {cell}: Post-checks={actual_label} "
+                            f"({prod}), CIQ target={ciq_val}.",
+                })
+
+        _check_end("BBU/XMU End SFP", bbu_model, bbu_temp, vals["bbu_prod"], "BBU/XMU end")
+        _check_end("Radio End SFP", rru_model, rru_temp, vals["rru_prod"], "Radio end")
+    return warnings
+
+
 def verify_deleted_sectors_against_postcheck(classification, post_text):
     post_pairs, _ = qx.extract_precheck_sectors(post_text)
     post_cells = {cell for (_node, cell) in post_pairs}
