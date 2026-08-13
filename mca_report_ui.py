@@ -251,7 +251,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     if postcheck_text:
         rs_completed, rs_pending = mcl.classify_radio_swap_placement(precheck_text, postcheck_text, ciq_wb)
         radio_swap_completed_lines = mcl.format_radio_swaps(rs_completed)
-        radio_swap_pending_lines = mcl.format_radio_swaps(rs_pending, label_prefix="Radio Swap on:")
+        radio_swap_pending_lines = mcl.format_radio_swaps(rs_pending, label_prefix="Radio Swap on:", stakeholder="Tower Crew")
 
     # ---- Port Conversion via board swap: NEW completion path, confirmed against real
     # ECL02586 data — a board swap can itself complete the 1G->10G conversion, which the
@@ -366,6 +366,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         for item in results:
             if item["key"] == "controller_integration":
                 item["checked_by_default"] = False
+                item["result"] = None  # confirmed fix: prevents a stale write leaking into the .xlsm even when unchecked
     if fdd_lines_fixed:
         # Suppress the checklist's own FDD Renaming item — it uses report_detect's
         # ungrouped per-cell tuples; the corrected, band-label-grouped version is
@@ -373,12 +374,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         for item in results:
             if item["key"] == "fdd_renaming":
                 item["checked_by_default"] = False
+                item["result"] = None
     # Suppress the checklist's own NGS activation item unconditionally — confirmed change:
     # was auto-Completed with no toggle; now needs a per-pair 3-way choice
     # (Completed/Pending/Pre-Existing), replaced by the custom section below.
     for item in results:
         if item["key"] == "ngs_activation":
             item["checked_by_default"] = False
+            item["result"] = None
     # Suppress the checklist's own DSS Activation item unconditionally — confirmed real
     # gap: it originally had toggle=True (Completed/Pending + AT&T/MIC stakeholder if
     # Pending), but that got silently lost when the UI was simplified to a plain checkbox.
@@ -386,6 +389,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     for item in results:
         if item["key"] == "dss_activation":
             item["checked_by_default"] = False
+            # Confirmed real bug (found this session): even suppressed, this item's OWN
+            # detect() result was still getting its value written into row 59 by the
+            # generic path (checked=False, but the cell text stayed) — and since the
+            # bespoke override further down writes an EMPTY value list whenever Pending
+            # was chosen, it never touches column 3 at all, so that stale "Completed"
+            # value from the generic path silently survived. Clearing result=None here
+            # stops the generic path from ever writing anything for this row.
+            item["result"] = None
     # Suppress the checklist's own LKF Installation item unconditionally — confirmed bug:
     # it was showing alongside the new per-node Completed/Pending dropdown section as a
     # confusing duplicate. The custom section (built this pass) fully replaces it, since it
@@ -394,6 +405,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     for item in results:
         if item["key"] == "lkf_installation":
             item["checked_by_default"] = False
+            item["result"] = None
     # Same confirmed bug found for Transport SFP — never suppressed, only triggered on
     # new_nodes in the old item, so it could show as a duplicate alongside the new
     # multi-trigger (new node/Port Conversion/board swap) section on any site where
@@ -401,16 +413,19 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     for item in results:
         if item["key"] == "transport_sfp":
             item["checked_by_default"] = False
+            item["result"] = None
     # Same confirmed mechanism as NSB/N2E, ported here — MCA's own checklist items for
     # these two ("sup_connections"/"xmu_installation") were plain manual toggles with no
     # auto-detection at all. Suppressed in favor of the auto-detected group built below.
     for item in results:
         if item["key"] in {"sup_connections", "xmu_installation"}:
             item["checked_by_default"] = False
+            item["result"] = None
     # Same fix, same reason: these two never had a working way to actually be selected.
     for item in results:
         if item["key"] in {"ret_configuration", "idl_connections"}:
             item["checked_by_default"] = False
+            item["result"] = None
 
     # ---- SUP / XMU auto-detection — confirmed same mechanism as NSB/N2E, reusing the
     # same shared helpers (nodes_expecting_sup/xmu, _hardware_component_state) rather than
@@ -1415,8 +1430,19 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # structured data, since the exact format is controlled and safe to parse. Uses the
         # CHECKBOX-GATED lines (gps_c_lines, sfp_c_lines, etc.) so unchecking any group
         # correctly excludes it from the .xlsm too, not just the plain-text report. ----
+        # Confirmed real bug: gps_c_lines[:1]/[1:] assumed index 0 was ALWAYS a new-node
+        # "GPS Installation:" line — but when there's no new-node install and only a GPS
+        # UPGRADE ("GPS upgraded from:...") on an existing node, that upgrade line lands at
+        # index 0 instead. It then failed the "Version:" parse (so nothing was written to
+        # the dedicated row) AND was excluded from the buffer (gps_c_lines[1:] skips index
+        # 0) — silently dropped from the .xlsm entirely. Split by actual line prefix instead
+        # of position: install lines can use the one dedicated row (overflow to buffer);
+        # upgrade lines never had a dedicated row at all (confirmed in gps_upgrade_lines'
+        # own docstring) and always belong in the buffer.
+        gps_install_lines = [l for l in gps_c_lines if l.startswith("GPS Installation:")]
+        gps_upgrade_lines_found = [l for l in gps_c_lines if l.startswith("GPS upgraded from:")]
         gps_completed_groups = []
-        for line in gps_c_lines[:1]:  # only the first (dedicated-row) group belongs here
+        for line in gps_install_lines[:1]:  # only the first (dedicated-row) group belongs here
             if "Version:" in line:
                 nodes_part, ver_part = line.split("Version:", 1)
                 nodes = nodes_part.replace("GPS Installation:", "").strip().split("|")
@@ -1470,8 +1496,13 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # rows) — NOT the full lists, since those already go to their own dedicated rows via
         # build_new_xlsm_row_writes below; including them again here would double-count the
         # same content in two places.
-        buffer_completed_lines = gps_c_lines[1:] + sfp_c_lines[3:] + rs_c_display[3:]
-        buffer_pending_lines = gps_p_lines[1:] + sfp_p_lines[4:] + rs_p_display[3:]
+        buffer_completed_lines = gps_install_lines[1:] + gps_upgrade_lines_found + sfp_c_lines[3:] + rs_c_display[3:]
+        # Confirmed real gap: bucket_pending (locked-alarm-port classification going to
+        # Pending) only ever reached choices["additional_pending"]["text"] — used for the
+        # text report, but NEVER read by the .xlsm write, which pulls from this narrower
+        # buffer_pending_lines instead. Added here explicitly, same pattern already used
+        # correctly for bucket_pre_existing just below.
+        buffer_pending_lines = gps_p_lines[1:] + sfp_p_lines[4:] + rs_p_display[3:] + bucket_pending
         buffer_pre_existing_lines = sfp_pre_existing_extra + bucket_pre_existing
 
         new_rw = mcl.build_new_xlsm_row_writes(
