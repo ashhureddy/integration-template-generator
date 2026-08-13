@@ -550,6 +550,21 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # wrapped to match what the Warnings tab render loop expects (w["text"]).
         warnings += [{"type": "eutran_param_mismatch", "text": s}
                      for s in mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)]
+        # Same confirmed gap, same fix, for 5G — already covers cellLocalId (checked
+        # independently against BOTH the CU and DU status tables), cellRange, nRPCI,
+        # arfcnDL/UL, bandwidths, configuredMaxTxPower, ssbFrequency, and nrTAC, all
+        # against the CIQ target. Never wired in either.
+        warnings += [{"type": "nr_param_mismatch", "text": s}
+                     for s in mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)]
+        # PCI (LTE) / nRPCI+cellRange (5G) Pre-checks-vs-Post-checks verification for
+        # pre-existing and moved sectors — confirmed real rule: newly added sectors already
+        # get CIQ-target-vs-Post-actual verification above (unchanged); pre-existing and
+        # moved sectors instead get checked against what they actually were in Pre-checks,
+        # since the question there isn't "was it built to target," it's "did this value
+        # unexpectedly change for something this scope didn't touch."
+        if precheck_text:
+            warnings += mcl.lte_pci_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text)
+            warnings += mcl.nr_pci_cellrange_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text)
         if edp_index:
             warnings += mcl.verify_port_conversion_against_postcheck(
                 ciq_wb, mm_objs, precheck_text, postcheck_text, edp_index)
