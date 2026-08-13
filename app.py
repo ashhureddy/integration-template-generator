@@ -606,27 +606,15 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
         retune_seen.add(sig)
         lines.append(f"Retune on:\t{r['label']}\tFrom:\t{r['from']}\tTo:\t{r['to']}")
 
-    # Group by the actual swap SIGNATURE (From -> To), not by physical co-location. Co-located
-    # bands (e.g. PCS_1 and AWS_1 sharing one antenna group) can have genuinely different radio
-    # compositions (e.g. PCS_1 alone has a daisy-chained secondary radio) — blending them by
-    # co-location silently combined unrelated radio tokens. Only bands that share the identical
-    # From/To signature get combined into one bracketed line; sectors merge the same way.
-    merged = {}
-    for r in (radio_swaps or []):
-        sig = (r["from"], r["to"])
-        merged.setdefault(sig, {"labels": set(), "sectors": set()})
-        merged[sig]["labels"].add(r["label"])
-        merged[sig]["sectors"].add(r["sector"])
-
-    for (from_radio, to_radio), grp in merged.items():
-        labels = tuple(sorted(grp["labels"]))
-        sector_set = grp["sectors"]
-
-        label_str = labels[0] if len(labels) == 1 else f"[{'|'.join(labels)}]"
-        sector_names = sorted(sector_set, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
-        is_whole = WHOLE_BAND_SET <= sector_set
-        sectors_str = " sectors" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
-        lines.append(f"Radio Swap on:\t{label_str}{sectors_str}\tFrom:\t{from_radio}\tTo:\t{to_radio}")
+    # Confirmed real bug found this session: "Radio Swap on:" generation used to live here
+    # too — a flat, undifferentiated list with no Completed/Pending distinction and no
+    # stakeholder concept at all. It's fully superseded by classify_radio_swap_placement()
+    # + format_radio_swaps() in mca_completed_logic.py (real Post-checks-driven placement,
+    # correct stakeholder tagging on Pending only) — mca_report_ui.py already stripped this
+    # old version's lines back out of scope_lines before ever reaching the checklist, but
+    # that stripping happened too late to stop it from leaking into any earlier-stage
+    # output built directly from this function's own return value. Removed at the source
+    # instead of relying on a later filter to catch it.
 
     if dss_outputs_meta:
         lines.append(f"DSS Activation:\t{' & '.join(dss_outputs_meta)}")
