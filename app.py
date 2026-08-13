@@ -1182,6 +1182,47 @@ def _idl_cable_node_label(ciq_wb, row):
     return f"{primary}({hw})"
 
 
+def _idl_cable_columns(ciq_wb, nodes_by_gen, entries):
+    """Confirmed real .xlsm gap: the template has FIXED columns per row (C=Cable P/N,
+    D=1st Node ID, E=2nd Node ID) for IDLe/IDLy — not a place to dump the whole combined
+    text line, and only one row exists (no overflow rows like Integration/Transport SFP
+    have). Multiple cable connections for the same build type get pipe-joined per column
+    (C: part1|part2, D: node1a|node2a, E: node1b|node2b); within a single connection with
+    3+ nodes, D gets the first node and E gets the rest pipe-joined. Returns (C, D, E)."""
+    def substitute_nodes(pattern):
+        nodes, used = [], {}
+        for gen, idx in re.findall(r"(G\d)(?:\((\d+)\))?", pattern):
+            candidates = nodes_by_gen.get(gen, [])
+            pos = (int(idx) - 1) if idx else used.get(gen, 0)
+            used[gen] = used.get(gen, 0) + 1
+            nodes.append(_idl_cable_node_label(ciq_wb, candidates[pos]) if 0 <= pos < len(candidates) else f"{gen} (node not found)")
+        return nodes
+
+    parts, firsts, rests = [], [], []
+    for part, combo in entries:
+        nodes = substitute_nodes(combo)
+        parts.append(part)
+        firsts.append(nodes[0] if nodes else "")
+        if len(nodes) > 1:
+            rests.append("|".join(nodes[1:]))
+    return "|".join(parts), "|".join(firsts), "|".join(rests)
+
+
+def idl_cable_columns_for_build_type(ciq_wb, mm_objs, build_type_letter):
+    """(C, D, E) column version of idl_cable_lines_for_build_type(), for the .xlsm write —
+    see _idl_cable_columns() for the combination rule. Returns (idle_cols, idly_cols),
+    each an (C, D, E) tuple."""
+    entry = IDL_CABLE_REFERENCE.get(str(build_type_letter or "").strip().upper())
+    if not entry:
+        return ("", "", ""), ("", "", "")
+    nodes_by_gen = {}
+    for row in mm_objs:
+        gen = get_node_generation(ciq_wb, row)
+        if gen:
+            nodes_by_gen.setdefault(gen, []).append(row)
+    return _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idle"]), _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idly"])
+
+
 def idl_cable_lines_for_build_type(ciq_wb, mm_objs, build_type_letter):
     """Confirmed rule: match nodes to each combination pattern's generation slots using
     get_node_generation() — same mapping already used for Build Type detection — then
@@ -1386,16 +1427,27 @@ def cran_idl_cable_lines(ciq_wb, mm_objs, base_build_type):
     return idle_lines, idly_lines
 
 
-def cran_slot_port_lines(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows):
-    """Builds the Switch + Slot/Port report lines for a CRAN site. Each non-hub node gets its
-    own line only if CRAN_SLOT_CABLE_REFERENCE has an entry for its (generation, position)
-    slot — nodes without one (e.g. an SMBB node reached only via IDL) are skipped here, since
-    they're already covered by cran_idl_cable_lines(). The hub always gets its own line, using
-    CRAN_HUB_CABLE_REFERENCE keyed by the "-1" variant. sidehaul_rows: the CIQ's Sidehaul Info,
-    already extracted by the caller (mca_completed_logic.extract_sidehaul_info — that function
-    lives there, not in this module, so it's passed in rather than called from here) — matched
-    to each node by its own node_id ("Basebands" column), not re-derived. Returns
-    (switch_lines, slot_port_lines)."""
+def cran_idl_cable_columns(ciq_wb, mm_objs, base_build_type):
+    """(C, D, E) column version of cran_idl_cable_lines(), for the .xlsm write — see
+    _idl_cable_columns() for the combination rule. Returns (idle_cols, idly_cols)."""
+    entry = CRAN_IDL_CABLE_REFERENCE.get(base_build_type)
+    if not entry:
+        return ("", "", ""), ("", "", "")
+    nodes_by_gen = {}
+    for row in mm_objs:
+        name = row.get("Node to be built as")
+        if str(name or "").strip().upper().endswith("F"):
+            continue
+        gen = get_node_generation(ciq_wb, row)
+        if gen:
+            nodes_by_gen.setdefault(gen, []).append(row)
+    return _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idle"]), _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idly"])
+
+
+def _cran_slot_port_data(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows):
+    """Shared matching logic for cran_slot_port_lines() (display text) and
+    cran_slot_port_rows() (structured, for .xlsm columns) — returns
+    (switch_ids, [{"slot_port", "cable", "node_display"}, ...])."""
     sidehaul_by_node = {str(r["node_id"]).strip().upper(): r for r in sidehaul_rows if r.get("node_id")}
 
     hub_row = None
@@ -1410,9 +1462,6 @@ def cran_slot_port_lines(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_ro
             nodes_by_gen.setdefault(gen, []).append(row)
 
     switch_ids = sorted({str(r["switch_id"]) for r in sidehaul_rows if r.get("switch_id")})
-    switch_lines = [f"Switch : {sid}" for sid in switch_ids]
-
-    slot_port_lines = []
 
     def sidehaul_match(row):
         primary = str(row.get("Node to be built as") or "").strip().upper()
@@ -1423,6 +1472,7 @@ def cran_slot_port_lines(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_ro
                 return sidehaul_by_node[key]
         return None
 
+    entries = []
     for gen, rows in nodes_by_gen.items():
         for idx, row in enumerate(rows, start=1):
             cable = CRAN_SLOT_CABLE_REFERENCE.get(base_build_type, {}).get((gen, idx))
@@ -1432,19 +1482,37 @@ def cran_slot_port_lines(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_ro
             sh = sidehaul_match(row)
             slot_port = sh["slot_port"] if sh else "Slot/Port not found in Sidehaul Info"
             node_display = _idl_cable_node_label(ciq_wb, row)
-            # Strip the trailing "(hw)" tag here — confirmed format for this line uses (P)/(S)
+            # Strip the trailing "(hw)" tag — confirmed format for this line uses (P)/(S)
             # only, hardware isn't shown (unlike the IDLe/IDLy line, which always includes it).
             node_display = re.sub(r"\([^()]*\)$", "", node_display).rstrip()
-            slot_port_lines.append(f"{slot_port} -> {cable} -> {node_display}")
+            entries.append({"slot_port": slot_port, "cable": cable, "node_display": node_display})
 
     if hub_row:
         hub_cable = CRAN_HUB_CABLE_REFERENCE.get((base_build_type, bool(is_dash1)))
         hub_cable = re.sub(r"\s+", " ", hub_cable).strip() if hub_cable else hub_cable
         sh = sidehaul_match(hub_row)
         slot_port = sh["slot_port"] if sh else "Slot/Port not found in Sidehaul Info"
-        slot_port_lines.append(f"{slot_port} -> {hub_cable} -> {hub_row.get('Node to be built as')}")
+        entries.append({"slot_port": slot_port, "cable": hub_cable, "node_display": hub_row.get("Node to be built as")})
 
+    return switch_ids, entries
+
+
+def cran_slot_port_lines(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows):
+    """Builds the Switch + Slot/Port report DISPLAY lines for a CRAN site — for the report
+    text / on-screen caption. See _cran_slot_port_data() for the matching rule. Returns
+    (switch_lines, slot_port_lines)."""
+    switch_ids, entries = _cran_slot_port_data(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows)
+    switch_lines = [f"Switch : {sid}" for sid in switch_ids]
+    slot_port_lines = [f"{e['slot_port']} -> {e['cable']} -> {e['node_display']}" for e in entries]
     return switch_lines, slot_port_lines
+
+
+def cran_slot_port_rows(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows):
+    """Structured version of cran_slot_port_lines(), for the .xlsm write — the template has
+    real Slot/Port and Cable P/N columns (rows 23/24, then overflow rows 25-39), not a place
+    to dump pre-formatted "->" display strings. Returns (switch_ids, [{"slot_port", "cable",
+    "node_display"}, ...])."""
+    return _cran_slot_port_data(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows)
 
 
 MCA_CRAN_IDL_REGISTRY = {
