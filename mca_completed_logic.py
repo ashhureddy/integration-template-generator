@@ -259,9 +259,15 @@ def extract_controller_checks(text):
     # confused operationalState (a static circuit-enable flag — ALWAYS "ENABLED" whether
     # or not there's a real fault, confirmed by inspecting the raw data) for it. That's
     # why every scripted port was being reported as "active" regardless of its real state.
+    # Confirmed real bug: the slogan character class didn't allow hyphens, so any slogan
+    # containing one (e.g. real data: "RBS -48V DC RECT MJ") failed the WHOLE port's match
+    # entirely — not just the slogan capture — silently dropping that port from
+    # alarm_ports altogether (confirmed: AlarmPort=10/11 in real data, both with "-48V" in
+    # their slogan, were never even reaching the alarm_ports list, hence port 10 never
+    # being recognized as LOCKED despite the raw text clearly showing "0 (LOCKED)").
     port_re = re.compile(
         r'FieldReplaceableUnit=SAU,AlarmPort=(\d+)\s+(true|false)\s+\d+\s+\((\w+)\)\s*'
-        r'([A-Z][A-Z0-9 +]*?)?\s*(true|false)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)')
+        r'([A-Z][A-Z0-9 +\-]*?)?\s*(true|false)\s+\d+\s+\((\w+)\)\s+\d+\s+\((\w+)\)')
     for m3 in port_re.finditer(text):
         port, active, admin, slogan, _normally_open, oper, severity = m3.groups()
         slogan = slogan.strip() if slogan and slogan.strip() else None
