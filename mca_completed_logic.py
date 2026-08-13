@@ -1969,7 +1969,7 @@ def sa_conversion_amf_warning(post_text, sa_conversion_nodes_list):
 # ============================================================
 
 _LTE_CELL_ROW_RE = re.compile(
-    r'(\S+) (LOCKED|UNLOCKED) (?:\d+ \S+ )?(BARRED|UNBARRED) (\d+) (\d+) (\d+) '
+    r'(\S+) (LOCKED|UNLOCKED) (?:\d+ \S+ )?(BARRED|UNBARRED|NOT_BARRED) (\d+) (\d+) (\d+) '
     r'(ENABLED|DISABLED) (\d+) (true|false) (\S+) (\d+) (\d+)')
 
 
