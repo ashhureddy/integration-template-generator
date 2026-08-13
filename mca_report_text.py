@@ -120,7 +120,7 @@ def build_mca_report_text(mm_objs, checklist_results, choices, header_fields, st
     lines.append("Notes:")
     for note_key in ("notes_final_port_config", "notes_nr_verified", "notes_cpri_sfp",
                      "notes_no_external_alarms", "notes_mme_config", "notes_monitored", "notes_not_monitored",
-                     "notes_ctrl_monitored", "notes_testing"):
+                     "notes_ctrl_monitored", "notes_testing", "notes_sau_enabled"):
         if choices.get(note_key, {}).get("checked"):
             text = choices[note_key].get("text", "")
             lines.append(text)
