@@ -1355,6 +1355,23 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         st.text_area("Report preview", report_text, height=400, key="rpt_preview")
         st.download_button("Download report (.txt)", report_text, file_name=f"{node_tag}_Integration_Report.txt", key="rpt_dl_txt")
 
+        # Confirmed real fix: a multi-row checklist item's overflow (beyond its own
+        # reserved rows) was being pipe-joined into its LAST reserved row — but a shared
+        # overflow buffer (rows 81-91, additional_completed) already exists for exactly
+        # this, with its OWN further "|"-onto-last-line handling if IT also fills up.
+        # Route true overflow there instead of double-combining into the item's own last
+        # row. Only applied to moved_sectors for now (the reported case) — truncating
+        # AFTER report_text is already built, so the text report still shows every
+        # instance individually; only the .xlsm write is affected.
+        _ms_overflow_lines = []
+        _moved_sectors_item = next((r for r in results if r["key"] == "moved_sectors"), None)
+        if _moved_sectors_item and _moved_sectors_item.get("result", {}).get("lines"):
+            _ms_lines = _moved_sectors_item["result"]["lines"]
+            _ms_dedicated_rows = len((ROW_MAP.get("moved_sectors") or {}).get("completed") or [])
+            if len(_ms_lines) > _ms_dedicated_rows:
+                _ms_overflow_lines = _ms_lines[_ms_dedicated_rows:]
+                _moved_sectors_item["result"] = dict(_moved_sectors_item["result"], lines=_ms_lines[:_ms_dedicated_rows])
+
         row_writes = mca_glue.build_xlsm_row_writes(results, choices, ROW_MAP, stakeholders=stakeholders)
         row_writes += _ct_row_writes
         row_writes.append((3, True, [(2, "MIC"), (3, market_subject_input), (4, status), (5, site_name), (6, fa_code), (7, site_ids), (8, sow)]))
@@ -1610,7 +1627,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # for the text report, never the .xlsm buffer computed here.
         # Confirmed real gap #2: bucket_pending (locked-alarm-port -> Pending) had the same
         # problem — only reached the text report, never this buffer.
+        # moved_sectors' true overflow (beyond its 3 dedicated rows) — see above where
+        # _ms_overflow_lines is captured, right before build_xlsm_row_writes truncated it.
         buffer_completed_lines = gps_install_lines[1:] + gps_upgrade_lines_found + sfp_c_lines[3:] + rs_c_display[3:] \
+            + [_humanize_scope_line(l) for l in _ms_overflow_lines] \
             + ([additional_completed.strip()] if additional_completed.strip() else [])
         buffer_pending_lines = gps_p_lines[1:] + sfp_p_lines[4:] + rs_p_display[3:] + bucket_pending \
             + ([additional_pending.strip()] if additional_pending.strip() else [])
