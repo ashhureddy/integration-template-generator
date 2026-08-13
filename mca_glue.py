@@ -129,10 +129,30 @@ def _combine_overflow_lines(lines):
     return combined
 
 
-def build_xlsm_row_writes(checklist_results, choices, row_map):
+def _apply_stakeholder(col_value_pairs, stakeholder):
+    """Appends ' (stakeholder)' to the FIRST value column — matching the exact same tag
+    build_mca_report_text already applies to the text report line for this item, so the
+    .xlsm write stops silently diverging from the report it's meant to mirror. Confirmed
+    real gap: the raw scope_line text this function reads was never tagged with a
+    stakeholder at the source — only build_mca_report_text's separate rendering step
+    added it, so every generic Pending item with a declared stakeholder (retune, FDD
+    renaming, controller integration, port conversion, NGS activation, alarm scripting/
+    testing, 6673 script load, SAU connections, etc.) silently wrote untagged text into
+    the .xlsm."""
+    if not stakeholder or not col_value_pairs:
+        return col_value_pairs
+    col, val = col_value_pairs[0]
+    if val:
+        col_value_pairs = [(col, f"{val} ({stakeholder})")] + list(col_value_pairs[1:])
+    return col_value_pairs
+
+
+def build_xlsm_row_writes(checklist_results, choices, row_map, stakeholders=None):
     """checklist_results: output of evaluate_checklist(). choices: dict of item key ->
     {"section": "completed"|"pending", "checked": bool, "manual_extra": [...]} — the engineer's
     actual choices from the UI (defaults to checked_by_default / item['section'] if not present).
+    stakeholders: item key -> resolved stakeholder string (same dict already built for
+    build_mca_report_text's stakeholder_by_key) — applied to Pending items' first value column.
     Returns the row_writes list ready for fill_legacy_mca()."""
     row_writes = []
     for item in checklist_results:
@@ -143,6 +163,7 @@ def build_xlsm_row_writes(checklist_results, choices, row_map):
         checked = choice.get("checked", item["checked_by_default"])
         section = choice.get("section", item["section"])
         manual_extra = choice.get("manual_extra", [])
+        stakeholder = (stakeholders or {}).get(key) if section == "pending" else None
 
         mapping = row_map[key]
         target_rows = mapping.get(section) if isinstance(mapping, dict) else None
@@ -165,7 +186,8 @@ def build_xlsm_row_writes(checklist_results, choices, row_map):
                         rest_cols = cols[1:]
                         if len(vals) > len(rest_cols) and rest_cols:
                             vals = vals[:len(rest_cols) - 1] + [" & ".join(vals[len(rest_cols) - 1:])]
-                        row_writes.append((row_num, checked, [(cols[0], node)] + list(zip(rest_cols, vals))))
+                        pairs = _apply_stakeholder([(cols[0], node)] + list(zip(rest_cols, vals)), stakeholder)
+                        row_writes.append((row_num, checked, pairs))
                     else:
                         row_writes.append((row_num, False, []))
             else:
@@ -175,7 +197,8 @@ def build_xlsm_row_writes(checklist_results, choices, row_map):
                 first_node = nodes[0]
                 first_vals = [v for v in per_node_values[first_node] if v]
                 node_display = first_node if len(nodes) == 1 else f"{first_node} (+{len(nodes)-1} more \u2014 see report)"
-                row_writes.append((target_rows[0], checked, [(cols[0], node_display)] + list(zip(cols[1:], first_vals))))
+                pairs = _apply_stakeholder([(cols[0], node_display)] + list(zip(cols[1:], first_vals)), stakeholder)
+                row_writes.append((target_rows[0], checked, pairs))
             continue
 
         values = _result_to_column_values(key, item.get("result"), manual_extra)
@@ -198,12 +221,12 @@ def build_xlsm_row_writes(checklist_results, choices, row_map):
                     row_writes.append((row_num, False, []))
                 elif i == n_rows - 1 and len(instances) > n_rows:
                     overflow_values = _combine_overflow_lines(instances[i:])
-                    row_writes.append((row_num, checked, list(zip(cols, overflow_values))))
+                    row_writes.append((row_num, checked, _apply_stakeholder(list(zip(cols, overflow_values)), stakeholder)))
                 else:
                     row_values = _line_to_column_values(instances[i])
-                    row_writes.append((row_num, checked, list(zip(cols, row_values))))
+                    row_writes.append((row_num, checked, _apply_stakeholder(list(zip(cols, row_values)), stakeholder)))
         else:
-            row_writes.append((target_rows[0], checked, col_value_pairs))
+            row_writes.append((target_rows[0], checked, _apply_stakeholder(col_value_pairs, stakeholder)))
             for extra_row in target_rows[1:]:
                 row_writes.append((extra_row, False, []))
 
