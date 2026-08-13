@@ -289,22 +289,35 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # (present in Pre-checks too, not a new addition as part of THIS scope) — there's only
     # a single controller-checks upload slot, no separate Pre-checks-equivalent for the
     # controller. Every site with a controller_id + controller-checks data was being
-    # treated as if the 6610 integration/SAU Connections/External alarm Scripting/LKF
-    # Installation (6610 portion) all still needed verifying, even when the controller
-    # genuinely isn't part of this scope at all. Manual override: when checked, all four
-    # are suppressed together, same as if there were no controller present.
+    # treated as if the 6610 integration/External alarm Scripting/LKF Installation (6610
+    # portion) all still needed verifying as NEW work, even when the controller genuinely
+    # isn't part of this scope at all.
     controller_pre_existing = st.checkbox(
         "6610 Controller was already integrated pre-existing (present in Pre-checks too \u2014 not part of this scope)",
         value=False, key="controller_pre_existing") if controller_id else False
-    controller_checks_data = mcl.extract_controller_checks(controller_checks_text) \
-        if (controller_checks_text and not controller_pre_existing) else {}
+    # Confirmed real correction: controller_checks_data is ALWAYS extracted from the real
+    # document regardless of controller_pre_existing — locked alarm ports, SAU state, and
+    # external alarm testing status are OBSERVATIONS about the site's actual current
+    # condition, not "did we do new integration work" questions, so they must keep
+    # reflecting reality even for a pre-existing controller. An earlier version of this
+    # fix wrongly zeroed this out entirely, which silently broke locked-port/SAU-state
+    # reporting too — not just the intended 4 "new work" triggers.
+    controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
+    # Only the "is NEW controller-integration work needed" decision gets suppressed —
+    # Controller Integration / Alarm Scripting on / LKF (6610 portion) are all about doing
+    # NEW work on the controller, none of which applies when it predates this scope.
     _effective_controller_id = None if controller_pre_existing else controller_id
     cascade_fires = mcl.controller_integration_cascade(
-        bool(controller_in_edp), controller_checks_data, _effective_controller_id) if not controller_pre_existing else False
-    sau_placement = mcl.sau_connections_placement(controller_checks_data, _effective_controller_id) \
-        if _effective_controller_id else None
+        bool(controller_in_edp), controller_checks_data, controller_id) if not controller_pre_existing else False
+    # SAU Connections placement stays computed from the real data regardless of
+    # controller_pre_existing — confirmed: locked alarm ports / SAU disabled are real
+    # observations about the site's current condition, not "did we do new work" questions.
+    # External alarm TESTING status, unlike SAU, is itself a verification step tied to
+    # doing new integration work on the controller — confirmed also not required for a
+    # pre-existing controller, so it's suppressed the same way as the cascade above.
+    sau_placement = mcl.sau_connections_placement(controller_checks_data, controller_id) if controller_id else None
     testing_section, testing_note, _ = mcl.external_alarm_testing_placement(controller_checks_data) \
-        if controller_checks_data else (None, None, None)
+        if (controller_checks_data and not controller_pre_existing) else (None, None, None)
 
     # ---- GPS: Installation (new nodes, grouped by Post-checks type), Upgrade (existing
     # nodes, type changed), and the two site-health checks — all fully automatic now that
