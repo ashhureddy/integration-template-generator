@@ -72,12 +72,23 @@ def _humanize_scope_line(raw_line):
     tab->sentence conversion) — but displaying/injecting them directly here (via
     _checked_group, not the normal per-item mechanism) would show literal tab characters
     instead of a clean sentence. Same conversion algorithm as mca_report_text.py, applied
-    explicitly since this bypasses that normal path."""
+    explicitly since this bypasses that normal path.
+
+    Confirmed real formatting rule: a stakeholder tag "(...)" embedded in the label/
+    sectors field (needed there so the .xlsm column write — which reads that same raw
+    field directly — carries it too) should appear at the very END of the humanized
+    report-text line, after the period, not buried in the middle before "From:"."""
     parts = [p.strip() for p in raw_line.split("\t") if p.strip()]
     if len(parts) <= 1:
         return raw_line
+    trailing_tag = ""
+    if len(parts) > 1:
+        m = re.search(r"\s*(\([^()]+\))\s*$", parts[1])
+        if m:
+            trailing_tag = " " + m.group(1)
+            parts[1] = parts[1][:m.start()].rstrip()
     rest = " ".join(parts[1:])
-    return f"{parts[0]} {rest}.".replace("  ", " ")
+    return f"{parts[0]} {rest}.{trailing_tag}".replace("  ", " ")
 
 
 def _checked_group(label, lines, key):
