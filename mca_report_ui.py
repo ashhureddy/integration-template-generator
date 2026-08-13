@@ -1176,11 +1176,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             testing_note_checked = False
         choices["notes_testing"] = {"checked": testing_note_checked, "text": testing_note or ""}
 
-        cpri_choice = "\u2014 Select \u2014"
-        if new_nodes:
-            st.markdown(f"**Area prechecks verification for CPRI/SFP check** \u2014 {len(new_nodes)} new node(s)")
-            cpri_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
-                                         key="cpri_sfp_status", label_visibility="collapsed")
+        # Confirmed real gap: this was gated behind "if new_nodes:", meaning the CPRI/SFP
+        # status dropdown never even appeared at all on a site with no new nodes — no way
+        # to select it, so the note could never reach either the report or the .xlsm.
+        # Always available now, same as the other general Notes items (e.g. "No scope of
+        # external alarms" below, which has no gating condition either).
+        st.markdown("**Area prechecks verification for CPRI/SFP check**")
+        cpri_choice = st.selectbox("Status", ["\u2014 Select \u2014", "Completed", "Pending"],
+                                     key="cpri_sfp_status", label_visibility="collapsed")
         cpri_text = ("Area prechecks verification for CPRI/SFP check is completed." if cpri_choice == "Completed"
                      else "Area prechecks verification for CPRI/SFP check is pending(Node is not replicating in tool)."
                      if cpri_choice == "Pending" else "")
