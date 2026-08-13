@@ -560,6 +560,14 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
     ctrl_rows = [r for r in controller_objs if str(r.get("Controller", "")).strip() == "6610"]
     for r in ctrl_rows:
         ctrl_id = r.get('Controller ID')
+        # Confirmed real bug: this loop iterates EVERY row matching Controller=="6610" — if
+        # controller_objs has more than one such row (e.g. a duplicate/blank leftover row
+        # alongside the real one), a "6610 Controller Integration:" line with no ID at all
+        # got generated for each blank row too, producing "6610 Controller Integration: ."
+        # in the report. _get_controller_id() (used for the report header) sidesteps this
+        # by only ever reading the first matching row — skip blank rows here too instead.
+        if not ctrl_id or not str(ctrl_id).strip():
+            continue
         if controller_edp_found is not None and controller_edp_found.get(ctrl_id) is False:
             lines.append(f"EDP is not published for the controller — {ctrl_id}")
         else:
