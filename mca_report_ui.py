@@ -532,6 +532,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     idle = idly = switch = slot_port = ""
     idl_build_type_final = idl_build_type
     has_cran_node = any(str(row.get("Node to be built as", "")).strip().upper().endswith("F") for row in mm_objs)
+    cran_base_type, is_dash1 = None, False  # persisted for the .xlsm write section, below
     if len(mm_objs) > 1:
         with st.container(border=True):
             # Confirmed same as NSB/N2E: IDL connections status is a real user choice
@@ -1294,42 +1295,63 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         row_writes.append((16, bool(gs_version.strip()), [(3, gs_version)] if gs_version.strip() else []))
         row_writes.append((19, bool(idl_build_type_final), [(3, idl_build_type_final)] if idl_build_type_final else []))
 
-        # IDLe / IDLy (rows 20/21) — same confirmed bug: never written before this fix, so
-        # the template's default (checked=True, placeholder text) always leaked through
-        # regardless of whether the engineer actually entered anything.
-        row_writes.append((20, bool(idle.strip()), [(3, idle)] if idle.strip() else []))
-        row_writes.append((21, bool(idly.strip()), [(3, idly)] if idly.strip() else []))
-
-        # Switch / Slot-Port (rows 23/24) — confirmed NEVER written at all before this fix,
-        # so the template's default (checked=True, placeholder text) always leaked through
-        # regardless of whether this site actually has Sidehaul Info data. Two paths: the
-        # Sidehaul-auto-fill case, and the manual-fallback case (when no Sidehaul data
-        # exists but the engineer typed into the manual Switch/Slot-Port text areas).
-        sidehaul_rows_data = mcl.sidehaul_display_rows(ciq_wb)
-        if sidehaul_rows_data:
-            first = sidehaul_rows_data[0]
-            row_writes.append((23, True, [(3, first["switch_type"]), (4, first["switch_id"])]))
-            cable_pn = st.session_state.get("cable_pn_0", "")
-            row_writes.append((24, True, [(3, cable_pn), (4, first["node_id"])]))
-        elif switch.strip() or slot_port.strip():
-            row_writes.append((23, bool(switch.strip()), [(3, switch)] if switch.strip() else []))
-            row_writes.append((24, bool(slot_port.strip()), [(3, slot_port)] if slot_port.strip() else []))
+        # IDLe / IDLy (rows 20/21) — confirmed real gap: the template has separate columns
+        # (C=Cable P/N, D=1st Node ID, E=2nd Node ID), not one cell to dump the whole
+        # combined text line into. Multiple cable connections pipe-join per column.
+        _bt_letter_for_xlsm = cran_base_type if has_cran_node else (idl_build_type_final or "").replace("Type ", "").strip()
+        if _bt_letter_for_xlsm and has_cran_node:
+            (idle_c, idle_d, idle_e), (idly_c, idly_d, idly_e) = app.cran_idl_cable_columns(ciq_wb, mm_objs, _bt_letter_for_xlsm)
+        elif _bt_letter_for_xlsm:
+            (idle_c, idle_d, idle_e), (idly_c, idly_d, idly_e) = app.idl_cable_columns_for_build_type(ciq_wb, mm_objs, _bt_letter_for_xlsm)
         else:
-            row_writes.append((23, False, []))
-            row_writes.append((24, False, []))
+            idle_c = idle_d = idle_e = idly_c = idly_d = idly_e = ""
+        # Manual entry (only present when nothing was auto-derived) still has nowhere but
+        # column C to go — same single-cell behavior as before for that fallback case.
+        if not idle_c and idle.strip():
+            idle_c = idle
+        if not idly_c and idly.strip():
+            idly_c = idly
+        row_writes.append((20, bool(idle_c), [(3, idle_c), (4, idle_d), (5, idle_e)] if idle_c else []))
+        row_writes.append((21, bool(idly_c), [(3, idly_c), (4, idly_d), (5, idly_e)] if idly_c else []))
 
-        # Rows 25-39 (15 "Manual Feed based on NEST & CIQ" rows) — confirmed real gap:
-        # overflow slots for ADDITIONAL Sidehaul connections beyond the first (real example:
-        # FSL00456 had 2 connections on the same switch). Never wired at all before this fix.
-        extra_sidehaul_rows = list(range(25, 40))
-        extra_connections = sidehaul_rows_data[1:] if sidehaul_rows_data else []
-        extra_sidehaul_lines = []
-        for i, conn in enumerate(extra_connections):
-            cable_pn_extra = st.session_state.get(f"cable_pn_{i+1}", "")
-            line = (f"Switch type: {conn['switch_type']}  Switch ID: {conn['switch_id']}  "
-                    f"Slot/Port: {conn['slot_port']}  Cable part number: {cable_pn_extra}  Node ID: {conn['node_id']}")
-            extra_sidehaul_lines.append(line)
-        mcl.write_buffer_with_overflow(row_writes, extra_sidehaul_rows, extra_sidehaul_lines)
+        # Switch / Slot-Port (rows 23/24 + overflow rows 25-39). CRAN-styled sites use the
+        # Build-Type-aware cable/hub data (cran_slot_port_rows) — confirmed real gap: this
+        # was previously never reached, since the generic Sidehaul-dump path below always
+        # ran first regardless of whether the site was CRAN-styled. Non-CRAN sites keep the
+        # exact same generic Sidehaul-Info-driven behavior as before, unchanged.
+        if has_cran_node and cran_base_type:
+            switch_ids, cran_entries = app.cran_slot_port_rows(
+                ciq_wb, mm_objs, cran_base_type, is_dash1, mcl.sidehaul_display_rows(ciq_wb))
+            row_writes.append((23, bool(switch_ids), [(3, "|".join(switch_ids))] if switch_ids else []))
+            slot_port_rows_available = [24] + list(range(25, 40))
+            slot_port_items = [f"{e['slot_port']} -> {e['cable']} -> {e['node_display']}" for e in cran_entries]
+            mcl.write_buffer_with_overflow(row_writes, slot_port_rows_available, slot_port_items, col=3)
+        else:
+            sidehaul_rows_data = mcl.sidehaul_display_rows(ciq_wb)
+            if sidehaul_rows_data:
+                first = sidehaul_rows_data[0]
+                row_writes.append((23, True, [(3, first["switch_type"]), (4, first["switch_id"])]))
+                cable_pn = st.session_state.get("cable_pn_0", "")
+                row_writes.append((24, True, [(3, cable_pn), (4, first["node_id"])]))
+            elif switch.strip() or slot_port.strip():
+                row_writes.append((23, bool(switch.strip()), [(3, switch)] if switch.strip() else []))
+                row_writes.append((24, bool(slot_port.strip()), [(3, slot_port)] if slot_port.strip() else []))
+            else:
+                row_writes.append((23, False, []))
+                row_writes.append((24, False, []))
+
+            # Rows 25-39 (15 "Manual Feed based on NEST & CIQ" rows) — confirmed real gap:
+            # overflow slots for ADDITIONAL Sidehaul connections beyond the first (real example:
+            # FSL00456 had 2 connections on the same switch). Never wired at all before this fix.
+            extra_sidehaul_rows = list(range(25, 40))
+            extra_connections = sidehaul_rows_data[1:] if sidehaul_rows_data else []
+            extra_sidehaul_lines = []
+            for i, conn in enumerate(extra_connections):
+                cable_pn_extra = st.session_state.get(f"cable_pn_{i+1}", "")
+                line = (f"Switch type: {conn['switch_type']}  Switch ID: {conn['switch_id']}  "
+                        f"Slot/Port: {conn['slot_port']}  Cable part number: {cable_pn_extra}  Node ID: {conn['node_id']}")
+                extra_sidehaul_lines.append(line)
+            mcl.write_buffer_with_overflow(row_writes, extra_sidehaul_rows, extra_sidehaul_lines)
 
         # Row 80 "Swap Sector Verification" — confirmed explicitly removed from scope
         # earlier this session, but never wrote False, so its template default (True,
