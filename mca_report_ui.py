@@ -369,7 +369,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # the node instead" framing doesn't apply — but SAU being enabled on a node is still a
     # real, reportable fact regardless of whether a 6610 exists. Node detection now also
     # triggers whenever there's simply no controller present.
-    sau_node_detection_applies = sau_actually_disabled_on_6610 or not controller_id
+    # Confirmed second gap, same shape: a 6610 CAN be present in the CIQ (controller_id
+    # truthy) while no controller-checks document was actually provided at all
+    # (controller_checks_text empty) — sau_connections_placement() still runs, but against
+    # an empty controller_checks_data, so it can never resolve to "Pending" either. There's
+    # no way to verify the 6610's own SAU state in that case, same as the "no controller at
+    # all" case above — so node detection triggers here too, not just when controller_id is
+    # completely absent.
+    sau_node_detection_applies = sau_actually_disabled_on_6610 or not controller_id or not controller_checks_text
     if testing_section and not cascade_fires:
         for item in results:
             if item["key"] == "alarm_testing":
