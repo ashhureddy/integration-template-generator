@@ -600,6 +600,31 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if gps_unconfirmed:
             warnings.append({"type": "gps_unconfirmed_type", "text": gps_unconfirmed})
 
+    # ==================== Warnings gate ====================
+    # Confirmed real change requested: same 2-step flow already used by NSB/N2E — if
+    # there are any warnings, show ONLY the warnings plus a "Continue to Report" button
+    # first, blocking the rest of the UI (Subject/Configuration/IDL Connections/etc.)
+    # from rendering at all until acknowledged. Previously MCA only showed warnings
+    # AFTER "Generate Report" was clicked, mixed into the report-generation flow itself
+    # — much easier to miss than a hard gate at the top. Acknowledgment is keyed against
+    # the actual warnings content (a hash of every warning's text), not a plain
+    # persistent flag, so a genuinely different set of warnings on a later site in the
+    # same session always re-triggers the gate rather than staying silently dismissed.
+    warnings_fingerprint = hash(tuple(sorted(w["text"] for w in warnings)))
+    if warnings and st.session_state.get("mca_warnings_ack_fingerprint") != warnings_fingerprint:
+        with st.container(border=True):
+            st.markdown(
+                f"<div style='color:#c0392b; font-size:1.3em; font-weight:700;'>"
+                f"\u26a0\ufe0f {len(warnings)} Warning{'s' if len(warnings) != 1 else ''}</div>",
+                unsafe_allow_html=True)
+            for w in warnings:
+                st.markdown(f"<div style='color:#c0392b; font-size:1.05em; padding:2px 0;'>\u2022 {w['text']}</div>",
+                            unsafe_allow_html=True)
+        if st.button("Continue to Report \u2192", type="primary", key="mca_warnings_continue"):
+            st.session_state["mca_warnings_ack_fingerprint"] = warnings_fingerprint
+            st.rerun()
+        return
+
     site_ids = "/".join(r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as"))
     fa_code = ""
     if "5G Info" in ciq_wb.sheetnames:
@@ -1419,27 +1444,19 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     node_tag = mm_objs[0].get("Node to be built as", "site") if mm_objs else "site"
 
     if st.button("Generate Report \u2192", type="primary", key="rpt_generate_mca"):
-        if warnings:
-            with st.container(border=True):
-                st.markdown(
-                    f"<div style='color:#c0392b; font-size:1.3em; font-weight:700;'>"
-                    f"⚠️ {len(warnings)} Warning{'s' if len(warnings) != 1 else ''}</div>"
-                    f"<div style='color:#c0392b; margin-bottom:0.5em;'>Informational only — these never change "
-                    f"what's in the report below, they're here so nothing gets missed.</div>",
-                    unsafe_allow_html=True)
-                for w in warnings:
-                    st.markdown(f"<div style='color:#c0392b; font-size:1.05em; padding:2px 0;'>• {w['text']}</div>",
-                                unsafe_allow_html=True)
-            # Temporary diagnostic — shows the RRU mapping check's reasoning for every
-            # cell (included/excluded and why), so a specific case can be verified
-            # directly in the app instead of needing another debugging round-trip.
-            if precheck_text and postcheck_text:
-                with st.expander("\U0001F50D RRU Mapping check details (debug)"):
-                    debug_rows = mcl.rru_mapping_debug_info(classification, ciq_wb, precheck_text, postcheck_text)
-                    for r in debug_rows:
-                        flag = " \u26a0\ufe0f MISMATCH" if r["mismatch"] and "excluded" not in r["reason"] else ""
-                        st.caption(f"**{r['cell']}** ({r['tech']}){flag} \u2014 {r['reason']}")
-                        st.caption(f"&nbsp;&nbsp;pre={r['pre']} | post={r['post']}")
+        # Confirmed real change: warnings are now handled entirely by the gate above
+        # (2-step flow, same as NSB/N2E) — by the time this button is even reachable,
+        # any warnings have already been shown and acknowledged, so there's nothing left
+        # to display here. The debug expander stays available unconditionally (not
+        # nested under "if warnings"), since it's useful to check even when the gate
+        # found nothing to flag.
+        if precheck_text and postcheck_text:
+            with st.expander("\U0001F50D RRU Mapping check details (debug)"):
+                debug_rows = mcl.rru_mapping_debug_info(classification, ciq_wb, precheck_text, postcheck_text)
+                for r in debug_rows:
+                    flag = " \u26a0\ufe0f MISMATCH" if r["mismatch"] and "excluded" not in r["reason"] else ""
+                    st.caption(f"**{r['cell']}** ({r['tech']}){flag} \u2014 {r['reason']}")
+                    st.caption(f"&nbsp;&nbsp;pre={r['pre']} | post={r['post']}")
 
         header_fields = {
             "mic": "MIC", "market": market_subject_input, "status": status, "site_name": site_name,
