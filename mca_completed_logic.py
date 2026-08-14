@@ -2417,7 +2417,7 @@ def extract_lte_cell_status(post_text):
     return out
 
 
-def lte_sector_param_warnings(ciq_wb, mm_objs, post_text, eutran_rows=None):
+def lte_sector_param_warnings(ciq_wb, mm_objs, post_text, eutran_rows=None, added_cells=None):
     """Confirmed CIQ mapping (cross-checked against real data, corrected from the
     original ask: PCI compares against CIQ's own PCI column, not cellId):
     dlChannelBandwidth->dlChannelBandwidth, earfcndl->earfcnDl, earfcnul->earfcnUl,
@@ -2426,7 +2426,14 @@ def lte_sector_param_warnings(ciq_wb, mm_objs, post_text, eutran_rows=None):
     every cell under that eNB). Returns list of warning texts, one per mismatched field.
     Confirmed perf fix: eutran_rows can be passed in pre-computed (once per render) to
     avoid re-parsing the same sheet repeatedly across this and other warning checks —
-    falls back to computing it here if not provided, for backward compatibility."""
+    falls back to computing it here if not provided, for backward compatibility.
+    Confirmed real rule: PCI specifically is only meant to be verified CIQ-vs-Post for
+    NEWLY ADDED cells — pre-existing/moved cells get PCI checked Pre-vs-Post instead
+    (lte_pci_prepost_warnings' job), since a pre-existing cell's PCI legitimately doesn't
+    have to match whatever the current CIQ document happens to say. added_cells, when
+    provided, is the flattened set of newly-added cell names; PCI is skipped here for any
+    cell not in it. None (the default) preserves the old behavior for other callers that
+    haven't opted into this distinction yet."""
     warnings = []
     if not post_text or "eUtran Parameters" not in ciq_wb.sheetnames:
         return warnings
@@ -2448,6 +2455,8 @@ def lte_sector_param_warnings(ciq_wb, mm_objs, post_text, eutran_rows=None):
         if not ciq_row:
             continue
         for post_key, ciq_key in field_map:
+            if post_key == "PCI" and added_cells is not None and cell not in added_cells:
+                continue
             post_val = str(post_vals.get(post_key, "")).strip()
             ciq_val = str(ciq_row.get(ciq_key, "")).strip()
             if ciq_val and post_val:
@@ -2550,7 +2559,7 @@ def extract_5g_cell_cu_status(post_text):
     return out
 
 
-def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text, fiveg_rows=None):
+def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text, fiveg_rows=None, added_cells=None):
     """Confirmed CIQ mapping: cellLocalId, CellRange, nRPCI, arfcnDL, arfcnUL,
     bSChannelBwDL, bSChannelBwUL, configuredMaxTxPower, ssbFrequency all compared
     directly against '5G Info' (matched by NRCellDU); nrTAC compared against 'NR_SA'
@@ -2558,7 +2567,14 @@ def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text, fiveg_rows=None):
     per-node pattern as LTE's tac/eNBId check).
     Confirmed perf fix: fiveg_rows can be passed in pre-computed (once per render) to
     avoid re-parsing the same sheet repeatedly across this and other warning checks —
-    falls back to computing it here if not provided, for backward compatibility."""
+    falls back to computing it here if not provided, for backward compatibility.
+    Confirmed real rule, same as lte_sector_param_warnings: nRPCI AND cellRange
+    specifically are only meant to be verified CIQ-vs-Post for NEWLY ADDED cells —
+    pre-existing/moved cells get both checked Pre-vs-Post instead
+    (nr_pci_cellrange_prepost_warnings' job). cellLocalId and every other field here
+    keep applying to every cell regardless (no such distinction for those). added_cells,
+    when provided, is the flattened set of newly-added cell names; None (the default)
+    preserves the old behavior for other callers that haven't opted into this yet."""
     warnings = []
     if not post_text or "5G Info" not in ciq_wb.sheetnames:
         return warnings
@@ -2575,7 +2591,8 @@ def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text, fiveg_rows=None):
     ciq_rows = {r.get("NRCellDU"): r for r in fiveg_rows if r.get("NRCellDU")}
 
     # cellLocalId — confirmed checked independently from BOTH the CU Status and DU
-    # Status tables, since either could diverge from the CIQ on its own.
+    # Status tables, since either could diverge from the CIQ on its own. No
+    # pre-existing/newly-added distinction for this field.
     for cell, cu_local_id in cell_cu.items():
         ciq_row = ciq_rows.get(cell)
         if not ciq_row:
@@ -2600,6 +2617,8 @@ def fiveg_sector_param_warnings(ciq_wb, mm_objs, post_text, fiveg_rows=None):
             ("ssbFrequency", "ssbFrequency"),
         ]
         for post_key, ciq_key in field_map:
+            if post_key in ("nRPCI", "cellRange") and added_cells is not None and cell not in added_cells:
+                continue
             post_val = str(combined.get(post_key, "")).strip()
             ciq_val = str(ciq_row.get(ciq_key, "")).strip()
             if not ciq_val or not post_val:
