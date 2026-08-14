@@ -796,12 +796,15 @@ def rru_mapping_prepost_warnings(classification, ciq_wb, precheck_text, postchec
                 continue  # a different check's concern (deleted/moved-away)
             post_vals = post_map[cell]
             if pre_vals.get("serial") != post_vals.get("serial") or pre_vals.get("radio_type") != post_vals.get("radio_type"):
+                # Confirmed exact requested wording: "Radio serial number mismatch on:
+                # Cell : Pre checks serial number | Post checks serial number." — trigger
+                # condition still considers both serial AND radio_type (either differing
+                # is a real mismatch), but the displayed text leads with the serial
+                # numbers specifically, per the confirmed rulebook wording.
                 warnings.append({
                     "type": "rru_mapping_mismatch",
-                    "text": f"{tech_label} RRU mapping changed on {cell} with no completed radio "
-                            f"swap on record: Pre-checks={pre_vals.get('radio_type')} "
-                            f"({pre_vals.get('serial')}), Post-checks={post_vals.get('radio_type')} "
-                            f"({post_vals.get('serial')}).",
+                    "text": f"Radio serial number mismatch on: {cell} : "
+                            f"{pre_vals.get('serial')} | {post_vals.get('serial')}.",
                 })
         return warnings
 
