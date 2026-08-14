@@ -454,6 +454,27 @@ def verify_retune_against_checks(ciq_wb, retune_events, post_text):
 # presence is NOT checked, per explicit instruction)
 # ============================================================
 
+def _build_sector_rename_map(ciq_wb):
+    """Confirmed real DRY violation: this exact 5-line loop over CIQ's 'Sector
+    Del_Movement' sheet was independently duplicated in 5 separate functions
+    (verify_moved_sectors_against_postcheck, lte_pci_prepost_warnings,
+    nr_pci_cellrange_prepost_warnings, rru_mapping_prepost_warnings,
+    rru_mapping_debug_info) — each rebuilding the identical {source_sector:
+    target_sector} map from scratch. Consolidated into one shared helper. ciq_wb can't
+    be cleanly @st.cache_data-cached itself (openpyxl Workbook isn't safely hashable),
+    so callers within the same render() pass should compute this ONCE and pass it in
+    via each function's optional rename_map parameter, rather than relying on this
+    helper alone to eliminate the redundant computation."""
+    rename_map = {}
+    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
+        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
+            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
+            tgt_node = r.get("Target Node name")
+            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
+                rename_map[src_sector] = tgt_sector
+    return rename_map
+
+
 def verify_moved_sectors_against_postcheck(classification, post_text, ciq_wb=None):
     """Confirmed real bug (found against ALL00640/ALL01340 data): classification['moved']
     only carries the SOURCE cell name (src_sector) — but a move can rename the cell as part
@@ -468,13 +489,7 @@ def verify_moved_sectors_against_postcheck(classification, post_text, ciq_wb=Non
     for node, cell in post_pairs:
         post_by_node.setdefault(node, set()).add(cell)
 
-    rename_map = {}
-    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
-        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
-            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
-            tgt_node = r.get("Target Node name")
-            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
-                rename_map[src_sector] = tgt_sector
+    rename_map = _build_sector_rename_map(ciq_wb)
 
     warnings = []
     for mv in classification.get("moved", []):
@@ -518,13 +533,7 @@ def lte_pci_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_te
 
     added_cells = {c for cells in classification.get("added", {}).values() for c in cells}
 
-    rename_map = {}
-    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
-        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
-            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
-            tgt_node = r.get("Target Node name")
-            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
-                rename_map[src_sector] = tgt_sector
+    rename_map = _build_sector_rename_map(ciq_wb)
 
     warnings = []
     checked_pre_cells = set()
@@ -578,13 +587,7 @@ def nr_pci_cellrange_prepost_warnings(classification, ciq_wb, precheck_text, pos
 
     added_cells = {c for cells in classification.get("added", {}).values() for c in cells}
 
-    rename_map = {}
-    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
-        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
-            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
-            tgt_node = r.get("Target Node name")
-            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
-                rename_map[src_sector] = tgt_sector
+    rename_map = _build_sector_rename_map(ciq_wb)
 
     field_labels = [("nRPCI", "nRPCI"), ("cellRange", "cellRange")]
     warnings = []
@@ -623,6 +626,7 @@ def nr_pci_cellrange_prepost_warnings(classification, ciq_wb, precheck_text, pos
     return warnings
 
 
+@st.cache_data
 def extract_rru_cell_mapping(text):
     """Parses the real 'RRU Cell Mapping' table (LTE):
 
@@ -664,6 +668,7 @@ def extract_rru_cell_mapping(text):
     return out
 
 
+@st.cache_data
 def extract_5g_rru_cell_mapping(text):
     """Same table, 5G side ('5G Cell to RRU Mapping'):
 
@@ -710,13 +715,7 @@ def rru_mapping_debug_info(classification, ciq_wb, precheck_text, postcheck_text
     if not precheck_text or not postcheck_text:
         return rows
 
-    rename_map = {}
-    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
-        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
-            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
-            tgt_node = r.get("Target Node name")
-            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
-                rename_map[src_sector] = tgt_sector
+    rename_map = _build_sector_rename_map(ciq_wb)
 
     rs_completed, rs_pending = classify_radio_swap_placement(precheck_text, postcheck_text, ciq_wb)
     completed_by_cell = {}
@@ -772,13 +771,7 @@ def rru_mapping_prepost_warnings(classification, ciq_wb, precheck_text, postchec
     if not precheck_text or not postcheck_text:
         return []
 
-    rename_map = {}
-    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
-        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
-            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
-            tgt_node = r.get("Target Node name")
-            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
-                rename_map[src_sector] = tgt_sector
+    rename_map = _build_sector_rename_map(ciq_wb)
 
     rs_completed, _ = classify_radio_swap_placement(precheck_text, postcheck_text, ciq_wb)
     completed_cells = set()
@@ -832,6 +825,7 @@ def sfp_part_info(part_number):
     return _SFP_MODEL_MAP.get(model_num), ("LT" if temp_code == "3" else "HT")
 
 
+@st.cache_data
 def extract_sfp_mapping(text):
     """Parses the real 'SFP Mapping' table:
 
@@ -866,7 +860,7 @@ def extract_sfp_mapping(text):
     return out
 
 
-def sfp_mapping_warnings(ciq_wb, post_text):
+def sfp_mapping_warnings(ciq_wb, post_text, eutran_rows=None):
     """Confirmed real rule: BBU/XMU-end and Radio(RRU)-end SFPs are LT (low temperature)
     or HT (high temperature) grade, identified from the Ericsson product code via
     sfp_part_info(). LT-LT, HT-HT, and LT-HT combinations are all valid; HT-LT (BBU/XMU
@@ -876,12 +870,18 @@ def sfp_mapping_warnings(ciq_wb, post_text):
     acceptable SFP type(s) ('BBU/XMU End SFP'/'Radio End SFP' in eUtran Parameters,
     "/"-separated when more than one grade is acceptable — same convention already used
     by lte_sector_param_warnings/fiveg_sector_param_warnings). Returns a list of warning
-    dicts."""
+    dicts.
+    Confirmed perf fix: eutran_rows can be passed in pre-computed (once per render,
+    shared with lte_sector_param_warnings, which parses this exact same sheet) to avoid
+    re-parsing 'eUtran Parameters' a second time — falls back to computing it here if
+    not provided, for backward compatibility."""
     warnings = []
     sfp_data = extract_sfp_mapping(post_text)
     if not sfp_data or ciq_wb is None or "eUtran Parameters" not in ciq_wb.sheetnames:
         return warnings
-    ciq_rows = {r.get("EutranCellFDDId"): r for r in qx.sheet_objs(ciq_wb["eUtran Parameters"])
+    if eutran_rows is None:
+        eutran_rows = qx.sheet_objs(ciq_wb["eUtran Parameters"])
+    ciq_rows = {r.get("EutranCellFDDId"): r for r in eutran_rows
                 if r.get("EutranCellFDDId")}
 
     for cell, vals in sfp_data.items():
@@ -1158,6 +1158,7 @@ def sau_connections_placement(controller_checks_data, controller_id):
     return "Completed" if sau["oper"] == "ENABLED" else "Pending"
 
 
+@st.cache_data
 def sau_node_state(postcheck_text):
     """Node-level SAU state, parsed from Post-checks' Hardware Status Information table.
     Confirmed real component-name variants: 'SAU-1', 'SAU-2', 'SAU-3', or bare 'SAU'
@@ -1178,6 +1179,7 @@ def sau_node_state(postcheck_text):
     return out
 
 
+@st.cache_data
 def sau_enabled_nodes(postcheck_text):
     """Confirmed MCA rule: SAU can be enabled on either the 6610 controller or the node
     itself. When the 6610's own SAU is confirmed disabled (via controller-checks), this
