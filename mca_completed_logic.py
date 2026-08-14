@@ -697,6 +697,63 @@ def extract_5g_rru_cell_mapping(text):
     return out
 
 
+def rru_mapping_debug_info(classification, ciq_wb, precheck_text, postcheck_text):
+    """Diagnostic companion to rru_mapping_prepost_warnings() — same computation, but
+    returns the reasoning for EVERY cell instead of just the flagged mismatches: whether
+    it was found in Pre/Post, whether it was excluded via a completed radio swap
+    (group_key) or as a moved-sector source, and its actual serial/radio_type on both
+    sides. Built specifically to let the person see directly why a given cell was or
+    wasn't flagged, without needing another round of back-and-forth to track it down.
+    Returns a list of dicts, one per cell found in Pre-checks' RRU mapping tables
+    (LTE + 5G combined)."""
+    rows = []
+    if not precheck_text or not postcheck_text:
+        return rows
+
+    rename_map = {}
+    if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
+        for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
+            src_sector, tgt_sector = r.get("Source Sector"), r.get("Target Sector")
+            tgt_node = r.get("Target Node name")
+            if src_sector and tgt_sector and str(tgt_node).strip().upper() != "DELETE":
+                rename_map[src_sector] = tgt_sector
+
+    rs_completed, rs_pending = classify_radio_swap_placement(precheck_text, postcheck_text, ciq_wb)
+    completed_by_cell = {}
+    for sw in rs_completed:
+        for c in sw.get("group_key", ()):
+            completed_by_cell[c] = sw
+    pending_by_cell = {}
+    for sw in rs_pending:
+        for c in sw.get("group_key", ()):
+            pending_by_cell[c] = sw
+
+    moved_by_cell = {mv["cell"]: mv for mv in classification.get("moved", [])}
+
+    for tech_label, pre_map, post_map in (
+        ("LTE", extract_rru_cell_mapping(precheck_text), extract_rru_cell_mapping(postcheck_text)),
+        ("5G", extract_5g_rru_cell_mapping(precheck_text), extract_5g_rru_cell_mapping(postcheck_text)),
+    ):
+        for cell, pre_vals in pre_map.items():
+            post_vals = post_map.get(cell)
+            reason = "checked (pre-existing, no swap/move on record)"
+            if cell in completed_by_cell:
+                reason = f"excluded: completed radio swap on record (group_key includes this cell), swap={completed_by_cell[cell]}"
+            elif cell in pending_by_cell:
+                reason = f"checked: PENDING radio swap on record (group_key includes this cell) \u2014 still compared, swap={pending_by_cell[cell]}"
+            elif cell in moved_by_cell:
+                reason = f"excluded: moved-sector source (classification['moved']), entry={moved_by_cell[cell]}"
+            elif cell not in post_map:
+                reason = "not checked: missing from Post-checks entirely"
+            rows.append({
+                "cell": cell, "tech": tech_label, "reason": reason,
+                "pre": pre_vals, "post": post_vals,
+                "mismatch": bool(post_vals) and (pre_vals.get("serial") != post_vals.get("serial")
+                                                  or pre_vals.get("radio_type") != post_vals.get("radio_type")),
+            })
+    return rows
+
+
 def rru_mapping_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text):
     """RRU Cell Mapping (Serial Number + Radio Type) verification, Pre-checks vs
     Post-checks, per sector — confirmed real rule: if a sector's radio swap is COMPLETED
