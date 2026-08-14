@@ -454,6 +454,15 @@ def verify_retune_against_checks(ciq_wb, retune_events, post_text):
 # presence is NOT checked, per explicit instruction)
 # ============================================================
 
+def _flatten_added_cells(classification):
+    """Confirmed same DRY pattern as _build_sector_rename_map(), lower stakes (a cheap
+    set comprehension, not a re-parse) but the same fix for the same reason: this exact
+    line was independently duplicated in lte_pci_prepost_warnings,
+    nr_pci_cellrange_prepost_warnings, and mca_report_ui.py's warnings block. One shared
+    definition instead of three."""
+    return {c for cells in classification.get("added", {}).values() for c in cells}
+
+
 def _build_sector_rename_map(ciq_wb):
     """Confirmed real DRY violation: this exact 5-line loop over CIQ's 'Sector
     Del_Movement' sheet was independently duplicated in 5 separate functions
@@ -531,7 +540,7 @@ def lte_pci_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_te
     if not pre_cells or not post_cells:
         return []
 
-    added_cells = {c for cells in classification.get("added", {}).values() for c in cells}
+    added_cells = _flatten_added_cells(classification)
 
     rename_map = _build_sector_rename_map(ciq_wb)
 
@@ -585,7 +594,7 @@ def nr_pci_cellrange_prepost_warnings(classification, ciq_wb, precheck_text, pos
     if not pre_cells or not post_cells:
         return []
 
-    added_cells = {c for cells in classification.get("added", {}).values() for c in cells}
+    added_cells = _flatten_added_cells(classification)
 
     rename_map = _build_sector_rename_map(ciq_wb)
 
