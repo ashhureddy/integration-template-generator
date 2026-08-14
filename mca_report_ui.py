@@ -538,24 +538,43 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # Radio Swap (which changes Completed/Pending placement itself) and the
     # board-swap-triggered Transport SFP case (which is both Pending AND a warning). ----
     warnings = []
+
+    def _run_check(label, fn):
+        # Confirmed real fix: none of these checks were individually isolated — one
+        # exception from an EARLIER check (most plausible given every other explanation
+        # for the missing RRU mapping warning has been ruled out: verified correct against
+        # real data, confirmed not excluded by swap classification, confirmed not a
+        # caching issue) would silently prevent every LATER warnings += call from ever
+        # running at all, with no visible error to the user — report generation completes
+        # normally otherwise, since this whole block sits inside report generation, not
+        # gating it. Each check now runs in isolation; a failure surfaces as its own
+        # diagnostic warning instead of silently taking out everything after it.
+        try:
+            return fn()
+        except Exception as e:
+            return [{"type": "warning_check_failed",
+                     "text": f"[Warnings check '{label}' failed to run: {type(e).__name__}: {e}]"}]
+
     if postcheck_text:
-        warnings += mcl.verify_integration_against_postcheck(classification, postcheck_text)
-        warnings += mcl.verify_moved_sectors_against_postcheck(classification, postcheck_text, ciq_wb)
-        warnings += mcl.verify_deleted_sectors_against_postcheck(classification, postcheck_text)
-        warnings += mcl.verify_retune_against_checks(ciq_wb, retune_events, postcheck_text)
+        warnings += _run_check("integration", lambda: mcl.verify_integration_against_postcheck(classification, postcheck_text))
+        warnings += _run_check("moved_sectors", lambda: mcl.verify_moved_sectors_against_postcheck(classification, postcheck_text, ciq_wb))
+        warnings += _run_check("deleted_sectors", lambda: mcl.verify_deleted_sectors_against_postcheck(classification, postcheck_text))
+        warnings += _run_check("retune", lambda: mcl.verify_retune_against_checks(ciq_wb, retune_events, postcheck_text))
         # Confirmed real gap: this already-built, more thorough function (dlChannelBandwidth,
         # earfcndl/earfcnul, sectorCarrierRef->sectorId, ulChannelBandwidth, plus PCI and
         # tac) was never actually wired into the Warnings tab at all — dead code. Returns
         # plain strings (not dicts), unlike the other verify_* calls here, so each gets
         # wrapped to match what the Warnings tab render loop expects (w["text"]).
-        warnings += [{"type": "eutran_param_mismatch", "text": s}
-                     for s in mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)]
+        _lte_param_result = _run_check("lte_sector_param", lambda: mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text))
+        warnings += [{"type": "eutran_param_mismatch", "text": s} if isinstance(s, str) else s
+                     for s in _lte_param_result]
         # Same confirmed gap, same fix, for 5G — already covers cellLocalId (checked
         # independently against BOTH the CU and DU status tables), cellRange, nRPCI,
         # arfcnDL/UL, bandwidths, configuredMaxTxPower, ssbFrequency, and nrTAC, all
         # against the CIQ target. Never wired in either.
-        warnings += [{"type": "nr_param_mismatch", "text": s}
-                     for s in mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text)]
+        _nr_param_result = _run_check("fiveg_sector_param", lambda: mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text))
+        warnings += [{"type": "nr_param_mismatch", "text": s} if isinstance(s, str) else s
+                     for s in _nr_param_result]
         # PCI (LTE) / nRPCI+cellRange (5G) Pre-checks-vs-Post-checks verification for
         # pre-existing and moved sectors — confirmed real rule: newly added sectors already
         # get CIQ-target-vs-Post-actual verification above (unchanged); pre-existing and
@@ -563,18 +582,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # since the question there isn't "was it built to target," it's "did this value
         # unexpectedly change for something this scope didn't touch."
         if precheck_text:
-            warnings += mcl.lte_pci_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text)
-            warnings += mcl.nr_pci_cellrange_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text)
+            warnings += _run_check("lte_pci_prepost", lambda: mcl.lte_pci_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text))
+            warnings += _run_check("nr_pci_cellrange_prepost", lambda: mcl.nr_pci_cellrange_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text))
             # RRU Cell Mapping (Serial Number + Radio Type): Pre-checks vs Post-checks per
             # sector, ignoring differences that are explained by a COMPLETED radio swap
             # (a different radio is genuinely expected there) or a moved sector (same
             # reasoning — a physical move means a different radio too). A PENDING swap, or
             # no tracked swap at all, means Pre and Post should still match.
-            warnings += mcl.rru_mapping_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text)
+            warnings += _run_check("rru_mapping_prepost", lambda: mcl.rru_mapping_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text))
         # SFP Mapping (BBU/XMU end vs Radio end, LT/HT grade) — HT-LT is always flagged
         # regardless of CIQ (a real electrical/compatibility mismatch); both ends are also
         # separately compared against the CIQ's own declared acceptable grade(s).
-        warnings += mcl.sfp_mapping_warnings(ciq_wb, postcheck_text)
+        warnings += _run_check("sfp_mapping", lambda: mcl.sfp_mapping_warnings(ciq_wb, postcheck_text))
         if edp_index:
             warnings += mcl.verify_port_conversion_against_postcheck(
                 ciq_wb, mm_objs, precheck_text, postcheck_text, edp_index)
