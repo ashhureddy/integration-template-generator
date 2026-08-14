@@ -539,6 +539,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # board-swap-triggered Transport SFP case (which is both Pending AND a warning). ----
     warnings = []
 
+    # Confirmed real bug fix: PCI (LTE) / nRPCI+cellRange (5G) were being checked
+    # CIQ-vs-Post for EVERY cell uniformly via lte_sector_param_warnings/
+    # fiveg_sector_param_warnings — but per the confirmed rulebook, that's only correct
+    # for newly-added cells; pre-existing/moved cells are supposed to rely solely on the
+    # Pre-vs-Post check instead (lte_pci_prepost_warnings/nr_pci_cellrange_prepost_warnings),
+    # since their PCI/cellRange legitimately doesn't have to match whatever the current
+    # CIQ document says. Flattened once here and passed to both param-warning calls below.
+    added_cells_flat = {c for cells in classification.get("added", {}).values() for c in cells}
+
     def _run_check(label, fn):
         # Confirmed real fix: none of these checks were individually isolated — one
         # exception from an EARLIER check (most plausible given every other explanation
@@ -565,14 +574,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # tac) was never actually wired into the Warnings tab at all — dead code. Returns
         # plain strings (not dicts), unlike the other verify_* calls here, so each gets
         # wrapped to match what the Warnings tab render loop expects (w["text"]).
-        _lte_param_result = _run_check("lte_sector_param", lambda: mcl.lte_sector_param_warnings(ciq_wb, mm_objs, postcheck_text))
+        _lte_param_result = _run_check("lte_sector_param", lambda: mcl.lte_sector_param_warnings(
+            ciq_wb, mm_objs, postcheck_text, added_cells=added_cells_flat))
         warnings += [{"type": "eutran_param_mismatch", "text": s} if isinstance(s, str) else s
                      for s in _lte_param_result]
         # Same confirmed gap, same fix, for 5G — already covers cellLocalId (checked
         # independently against BOTH the CU and DU status tables), cellRange, nRPCI,
         # arfcnDL/UL, bandwidths, configuredMaxTxPower, ssbFrequency, and nrTAC, all
         # against the CIQ target. Never wired in either.
-        _nr_param_result = _run_check("fiveg_sector_param", lambda: mcl.fiveg_sector_param_warnings(ciq_wb, mm_objs, postcheck_text))
+        _nr_param_result = _run_check("fiveg_sector_param", lambda: mcl.fiveg_sector_param_warnings(
+            ciq_wb, mm_objs, postcheck_text, added_cells=added_cells_flat))
         warnings += [{"type": "nr_param_mismatch", "text": s} if isinstance(s, str) else s
                      for s in _nr_param_result]
         # PCI (LTE) / nRPCI+cellRange (5G) Pre-checks-vs-Post-checks verification for
@@ -595,8 +606,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # separately compared against the CIQ's own declared acceptable grade(s).
         warnings += _run_check("sfp_mapping", lambda: mcl.sfp_mapping_warnings(ciq_wb, postcheck_text))
         if edp_index:
-            warnings += mcl.verify_port_conversion_against_postcheck(
-                ciq_wb, mm_objs, precheck_text, postcheck_text, edp_index)
+            warnings += _run_check("port_conversion", lambda: mcl.verify_port_conversion_against_postcheck(
+                ciq_wb, mm_objs, precheck_text, postcheck_text, edp_index))
         if gps_unconfirmed:
             warnings.append({"type": "gps_unconfirmed_type", "text": gps_unconfirmed})
 
