@@ -1430,6 +1430,16 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 for w in warnings:
                     st.markdown(f"<div style='color:#c0392b; font-size:1.05em; padding:2px 0;'>• {w['text']}</div>",
                                 unsafe_allow_html=True)
+            # Temporary diagnostic — shows the RRU mapping check's reasoning for every
+            # cell (included/excluded and why), so a specific case can be verified
+            # directly in the app instead of needing another debugging round-trip.
+            if precheck_text and postcheck_text:
+                with st.expander("\U0001F50D RRU Mapping check details (debug)"):
+                    debug_rows = mcl.rru_mapping_debug_info(classification, ciq_wb, precheck_text, postcheck_text)
+                    for r in debug_rows:
+                        flag = " \u26a0\ufe0f MISMATCH" if r["mismatch"] and "excluded" not in r["reason"] else ""
+                        st.caption(f"**{r['cell']}** ({r['tech']}){flag} \u2014 {r['reason']}")
+                        st.caption(f"&nbsp;&nbsp;pre={r['pre']} | post={r['post']}")
 
         header_fields = {
             "mic": "MIC", "market": market_subject_input, "status": status, "site_name": site_name,
