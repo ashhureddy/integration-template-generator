@@ -565,6 +565,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                      "text": f"[Warnings check '{label}' failed to run: {type(e).__name__}: {e}]"}]
 
     if postcheck_text:
+        # Confirmed real optimization (matching NSB/N2E's established pattern): both
+        # lte_sector_param_warnings and sfp_mapping_warnings independently parsed the
+        # same "eUtran Parameters" sheet; fiveg_sector_param_warnings parses "5G Info"
+        # too. Computed once here and shared across all three instead.
+        _warnings_eutran_rows = app.sheet_objs(ciq_wb["eUtran Parameters"]) if "eUtran Parameters" in ciq_wb.sheetnames else []
+        _warnings_fiveg_rows = app.sheet_objs(ciq_wb["5G Info"]) if "5G Info" in ciq_wb.sheetnames else []
         warnings += _run_check("integration", lambda: mcl.verify_integration_against_postcheck(classification, postcheck_text))
         warnings += _run_check("moved_sectors", lambda: mcl.verify_moved_sectors_against_postcheck(classification, postcheck_text, ciq_wb))
         warnings += _run_check("deleted_sectors", lambda: mcl.verify_deleted_sectors_against_postcheck(classification, postcheck_text))
@@ -575,7 +581,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # plain strings (not dicts), unlike the other verify_* calls here, so each gets
         # wrapped to match what the Warnings tab render loop expects (w["text"]).
         _lte_param_result = _run_check("lte_sector_param", lambda: mcl.lte_sector_param_warnings(
-            ciq_wb, mm_objs, postcheck_text, added_cells=added_cells_flat))
+            ciq_wb, mm_objs, postcheck_text, eutran_rows=_warnings_eutran_rows, added_cells=added_cells_flat))
         warnings += [{"type": "eutran_param_mismatch", "text": s} if isinstance(s, str) else s
                      for s in _lte_param_result]
         # Same confirmed gap, same fix, for 5G — already covers cellLocalId (checked
@@ -583,7 +589,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # arfcnDL/UL, bandwidths, configuredMaxTxPower, ssbFrequency, and nrTAC, all
         # against the CIQ target. Never wired in either.
         _nr_param_result = _run_check("fiveg_sector_param", lambda: mcl.fiveg_sector_param_warnings(
-            ciq_wb, mm_objs, postcheck_text, added_cells=added_cells_flat))
+            ciq_wb, mm_objs, postcheck_text, fiveg_rows=_warnings_fiveg_rows, added_cells=added_cells_flat))
         warnings += [{"type": "nr_param_mismatch", "text": s} if isinstance(s, str) else s
                      for s in _nr_param_result]
         # PCI (LTE) / nRPCI+cellRange (5G) Pre-checks-vs-Post-checks verification for
@@ -604,7 +610,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # SFP Mapping (BBU/XMU end vs Radio end, LT/HT grade) — HT-LT is always flagged
         # regardless of CIQ (a real electrical/compatibility mismatch); both ends are also
         # separately compared against the CIQ's own declared acceptable grade(s).
-        warnings += _run_check("sfp_mapping", lambda: mcl.sfp_mapping_warnings(ciq_wb, postcheck_text))
+        warnings += _run_check("sfp_mapping", lambda: mcl.sfp_mapping_warnings(ciq_wb, postcheck_text, eutran_rows=_warnings_eutran_rows))
         if edp_index:
             warnings += _run_check("port_conversion", lambda: mcl.verify_port_conversion_against_postcheck(
                 ciq_wb, mm_objs, precheck_text, postcheck_text, edp_index))
@@ -1458,17 +1464,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # Confirmed real change: warnings are now handled entirely by the gate above
         # (2-step flow, same as NSB/N2E) — by the time this button is even reachable,
         # any warnings have already been shown and acknowledged, so there's nothing left
-        # to display here. The debug expander stays available unconditionally (not
-        # nested under "if warnings"), since it's useful to check even when the gate
-        # found nothing to flag.
-        if precheck_text and postcheck_text:
-            with st.expander("\U0001F50D RRU Mapping check details (debug)"):
-                debug_rows = mcl.rru_mapping_debug_info(classification, ciq_wb, precheck_text, postcheck_text)
-                for r in debug_rows:
-                    flag = " \u26a0\ufe0f MISMATCH" if r["mismatch"] and "excluded" not in r["reason"] else ""
-                    st.caption(f"**{r['cell']}** ({r['tech']}){flag} \u2014 {r['reason']}")
-                    st.caption(f"&nbsp;&nbsp;pre={r['pre']} | post={r['post']}")
-
+        # to display here.
         header_fields = {
             "mic": "MIC", "market": market_subject_input, "status": status, "site_name": site_name,
             "fa_code": fa_code, "site_ids": site_ids, "sow": sow, "iwm_details": iwm_details,
