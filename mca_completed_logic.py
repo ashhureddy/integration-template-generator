@@ -465,15 +465,14 @@ def _flatten_added_cells(classification):
 
 def _build_sector_rename_map(ciq_wb):
     """Confirmed real DRY violation: this exact 5-line loop over CIQ's 'Sector
-    Del_Movement' sheet was independently duplicated in 5 separate functions
+    Del_Movement' sheet was independently duplicated in 4 separate functions
     (verify_moved_sectors_against_postcheck, lte_pci_prepost_warnings,
-    nr_pci_cellrange_prepost_warnings, rru_mapping_prepost_warnings,
-    rru_mapping_debug_info) — each rebuilding the identical {source_sector:
-    target_sector} map from scratch. Consolidated into one shared helper. ciq_wb can't
-    be cleanly @st.cache_data-cached itself (openpyxl Workbook isn't safely hashable),
-    so callers within the same render() pass should compute this ONCE and pass it in
-    via each function's optional rename_map parameter, rather than relying on this
-    helper alone to eliminate the redundant computation."""
+    nr_pci_cellrange_prepost_warnings, rru_mapping_prepost_warnings) — each rebuilding
+    the identical {source_sector: target_sector} map from scratch. Consolidated into
+    one shared helper. ciq_wb can't be cleanly @st.cache_data-cached itself (openpyxl
+    Workbook isn't safely hashable), so callers within the same render() pass should
+    compute this ONCE and pass it in via each function's optional rename_map parameter,
+    rather than relying on this helper alone to eliminate the redundant computation."""
     rename_map = {}
     if ciq_wb is not None and "Sector Del_Movement" in ciq_wb.sheetnames:
         for r in qx.sheet_objs(ciq_wb["Sector Del_Movement"]):
@@ -709,57 +708,6 @@ def extract_5g_rru_cell_mapping(text):
         radio_type = " ".join(tokens[5:-3])
         out[cell] = {"serial": serial, "radio_type": radio_type}
     return out
-
-
-def rru_mapping_debug_info(classification, ciq_wb, precheck_text, postcheck_text):
-    """Diagnostic companion to rru_mapping_prepost_warnings() — same computation, but
-    returns the reasoning for EVERY cell instead of just the flagged mismatches: whether
-    it was found in Pre/Post, whether it was excluded via a completed radio swap
-    (group_key) or as a moved-sector source, and its actual serial/radio_type on both
-    sides. Built specifically to let the person see directly why a given cell was or
-    wasn't flagged, without needing another round of back-and-forth to track it down.
-    Returns a list of dicts, one per cell found in Pre-checks' RRU mapping tables
-    (LTE + 5G combined)."""
-    rows = []
-    if not precheck_text or not postcheck_text:
-        return rows
-
-    rename_map = _build_sector_rename_map(ciq_wb)
-
-    rs_completed, rs_pending = classify_radio_swap_placement(precheck_text, postcheck_text, ciq_wb)
-    completed_by_cell = {}
-    for sw in rs_completed:
-        for c in sw.get("group_key", ()):
-            completed_by_cell[c] = sw
-    pending_by_cell = {}
-    for sw in rs_pending:
-        for c in sw.get("group_key", ()):
-            pending_by_cell[c] = sw
-
-    moved_by_cell = {mv["cell"]: mv for mv in classification.get("moved", [])}
-
-    for tech_label, pre_map, post_map in (
-        ("LTE", extract_rru_cell_mapping(precheck_text), extract_rru_cell_mapping(postcheck_text)),
-        ("5G", extract_5g_rru_cell_mapping(precheck_text), extract_5g_rru_cell_mapping(postcheck_text)),
-    ):
-        for cell, pre_vals in pre_map.items():
-            post_vals = post_map.get(cell)
-            reason = "checked (pre-existing, no swap/move on record)"
-            if cell in completed_by_cell:
-                reason = f"excluded: completed radio swap on record (group_key includes this cell), swap={completed_by_cell[cell]}"
-            elif cell in pending_by_cell:
-                reason = f"checked: PENDING radio swap on record (group_key includes this cell) \u2014 still compared, swap={pending_by_cell[cell]}"
-            elif cell in moved_by_cell:
-                reason = f"excluded: moved-sector source (classification['moved']), entry={moved_by_cell[cell]}"
-            elif cell not in post_map:
-                reason = "not checked: missing from Post-checks entirely"
-            rows.append({
-                "cell": cell, "tech": tech_label, "reason": reason,
-                "pre": pre_vals, "post": post_vals,
-                "mismatch": bool(post_vals) and (pre_vals.get("serial") != post_vals.get("serial")
-                                                  or pre_vals.get("radio_type") != post_vals.get("radio_type")),
-            })
-    return rows
 
 
 def rru_mapping_prepost_warnings(classification, ciq_wb, precheck_text, postcheck_text):
