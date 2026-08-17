@@ -374,6 +374,19 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             if item["key"] in cascade_keys:
                 item["section"] = "pending"
                 item["checked_by_default"] = True
+                # Confirmed real bug: controller_integration's own detect() only matches
+                # scope_lines starting with "6610 Controller Integration:" — but
+                # format_scope_of_work() generates that OR "EDP is not published for the
+                # controller — {id}" (mutually exclusive, depending on EDP status), never
+                # both. When EDP isn't published — the common case for a site whose
+                # cascade fired over unconfirmed alarm scripting in the first place —
+                # detect() finds nothing, item["result"] stays None, and the "Detected:
+                # ..." preview silently never renders even though the checkbox is forced
+                # checked. controller_id is already known to be reliably available here
+                # (confirmed working in the header and LKF caption), so fill the preview
+                # directly rather than depending on the scope_line search succeeding.
+                if item["key"] == "controller_integration" and not item.get("result") and controller_id:
+                    item["result"] = {"lines": [f"6610 Controller Integration:\t{controller_id}"]}
     if sau_placement and not cascade_fires:
         for item in results:
             if item["key"] == "sau_connections":
