@@ -31,6 +31,9 @@ TPL_MMBB = resolve_template("LTE+5G_MMBB_Integration_Pre-existing_Procedure_with
 TPL_TMBB = resolve_template("TRIMODE_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V10.txt", "TRIMODE_Integration")
 TPL_CENM = resolve_template("cENM_TRIMODE_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V4.txt", "cENM_TRIMODE")
 TPL_CENM_MMBB = resolve_template("cENM_MMBB_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V4.txt", "cENM_MMBB")
+# SMBB (LTE-only, LTE primary) — same source file shared by MCA and CENM per the blueprint.
+# NSB has its own file (no Pre-checks section, different EDP-field legend).
+TPL_SMBB_LTE = resolve_template("LTE_Integration_Pre-existing_Procedure_with_LTE_as_Primary_CMCLI_Updated_1.txt", "LTE_as_Primary_CMCLI")
 TPL_6610 = resolve_template("6610 Controller Integration Procedure_25Q3_Updated_V12.txt", "6610")
 TPL_PORT_CONVERSION = resolve_template("Template_Port_Conversion_1G_to_10G_BBU_V1_1.txt", "Port_Conversion")
 TPL_CRAN_TRIP1 = resolve_template("CRAN_TO_CRAN_Rehome_Pre-integration_Trip-1_Procedure_for_SA_Sites_V2.txt", "Trip-1")
@@ -60,6 +63,7 @@ TDIR_STATIC = Path(__file__).parent / "templates" / "Static"
 TDIR_MCA_IDL_CRAN = Path(__file__).parent / "templates" / "MCA" / "IDL_CRAN"
 TPL_NSB_MMBB = TDIR_NSB / "LTE+5G_MMBB_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V13.txt"
 TPL_NSB_TRIMODE = TDIR_NSB / "TRIMODE_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
+TPL_NSB_SMBB_LTE = TDIR_NSB / "LTE_Integration_NSB_Procedure_with_LTE_as_Primary_CMCLI_Updated_1.txt"
 
 # ============================================================
 # SHARED HELPERS
@@ -695,6 +699,63 @@ def fill_node_template(base_tpl, row, edp_index, user_id, date_str, summary_rows
         ("xxBBU_PTP_SIAD_IPxx", ptp_siad, "EDP · BBU_PTP_SIAD_IP (primary→secondary fallback)"),
         ("xLTE_IPV6_ENODEB_BEARER_IPx", lte_bearer, "EDP · IPV6_ENODEB_BEARER_IP (row matched by eNodeB Name)"),
         ("x5G_IPV6_ENODEB_BEARER_IPx", fiveg_bearer, "EDP · IPV6_ENODEB_BEARER_IP (row matched by gNodeB Name)"),
+    ]
+    for token, val, src in fills:
+        if val:
+            tpl = tpl.replace(token, str(val))
+            summary_rows.append({"Item": f"{site_id} · {token}", "Source": src, "Value": val, "Note": ""})
+        else:
+            summary_rows.append({"Item": f"{site_id} · {token}", "Source": src, "Value": "NOT FOUND", "Note": "left as placeholder"})
+        log(f"{'✓' if val else '✗'} {site_id} · {token} -> {val or 'NOT FOUND'}")
+    return tpl
+
+
+def is_smbb_lte_primary(row):
+    """SMBB (single-identity) row whose only/primary identity is LTE — the only SMBB variant
+    a template exists for so far (SMBB-5G-primary is not yet supported, stays skipped)."""
+    bbu_mode = str(row.get("BBU Mode", "")).strip().upper()
+    has_lte = is_populated(row.get("eNBId")) or is_populated(row.get("eNodeB Name"))
+    has_5g = is_populated(row.get("gNBId")) or is_populated(row.get("gNodeB Name"))
+    return bbu_mode == "SMBB" and has_lte and not has_5g
+
+
+def fill_node_template_smbb_lte(base_tpl, row, mm_objs, edp_index, user_id, date_str, summary_rows, log):
+    """SMBB/LTE-primary placeholder fill — shared by MCA, CENM, and NSB (same CIQ/EDP source
+    data; only the template *file* differs per scope). Confirmed real mapping:
+    xLTE_SiteID2x/xLTE_SiteID3x = the other Mixed Mode Info rows in this same CIQ, in row order
+    (not a distinct 'co-located' concept — just 'this row's siblings').
+    xgNBIdx/xgNB_Namex/x5G_IPV6_ENODEB_BEARER_IPx and the xxSharing_*/xxFDD_NAMExx tokens (plus
+    the literal 'xx' in RiLink=xx) are confirmed manual fill-in — deliberately NOT substituted
+    here, left as-is in the output for the engineer."""
+    site_id = row.get("Node to be built as")
+    e_name = row.get("eNodeB Name")
+    lte_row = edp_row_for(edp_index, e_name)
+    lte_bearer = edp_get(edp_index, lte_row, "IPV6_ENODEB_BEARER_IP")
+    ptp_server = edp_get(edp_index, lte_row, "BBU_PTP_SERVER_IP")
+    ptp_siad = edp_get(edp_index, lte_row, "BBU_PTP_SIAD_IP")
+    siad_bearer_router = edp_get(edp_index, lte_row, "ipv6_siad_bearer_ip_def_router")
+    vlan_id = edp_get(edp_index, lte_row, "bearer_enodeb_sb_vlan_id")
+
+    siblings = [r.get("Node to be built as") for r in mm_objs
+                if r.get("Node to be built as") and r.get("Node to be built as") != site_id]
+    site_id2 = siblings[0] if len(siblings) > 0 else None
+    site_id3 = siblings[1] if len(siblings) > 1 else None
+
+    tpl = base_tpl
+    fills = [
+        ("xxSiteIdxx", site_id, "CIQ · Mixed Mode Info · Node to be built as"),
+        ("xLTE_SiteID1x", site_id, "CIQ · Mixed Mode Info · Node to be built as (same node, MCA amos-login token)"),
+        ("xxUserIDxx", user_id, "manual input"),
+        ("xxDatexx", date_str, "manual input"),
+        ("xDatex", date_str, "manual input"),
+        ("xLTE_IPV6_ENODEB_BEARER_IPx", lte_bearer, "EDP · IPV6_ENODEB_BEARER_IP (row matched by eNodeB Name)"),
+        ("xxBBU_PTP_SERVER_IPxx", ptp_server, "EDP · BBU_PTP_SERVER_IP"),
+        ("xxBBU_PTP_SIAD_IPxx", ptp_siad, "EDP · BBU_PTP_SIAD_IP"),
+        ("xsecondary_IPV6_ENODEB_BEARER_IPx", lte_bearer, "EDP · IPV6_ENODEB_BEARER_IP (row matched by eNodeB Name)"),
+        ("xLTE_IPV6_SIAD_BEARER_IPx", siad_bearer_router, "EDP · ipv6_siad_bearer_ip_def_router"),
+        ("xLTE_Vlan_IDx", vlan_id, "EDP · bearer_enodeb_sb_vlan_id"),
+        ("xLTE_SiteID2x", site_id2, "CIQ · Mixed Mode Info · other row (2nd)"),
+        ("xLTE_SiteID3x", site_id3, "CIQ · Mixed Mode Info · other row (3rd)"),
     ]
     for token, val, src in fills:
         if val:
@@ -2863,9 +2924,10 @@ def generate_n2e(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
 
 # ============================================================
 # GENERATOR: NSB — no Pre-checks (Pre Configuration is always the fixed string "NA").
-# Only 2 templates (MMBB, TRIMODE) — no LTE-only/5G-only variants, per the blueprint.
-# Same confirmed placeholder mapping as N2E's MMBB/TRIMODE, minus the controller ID field
+# 3 templates: MMBB, TRIMODE, and SMBB (LTE-primary only — SMBB-5G-primary has no template yet).
+# MMBB/TRIMODE share the confirmed N2E placeholder mapping, minus the controller ID field
 # (NSB templates don't fill xController_IDX directly — 6610 is purely the universal add-on here too).
+# SMBB uses fill_node_template_smbb_lte (shared with MCA/CENM) — different placeholder set.
 # ============================================================
 
 def nsb_node_type(row):
@@ -2874,6 +2936,8 @@ def nsb_node_type(row):
         return "MMBB"
     if bbu_mode == "TMBB":
         return "TRIMODE"
+    if is_smbb_lte_primary(row):
+        return "SMBB"
     return None
 
 
@@ -2910,15 +2974,15 @@ def fill_node_template_nsb(template_text, row, edp_index, user_id, date_str, sum
 
 def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str, log):
     summary_rows, siad_rows, outputs = [], [], []
-    tpl_paths = {"MMBB": TPL_NSB_MMBB, "TRIMODE": TPL_NSB_TRIMODE}
+    tpl_paths = {"MMBB": TPL_NSB_MMBB, "TRIMODE": TPL_NSB_TRIMODE, "SMBB": TPL_NSB_SMBB_LTE}
     sa_conversion_nodes = []
 
     for row in mm_objs:
         node_type = nsb_node_type(row)
         primary = row.get("Node to be built as")
         if node_type is None:
-            summary_rows.append({"Item": f"Node: {primary}", "Source": "node type detection", "Value": "skipped", "Note": "NSB only supports MMBB/TMBB — not LTE-only or 5G-only"})
-            log(f"· {primary}: BBU Mode not MMBB/TMBB, skipped")
+            summary_rows.append({"Item": f"Node: {primary}", "Source": "node type detection", "Value": "skipped", "Note": "NSB only supports MMBB/TMBB/SMBB-LTE-primary — not 5G-only"})
+            log(f"· {primary}: BBU Mode not MMBB/TMBB/SMBB-LTE-primary, skipped")
             continue
         tpl_path = tpl_paths[node_type]
         if not tpl_path.exists():
@@ -2926,7 +2990,10 @@ def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
             log(f"✗ {primary}: NSB {node_type} template file not found, skipped")
             continue
         tpl_text = tpl_path.read_text(encoding="utf-8")
-        tpl = fill_node_template_nsb(tpl_text, row, edp_index, user_id, date_str, summary_rows, log)
+        if node_type == "SMBB":
+            tpl = fill_node_template_smbb_lte(tpl_text, row, mm_objs, edp_index, user_id, date_str, summary_rows, log)
+        else:
+            tpl = fill_node_template_nsb(tpl_text, row, edp_index, user_id, date_str, summary_rows, log)
         outputs.append((f"{primary}_NSB_{node_type}_Integration_Filled.txt", tpl))
         push_siad_row(siad_rows, edp_index, primary)
         if check_sa_conversion(ciq_wb, primary):
@@ -3001,6 +3068,7 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     summary_rows, siad_rows, outputs = [], [], []
     tpl_mmbb = TPL_MMBB.read_text(encoding="utf-8")
     tpl_tmbb = TPL_TMBB.read_text(encoding="utf-8")
+    tpl_smbb_lte = TPL_SMBB_LTE.read_text(encoding="utf-8") if TPL_SMBB_LTE.exists() else None
 
     for row in mm_objs:
         bbu_mode = str(row.get("BBU Mode", "")).strip()
@@ -3013,9 +3081,19 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
             tpl = fill_node_template(tpl_tmbb, row, edp_index, user_id, date_str, summary_rows, log)
             outputs.append((f"{site_id}_TMBB_Integration_Filled.txt", tpl))
             push_siad_row(siad_rows, edp_index, site_id)
+        elif is_smbb_lte_primary(row):
+            if tpl_smbb_lte is None:
+                summary_rows.append({"Item": f"Node: {site_id}", "Source": "SMBB LTE template", "Value": "NOT FOUND", "Note": f"expected file not in templates/MCA/: {TPL_SMBB_LTE.name}"})
+                log(f"✗ {site_id}: SMBB LTE template file not found, skipped")
+                push_siad_row(siad_rows, edp_index, site_id)
+                continue
+            tpl = fill_node_template_smbb_lte(tpl_smbb_lte, row, mm_objs, edp_index, user_id, date_str, summary_rows, log)
+            outputs.append((f"{site_id}_SMBB_LTE_Integration_Filled.txt", tpl))
+            push_siad_row(siad_rows, edp_index, site_id)
         else:
-            summary_rows.append({"Item": f"Node: {site_id}", "Source": f"BBU Mode = {bbu_mode}", "Value": "skipped", "Note": "not MMBB or TMBB"})
-            log(f"· {site_id}: BBU Mode = {bbu_mode}, skipped")
+            note = "SMBB but 5G-primary — no template yet" if bbu_mode == "SMBB" else "not MMBB, TMBB, or SMBB-LTE-primary"
+            summary_rows.append({"Item": f"Node: {site_id}", "Source": f"BBU Mode = {bbu_mode}", "Value": "skipped", "Note": note})
+            log(f"· {site_id}: BBU Mode = {bbu_mode}, skipped ({note})")
             push_siad_row(siad_rows, edp_index, site_id)
 
     controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
@@ -3071,11 +3149,14 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     summary_rows, siad_rows, outputs = [], [], []
     tpl_cenm_tmbb = TPL_CENM.read_text(encoding="utf-8")
     tpl_cenm_mmbb = TPL_CENM_MMBB.read_text(encoding="utf-8") if TPL_CENM_MMBB.exists() else None
+    # SMBB-LTE-primary shares the exact same template file as MCA (confirmed) — TPL_SMBB_LTE.
+    tpl_cenm_smbb_lte = TPL_SMBB_LTE.read_text(encoding="utf-8") if TPL_SMBB_LTE.exists() else None
 
     tmbb_rows = [r for r in mm_objs if str(r.get("BBU Mode", "")).strip() == "TMBB"]
     mmbb_rows = [r for r in mm_objs if str(r.get("BBU Mode", "")).strip() == "MMBB"]
-    if not tmbb_rows and not mmbb_rows:
-        summary_rows.append({"Item": "Node identification", "Source": "CIQ · Mixed Mode Info", "Value": "NOT FOUND", "Note": "CENM expects a BBU Mode = TMBB or MMBB row"})
+    smbb_lte_rows = [r for r in mm_objs if is_smbb_lte_primary(r)]
+    if not tmbb_rows and not mmbb_rows and not smbb_lte_rows:
+        summary_rows.append({"Item": "Node identification", "Source": "CIQ · Mixed Mode Info", "Value": "NOT FOUND", "Note": "CENM expects a BBU Mode = TMBB, MMBB, or SMBB-LTE-primary row"})
         return summary_rows, None, None, siad_rows, outputs, [], []
 
     for row in tmbb_rows:
@@ -3095,10 +3176,21 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
         outputs.append((f"{site_id}_cENM_MMBB_Integration_Filled.txt", tpl))
         push_siad_row(siad_rows, edp_index, site_id)
 
+    for row in smbb_lte_rows:
+        site_id = row.get("Node to be built as")
+        if tpl_cenm_smbb_lte is None:
+            summary_rows.append({"Item": f"Node: {site_id}", "Source": "CENM SMBB-LTE template", "Value": "NOT FOUND", "Note": f"expected file not in templates/MCA/: {TPL_SMBB_LTE.name}"})
+            log(f"✗ {site_id}: CENM SMBB-LTE template file not found, skipped")
+            push_siad_row(siad_rows, edp_index, site_id)
+            continue
+        tpl = fill_node_template_smbb_lte(tpl_cenm_smbb_lte, row, mm_objs, edp_index, user_id, date_str, summary_rows, log)
+        outputs.append((f"{site_id}_cENM_SMBB_LTE_Integration_Filled.txt", tpl))
+        push_siad_row(siad_rows, edp_index, site_id)
+
     for row in mm_objs:
-        if str(row.get("BBU Mode", "")).strip() not in ("TMBB", "MMBB"):
+        if str(row.get("BBU Mode", "")).strip() not in ("TMBB", "MMBB") and not is_smbb_lte_primary(row):
             site_id = row.get("Node to be built as")
-            summary_rows.append({"Item": f"Node: {site_id}", "Source": f"BBU Mode = {row.get('BBU Mode')}", "Value": "skipped for template", "Note": "not TMBB/MMBB — still included in Pre/Post and SIAD"})
+            summary_rows.append({"Item": f"Node: {site_id}", "Source": f"BBU Mode = {row.get('BBU Mode')}", "Value": "skipped for template", "Note": "not TMBB/MMBB/SMBB-LTE-primary — still included in Pre/Post and SIAD"})
             push_siad_row(siad_rows, edp_index, site_id)
 
     controller_edp_found = push_all_controller_siad_rows(siad_rows, edp_index, controller_objs)
