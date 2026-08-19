@@ -32,7 +32,7 @@ TPL_CENM = resolve_template("cENM_TRIMODE_Integration_Pre-existing_Procedure_wit
 TPL_CENM_MMBB = resolve_template("cENM_MMBB_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V4.txt", "cENM_MMBB")
 # SMBB (LTE-only, LTE primary) — same source file shared by MCA and CENM per the blueprint.
 # NSB has its own file (no Pre-checks section, different EDP-field legend).
-TPL_SMBB_LTE = resolve_template("LTE_Integration_Pre-existing_Procedure_with_LTE_as_Primary_CMCLI_Updated_1.txt", "LTE_as_Primary_CMCLI")
+TPL_SMBB_LTE = resolve_template("LTE_Integration_Pre-existing_Procedure_with_LTE_as_Primary_CMCLI_Updated_V1.txt", "LTE_as_Primary_CMCLI")
 TPL_6610 = resolve_template("6610 Controller Integration Procedure_25Q3_Updated_V12.txt", "6610")
 TPL_PORT_CONVERSION = resolve_template("Template_Port_Conversion_1G_to_10G_BBU_V1_1.txt", "Port_Conversion")
 TPL_CRAN_TRIP1 = resolve_template("CRAN_TO_CRAN_Rehome_Pre-integration_Trip-1_Procedure_for_SA_Sites_V2.txt", "Trip-1")
@@ -62,7 +62,7 @@ TDIR_STATIC = Path(__file__).parent / "templates" / "Static"
 TDIR_MCA_IDL_CRAN = Path(__file__).parent / "templates" / "MCA" / "IDL_CRAN"
 TPL_NSB_MMBB = TDIR_NSB / "LTE+5G_MMBB_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V13.txt"
 TPL_NSB_TRIMODE = TDIR_NSB / "TRIMODE_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
-TPL_NSB_SMBB_LTE = TDIR_NSB / "LTE_Integration_NSB_Procedure_with_LTE_as_Primary_CMCLI_Updated_1.txt"
+TPL_NSB_SMBB_LTE = TDIR_NSB / "LTE_Integration_NSB_Procedure_with_LTE_as_Primary_CMCLI_Updated_V1.txt"
 
 # ============================================================
 # SHARED HELPERS
