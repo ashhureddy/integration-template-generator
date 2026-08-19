@@ -2478,17 +2478,95 @@ def build_mca_integration_report(pre_line, post_line, controller_objs, mm_objs, 
     return "\n".join(lines)
 
 
-def get_universal_static_outputs(log):
+def get_fa_code(ciq_wb):
+    """FA Code lives in the CIQ's 5G Info sheet only (same value repeated on every 5G cell row).
+    LTE-only (SMBB) sites have no 5G Info rows at all — confirmed to just leave it blank there
+    rather than guess a fallback column."""
+    if "5G Info" not in ciq_wb.sheetnames:
+        return None
+    ws = ciq_wb["5G Info"]
+    header = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    if "FA Code" not in header:
+        return None
+    idx = header.index("FA Code")
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if idx < len(row) and is_populated(row[idx]):
+            return row[idx]
+    return None
+
+
+def fill_integration_checklist(fpath, ciq_wb, mm_objs, log):
+    """Integration_Checklist_v3.xlsx: the real template already has labeled, highlighted cells
+    (A1=\"Site ID's :\", A2='FA Code :', A3='Support Engineer Name : ') — confirmed layout is
+    the value appended directly onto the label in the SAME cell, no separate value column
+    (both labels already end in ':' with no trailing space, so plain concatenation reproduces
+    e.g. \"Site ID's :KYL06026/KYL07626R\" exactly). Support Engineer Name stays untouched —
+    not derivable from the CIQ, manual entry."""
+    import openpyxl
+    wb = openpyxl.load_workbook(fpath)
+    ws = wb["Checklist"] if "Checklist" in wb.sheetnames else wb.worksheets[0]
+    site_ids = "/".join(r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as"))
+    fa_code = get_fa_code(ciq_wb)
+    site_label = ws["A1"].value or "Site ID's :"
+    fa_label = ws["A2"].value or "FA Code :"
+    ws["A1"] = site_label + site_ids
+    ws["A2"] = fa_label + (fa_code if fa_code is not None else "")
+    log(f"{'✓' if site_ids else '✗'} Integration Checklist · Site ID's -> {site_ids or 'NOT FOUND'}")
+    log(f"{'✓' if fa_code is not None else '✗'} Integration Checklist · FA Code -> {fa_code if fa_code is not None else 'NOT FOUND'}")
+    import io
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def fill_global_local_script_order(fpath, mm_objs, log):
+    """Global Local Script Execution Order.xlsx: Node_1/Node_2/Node_3 sheets, one per Mixed Mode
+    Info row in row order (same sibling-order convention as SMBB's xLTE_SiteID2x/3x). Each
+    sheet's own 'Node ID :' label (B1) and every 'XXSITEIDXX' placeholder inside that sheet's
+    script filenames get that sheet's node ID. A site with fewer than 3 nodes leaves the
+    unused Node_2/Node_3 sheet(s) untouched (confirmed — not deleted)."""
+    import openpyxl
+    wb = openpyxl.load_workbook(fpath)
+    site_ids = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
+    for i, sheet_name in enumerate(["Node_1", "Node_2", "Node_3"]):
+        if sheet_name not in wb.sheetnames:
+            continue
+        if i >= len(site_ids):
+            log(f"· Global Local Script Order · {sheet_name} -> no corresponding CIQ node, left blank")
+            continue
+        node_id = site_ids[i]
+        ws = wb[sheet_name]
+        ws["B1"] = node_id
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and "XXSITEIDXX" in cell.value:
+                    cell.value = cell.value.replace("XXSITEIDXX", str(node_id))
+        log(f"✓ Global Local Script Order · {sheet_name} -> {node_id}")
+    import io
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def get_universal_static_outputs(ciq_wb, mm_objs, log):
     """Returns a list of (filename, bytes) for the static reference files that ship alongside
-    Final Connections / Pre Fibers for every scope, unmodified — no CIQ/EDP data goes into these."""
+    Final Connections / Pre Fibers for every scope. Integration_Checklist_v3.xlsx and
+    Global Local Script Execution Order.xlsx now get Site ID/FA Code/Node ID auto-filled from
+    the CIQ (see fill_integration_checklist / fill_global_local_script_order) — everything else
+    in STATIC_OUTPUT_FILES stays a pure, unmodified passthrough."""
     outputs = []
     for fname in STATIC_OUTPUT_FILES:
         fpath = TDIR_STATIC / fname
-        if fpath.exists():
-            outputs.append((fname, fpath.read_bytes()))
-            log(f"\u2713 Static output attached: {fname}")
-        else:
+        if not fpath.exists():
             log(f"\u2717 Static output not found: templates/Static/{fname}")
+            continue
+        if fname == "Integration_Checklist_v3.xlsx":
+            outputs.append((fname, fill_integration_checklist(fpath, ciq_wb, mm_objs, log)))
+        elif fname == "Global Local Script Execution Order.xlsx":
+            outputs.append((fname, fill_global_local_script_order(fpath, mm_objs, log)))
+        else:
+            outputs.append((fname, fpath.read_bytes()))
+        log(f"\u2713 Static output attached: {fname}")
     return outputs
 
 
@@ -2924,10 +3002,9 @@ def generate_n2e(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
 
 # ============================================================
 # GENERATOR: NSB — no Pre-checks (Pre Configuration is always the fixed string "NA").
-# 3 templates: MMBB, TRIMODE, and SMBB (LTE-primary only — SMBB-5G-primary has no template yet).
-# MMBB/TRIMODE share the confirmed N2E placeholder mapping, minus the controller ID field
+# Only 2 templates (MMBB, TRIMODE) — no LTE-only/5G-only variants, per the blueprint.
+# Same confirmed placeholder mapping as N2E's MMBB/TRIMODE, minus the controller ID field
 # (NSB templates don't fill xController_IDX directly — 6610 is purely the universal add-on here too).
-# SMBB uses fill_node_template_smbb_lte (shared with MCA/CENM) — different placeholder set.
 # ============================================================
 
 def nsb_node_type(row):
@@ -3839,7 +3916,7 @@ elif st.session_state.qkx_page == "input":
 
             log("Done.")
 
-            binary_outputs += get_universal_static_outputs(log)
+            binary_outputs += get_universal_static_outputs(ciq_wb, mm_objs, log)
 
             st.session_state.qkx_results = {
                 "top_scope": top_scope, "scope_lines": scope_lines, "pre_line": pre_line, "post_line": post_line,
