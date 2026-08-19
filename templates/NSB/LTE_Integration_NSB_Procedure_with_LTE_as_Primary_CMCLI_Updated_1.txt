@@ -146,8 +146,8 @@ cmedit get xxSiteIdxx networkelement.userlabel
 
 ####### If userLabel is not set as per requirement, Set the Userlabel as per the site configuration #######
 
-cmedit set xxSiteIdxx networkelement=xxSiteIdxx userlabel=MMRadioNode
-<For MMBB Nodes>
+cmedit set xxSiteIdxx networkelement=xxSiteIdxx userlabel=4GRadioNode
+<For LTE Nodes>
 
 cmedit get xxSiteIdxx networkelement.userlabel
 
@@ -415,11 +415,27 @@ sts
 
 ########################## Transport script ###########################################
 
-cmedit action xxSiteIdxx BrmBackupManager=1 createBackup.(name="Pre_Integration")
+cmedit action xxSiteIdxx BrmBackupManager=1 createBackup.(name="Pre_Integration_Transport")
 cmedit get xxSiteIdxx BrmBackup.* -t
+
+Execute the transport script in CLI in ENM
+Drag and Drop the script in CLI and execute the script with command ** Batch execute file:xxSiteIdxx_RADIO_5G_Primary_cmcli_Transport_Script_xDatex
+
+cmedit action xxSiteIdxx BrmBackupManager=1 createBackup.(name="Post_Integration_Transport")
+cmedit get xxSiteIdxx BrmBackup.* -t
+
+#### Check if InterfaceIPv6=NR MO has been created on Router=LTE Parent MO.####
 
 lpr transport
 lpr Router
+
+###################################################################################################################
+## If InterfaceIPv6=NR MO is missing on site at this point, please escalate it in the RSF and reach out to Leads ##
+###################################################################################################################
+
+## Restart the Mixedmode node in order to get the sctp Endpoints in Enabled state ##
+
+cmedit action xxSiteIdxx FieldReplaceableUnit=1 restartUnit.(restartrank=RESTART_WARM,restartreason=PLANNED_RECONFIGURATION) --force
 
 ########################################
 Once Node is reachable, Check Sync State
@@ -435,8 +451,9 @@ cmedit action NetworkElement=xxSiteIdxx,CmFunction=1 sync
 cmedit get NetworkElement=xxSiteIdxx,CmFunction=1
 
 #######################################################################
-##  sctp check commands for nodes with 5G or LTE as primary  ## 
+##  sctp check commands for nodes with LTE as primary      ## 
 #######################################################################
+
 lt all
 st sctp
 
@@ -481,12 +498,13 @@ Note: If the IPV6_ENODEB_BEARER_IP for the node is not ping-able and the result 
 #####################################################################################################################################################################
 #####################################################################################################################################################################
 
->>> Note that while Creating Import Job in Bulk Cofiguration, Name the Job Name as same as the Script file (To indentify the Script execution status in future)
+>>> Note that while Creating Import Job in Bulk Configuration, Name the Job Name as same as the Script file (To identify the Script execution status in future)
 >>> Copy the Script File Name to be executed, Paste it on the Job Name Section.
 >>> Select the Script File to be executed in the File Selection Section.
 >>> In Validation Options, Select Skip Node Based Validation
->>> In Execution Error Handling, Select Stop
->>> Select Sequential in Execution Order
+>>> In Execution Error Handling, Select below options accordingly
+    While running Radio/RET Scripts Select "Stop"; While running NR/BL Scripts Select "Skip to Next Operation"
+    For NR/BL Scripts, on selecting "Skip to Next Operation", Execution Order will get highlighted, Select "Sequential" in Execution Order.
 >>> Create & Validate the Job
 >>> Validate the Job & wait for the status to change to VALIDATED. Check for any Error.
 >>> If any Error is received check with Lead & accordingly escalate to Scripting Team if required.
@@ -501,7 +519,7 @@ cmedit get xxSiteIdxx BrmBackup.* -t
 
 ####### For Any NR Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
 For "Instance Validation Error : MO created earlier by import file", Check the Bulk Import Created Job List & make sure No other Job is Validated/Running for the same Node.
-Thereby, Delete the previously validated file, then Reimport the script file, Re-Validate & Re-Execute.
+Thereby, Delete the previously validated file, Resync the Node in ENM CLI; then Reimport the script file, Re-Validate & Re-Execute.
 For Errors received due to Nodes being "Unsynchronized" during Job execution, Resync the Node & ensure that the Node is Sync'd in ENM. Then Re-Validate & Re-Execute the Job. #######
 
 xxSiteIdxx_01_1_network_relations_xDatex_dynamic_script
@@ -517,11 +535,11 @@ xxSiteIdxx_01_1_network_relations_xDatex_dynamic_script
 ##  Proceed with Sectorization script  	##
 ##########################################
 
-############################# Radio Combined - Scirpt #######################
+############################# Radio Combined - Script #######################
 ##                  Bulk Configuration script execution method             ##       
 #############################################################################
 
-cmedit action xxSiteIdxx BrmBackupManager=1 createBackup.(name="Pre_sectorization")
+cmedit action xxSiteIdxx BrmBackupManager=1 createBackup.(name="Pre_Sectorization")
 cmedit get xxSiteIdxx BrmBackup.* -t
 
 Run Combined radio script in Bulk Configuration 
@@ -561,7 +579,7 @@ st sector
 st TermPoint
 
 #####################################################################################################################################################################
-## 	Make sure MME is enable at this stage and  Proceed                                                                                                             ##
+## 	Make sure MME is enable at this stage and Proceed                                                                                                             ##
 #####################################################################################################################################################################
 
 st MME
@@ -646,7 +664,6 @@ cmedit get NetworkElement=xxSiteIdxx,CmFunction=1
 ##################################
 Checks for Scanner Profile on node
 ###################################
-(If scanner is missing on site then proceed with toggling the CM & PM functions)
 
 pst
 
@@ -668,6 +685,8 @@ pst PmJob=USERDEF-National
 ####                                                                                                                                    ####
 #### HXIN083802>                                                                                                                        ####
 ############################################################################################################################################
+
+(If scanner is missing on site then proceed with toggling the CM & PM functions)
 
 ##########################################
 MMBB NODE SCANNER CHECK
@@ -722,7 +741,7 @@ st UlCompGroup
 cmedit action xxSiteIdxx BrmBackupManager=1 createBackup.(name="Pre_Baselines_1")
 cmedit get xxSiteIdxx BrmBackup.* -t
 
-####### For BL Error, if Any BL Script Fails as a whole in Validation state or stuck in Parsed state, Need to Re-Import, Re-Validate & Execute. If Error persists, open a ticket & raise to BL Team.
+####### For BL Error, if Any BL Script Fails as a whole in Validation state, stuck in Parsed state or encounter any Error; first resync the Node in ENM CLI, then Reimport the script file, Re-Validate & Execute. If Error persists, open a ticket & raise to BL Team.
 For Any BL Script, if we see 'MO already exist' error/'Supplied and Current Values are same'. We can ignore those errors. No Need to open a ticket for that issue.
 Ensure that the BL File SW version is as per latest release. If found to be of Older SW version, reach out to the Leads/escalate to Scripting Team.
 Don't perform any parallel execution on the same Node even from Bulk Configuration or ENM CLI. Wait for the last running Job to complete before proceeding for next file validation.
@@ -809,11 +828,12 @@ Baseline 5 we will run in putty
 run /home/shared/xxUserIDxx/QIC/scripts/xxSiteIdxx_05_Baseline_for_Internal_Parameters_Write_Script_DU5216_L25Q4_REV25.46_xDatex.txt
  
 ####### Wait for BL5 to complete. Don't perform any parallel execution on the same Node even from Bulk Configuration or ENM CLI. #######
-####### After Baseline 5 is completed, Run Baseline 8,9,11,12,13,14,15,16,18 and 19 script in Bulk Configuration. #######
+####### After Baseline 5 is completed, Run rest of the Baseline scripts in Bulk Configuration. Do not validate/execute scripts parallelly, wait for the earlier running script to complete before running the next script #######
 
 xxSiteIdxx_08_1_Baseline_for_CRX_SectorcarrierparametersL25Q4_REV25.46_xDatex_dynamic_script
 
 xxSiteIdxx_08_2_Baseline_for_CRX_AIRLOAD_Startailg_L25Q4_REV25.46_xDatex_dynamic_script
+
 ###### Note that startAilg will only work if the cells are enabled. If received any Error, check cell status & consult with Leads for further action; Don't have to flag it as an Error to Scripting/raise Ticket #######
 
 xxSiteIdxx_08_2_Baseline_for_CRX_SectorcarrierparametersL25Q4_REV25.46_xDatex_dynamic_script
@@ -911,8 +931,9 @@ lst near
 hget AntennaNearUnit UniqueId|rfPortRef|State|iuantDeviceType|productNumber
 hget RetSubUnit State|userLabel|reservedby
 hget RetSubUnit iuantBaseStationId|iuantSectorId|electricalAntennaTilt|maxTilt|minTilt|iuantAntennaBearing
-st tma
+
 ### If TMA present ###
+st tma
 
 #####################################################################################################################################
 ## Once RET Scripts are completed and RETs are verified,Proceed with Calltest,External alarm Scripts execution                     ##
@@ -923,7 +944,7 @@ Run Call Test script
 
 xxSiteIdxx_calltest_2_network_relations_xDatex_dynamic_script
 
-################################### Externalalarm script #######################
+################################### External alarm script #######################
 
 ########################################################################################################################################################### 
 ## Check if no 6610 is present, we need to script external alarms on the node please run external alarms script and verify the all alarms are scripted as per pre ##
@@ -952,7 +973,7 @@ lpr EUtranCellRelation=
 get . cellsubscriptioncapacity
 
 #############################################################################################################################
-mfbiSupport  check. This parameter has to be in true. Please check using below commands and set to true if found in false
+mfbiSupport check. This parameter has to be in true. Please check using below commands and set to true if found in false
 #############################################################################################################################
 
 get . mfbiSupport
@@ -984,13 +1005,10 @@ cmedit get xxSiteIdxx UlCompGroup.(administrativeState) -t
 st UlCompGroup
 hget SectorCarrier= reservedBy
 
-
 ##########################################################################################
 Deblock of site , Before Unlocking site remember we must have Launch Approval and CBAND|DOD Radiation list check.
 If Launch approval is not there Site must be in Locked state, No Needs to Unlock at any point
 ##########################################################################################
-
-lt all
 
 cmedit set xxSiteIdxx TermPointToENB.TermPointToENBId==* administrativeState:UNLOCKED --force
 cmedit set xxSiteIdxx TermPointToMme.TermPointToMmeId==* administrativeState:UNLOCKED --force
@@ -1118,7 +1136,7 @@ Please softlock and unlock the FDDs and proceed to implement the above command t
 
 ##############################################################################################################################################################
 
-cmedit action xxSiteIdxx BrmBackupManager=1 createBackup.(name="Post_MMBB_Int_Final_xDatex")
+cmedit action xxSiteIdxx BrmBackupManager=1 createBackup.(name="Post_LTE_Int_Final_xDatex")
 cmedit get xxSiteIdxx BrmBackup.* -t
 
 alt
@@ -1132,9 +1150,10 @@ cmedit action xxSiteIdxx FieldReplaceableUnit=1 restartUnit.(restartrank=RESTART
 ##### Contact Next level of support if the TermPointToGNB is still DISABLED #####
 ##############################################################################################################
 
-****************************************************
-Commands to check the TermPointToGNB on MMBB Node
-****************************************************
+*************************************************
+Commands to check the TermPointToGNB on Node
+*************************************************
+
 st TermPointToGNB
 
 ##########################################
@@ -1219,9 +1238,6 @@ hget ^EUtranCellFDD|TDD state|cellbarred|primaryplmnreserved|sectorcarrier
 
 **LTE Traffic check**
 ue print -admitted
-
-**5G NR Traffic check**
-pget . pmendcsetupue|pmmacvoldldrb$
 
 ue print -admitted
 pmr -m .5 -r 403
@@ -1358,7 +1374,6 @@ q
 cmedit get xxSiteIdxx EUtrancellFDD.(EUtranCellFDDid,administrativeState,cellbarred) -t
 cmedit set xxSiteIdxx EUtrancellFDD.(EUtranCellFDDid==*) administrativeState:SHUTTINGDOWN
 
-
 cmedit get xxSiteIdxx EUtrancellFDD.(EUtranCellFDDid,administrativeState,cellbarred) -t
 cmedit set xxSiteIdxx EUtrancellFDD.EUtranCellFDDid==* cellBarred:BARRED
 
@@ -1379,11 +1394,6 @@ hget ^EUtranCell.DD cellBarred|sectorCarrierRef|primaryPlmnReserved|state|additi
 
 st TermPointToGNB
 
-Lock the sectors/NrcellDUs
-
-cmedit set xxSiteIdxx nrcelldu.nrcellduid==* administrativestate:SHUTTINGDOWN -force
-cmedit set xxSiteIdxx NRSectorCarrier.NRSectorCarrierid==* administrativestate:LOCKED -force
-
 lpr GUtranFreqRelation
 
 $$$$ Note $$$$
@@ -1392,7 +1402,7 @@ Make sure this has been set at the end of integration and the FE should not chan
 if FE unplug the fibers and plugin a different radio fiber will result in the auto deletion of this MO. So, the attribute has to be set again once the fiber is plugged in to the right Port.
 ####################################################################################################
 
-IMPORTANT Check
+####### IMPORTANT Check #######
 
 #############################################################################################################################
 ## Make sure once integration completed all cells Must be LOCKED/BARRED/RESERVED                                         ##
@@ -1410,6 +1420,8 @@ It should always be ran with current HC if found locked and non commercials.
 ## Putty Post checks get commands ##
 ########################################
 
+lt all
+s+
 alt
 hget ^EUtranCell.DD cellBarred|sectorCarrierRef|primaryPlmnReserved|state|additionalPlmnReservedList
 hget ^EUtranCell.DD availabilityStatus|cellrange|administrativeState|operationalState|primaryPlmnReserved|^tac|^CellId|earfcndl|earfcnul|dlChannelBandwidth|physicalLayerCellIdGroup|physicalLayerSubCellId|rachRootSequence|transmissionmode$|freqband$|Cellrange
@@ -1428,24 +1440,6 @@ hget RfPort rfPortId
 hget RiLink riPortRef1|riPortRef2|operationalState|transportType|fronthaulDeviceLineRate|availabilityStatusRiLinkId
 hget RfBranch dlAttenuation|ulAttenuation|ulTrafficDelay|dlTrafficDelay
 sdir
-
-##########################################################################################################################################################################################
-## Digital Tilt Check [Please ensure that if CBAND/DOD is newly added or retuned, tilt verification has to be performed & ensure that digitalTilt is set for all the CBAND/DOD sectors] ##
-##########################################################################################################################################################################################
-
-####### Digital tilt should be set as per Pre. For newly added tilt set the value as per CIQ #######
-
-hget CommonBeamforming digitalTilt|usedDigitalTilt
-
-cmedit get xxSiteIdxx CommonBeamforming.digitalTilt -t
-
-cmedit set SubNetwork=ONRM_ROOT_MO,MeContext=xxSiteIdxx,ManagedElement=xxSiteIdxx,GNBDUFunction=1,NRSectorCarrier=xxSiteIdxx_xxSectorIdxx,CommonBeamforming=1 digitalTilt : <tilt_value>
-
-cmedit get xxSiteIdxx CommonBeamforming.digitalTilt -t
-
-hget CommonBeamforming digitalTilt|usedDigitalTilt
-
-####### Check that the digital tilt is correctly set #######
 
 ###############
 ##RET Checks##
@@ -1610,13 +1604,6 @@ get . encapsulation
 get . vlanId
 
 ##############################
-## 5G Check ##
-##############################
-
-hget ^NRCell|syncsignal cellBarred|^state|cellRange|cellState|nRSectorCarrier|cellReservedForOperator
-hget ^NRCell|syncsignal sectorCarrierRef|primaryPlmnReserved|nCGI|nCI|nRPCI|nRSectorCarrier|nRTAC|arfcn$|cellLocalId
-
-##############################
 ## IDLe/IDLy checks ##
 ##############################
 
@@ -1652,7 +1639,7 @@ xxSiteIDxx_Postchecks_xxDatexx_ENM_Logs
 ** Recorded and Saved session of Postchecks logs from ENM and putty needs to be saved in Daily logs folder under Postchecks folder ***
 
 #######################################################
-### PostChecks End - ###
+### Post Checks End - ###
 #######################################################
 
 ##########################################################################################
