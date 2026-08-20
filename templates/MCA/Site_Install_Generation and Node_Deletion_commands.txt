@@ -1,0 +1,122 @@
+Site ID  :  xxSite_IDxx        (Replace with your Site ID)
+IP Address :  xxxxIP_ADDDESS_SITExxxx    (Replace with the IP address of your site)
+
+########################################################################################################################################################
+To Delete the Node in the ENM 
+########################################################################################################################################################
+cmedit get  xxSite_IDxx  CppConnectivityInformation.*   -- only for DUS Boards
+cmedit get  xxSite_IDxx  ComConnectivityInformation.*   -- only for G2/G3/G4 Boards
+cmedit get NetworkElement= xxSite_IDxx ,CmFunction=1
+cmedit get  xxSite_IDxx  networkelement.*
+
+cmedit set NetworkElement=xxSite_IDxx ,InventorySupervision=1 active=false
+cmedit set NetworkElement=xxSite_IDxx ,CmNodeHeartbeatSupervision=1 active=false
+cmedit get NetworkElement=xxSite_IDxx ,FmAlarmSupervision=1
+cmedit set NetworkElement=xxSite_IDxx ,FmAlarmSupervision=1 active=false
+
+cmedit get NetworkElement=xxSite_IDxx ,PmFunction=1 
+cmedit set NetworkElement=xxSite_IDxx ,PmFunction=1 pmEnabled=false 
+
+cmedit action NetworkElement=xxSite_IDxx ,CmFunction=1 deleteNrmDataFromEnm
+cmedit delete NetworkElement=xxSite_IDxx  -ALL
+
+Check if the Node is delete. Following commands should not give you any output.
+cmedit get  xxSite_IDxx  CppConnectivityInformation.* 
+cmedit get  xxSite_IDxx  ComConnectivityInformation.* 
+cmedit get NetworkElement=xxSite_IDxx ,CmFunction=1
+cmedit get  xxSite_IDxx  networkelement.*
+
+/////////cmedit get  xxSite_IDxx  ComConnectivityInformation.* -- only for G2/G3/G4 Boards
+
+cmedit delete Project=xxSite_IDxx  -ALL --force 
+
+#####Delete#####
+ap delete -p  xxSite_IDxx 
+ap delete -n  xxSite_IDxx 
+####################
+
+2. Creating Node in ENM and Site Integration scripts(Download LKF and Import it in ENM(SHM/ LICENSE ADMINISTRATION/IMPORT KEY FILES) before proceeding)
+#######################################################################################################################################################
+Drag and Drop the Apfile in the ENM for the respective node
+#######################################################################################################################################################
+
+ap order file: xxSite_IDxx_Radionode_Project.zip
+
+ap view -n  xxSite_IDxx 
+ap status -n  xxSite_IDxx 
+ap download -o -n  xxSite_IDxx 
+
+Please Check IP Address if matching as per pre if these are Pre-Existing nodes and has Board Migration.
+
+Please verify the S/W version and compare it with S/W version sent in RSF for which the Baselines are prepared.
+
+xxSite_IDxx  = xxxxIP_ADDDESS_SITExxxx
+
+#######################################################################################################################################################
+3. Once Node is Ready for service and has connectivity - Setting supervision parameters to true and Synchronizing the nodes
+#######################################################################################################################################################
+
+########### ENM ##############
+ap status -n xxSite_IDxx 
+
+cmedit get NetworkElement=xxSite_IDxx ,CmNodeHeartbeatSupervision=1 
+cmedit set NetworkElement=xxSite_IDxx ,CmNodeHeartbeatSupervision=1 active=true 
+
+cmedit get NetworkElement=xxSite_IDxx , FmAlarmSupervision=1 
+cmedit set NetworkElement=xxSite_IDxx ,FmAlarmSupervision=1 active=true
+
+cmedit get NetworkElement=xxSite_IDxx , InventorySupervision=1 
+cmedit set NetworkElement=xxSite_IDxx ,InventorySupervision=1 active=true 
+
+cmedit get NetworkElement=xxSite_IDxx ,PmFunction=1 
+cmedit set NetworkElement=xxSite_IDxx ,PmFunction=1 pmEnabled=true 
+
+cmedit get NetworkElement=xxSite_IDxx,CmFunction=1
+cmedit action NetworkElement=xxSite_IDxx ,CmFunction=1 sync 
+
+
+
+############ PUTTY ################
+
+amos xxSite_IDxx 
+lt all
+s+
+cvls
+st field
+alt
+
+s+
+lpr Router=LTE,InterfaceIPv6=1,AddressIPv6=1
+st field
+
+RN :  Verify with Pre-Checks for Pre-existing Site / verify with CIQ for the newly added node.
+hget enodebfunction userlabel|enbid
+
+TN : 
+lpr SctpProfile
+lpr TimeSyncIO=1
+
+
+Guidelines to be followed for FE replies on site install file
+#################### How to send the SIF to the FE #############
+
+FE Name
+
+Please load the attached Site Install Script using LMT tab and SMRS credentials
+
+Thanks
+
+############### Error in the Site Install Script ############################################################
+
+FE Name,
+
+Lets do a Board Restore and load the attached Site Install Script again and send us a screenshot whenever you are stuck. 
+
+Thanks
+
+********* Send the below email when the autointegration log has LOS inactive ******************
+FE Name,
+
+Please perform a board restore, also disconnect your laptop/ delete browser cookies. Once you are done will all the things. Let me know, I will send new Site Install.
+
+Thanks
