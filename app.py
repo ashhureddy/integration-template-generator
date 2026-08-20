@@ -32,7 +32,9 @@ TPL_CENM = resolve_template("cENM_TRIMODE_Integration_Pre-existing_Procedure_wit
 TPL_CENM_MMBB = resolve_template("cENM_MMBB_Integration_Pre-existing_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V4.txt", "cENM_MMBB")
 # SMBB (LTE-only, LTE primary) — same source file shared by MCA and CENM per the blueprint.
 # NSB has its own file (no Pre-checks section, different EDP-field legend).
-TPL_SMBB_LTE = resolve_template("LTE_Integration_Pre-existing_Procedure_with_LTE_as_Primary_CMCLI_Updated_V1.txt", "LTE_as_Primary_CMCLI")
+TPL_SMBB_LTE = resolve_template("LTE_Integration_Pre-existing_Procedure_with_LTE_as_Primary_CMCLI_Updated_1.txt", "LTE_as_Primary_CMCLI")
+# Deleted-node / board-swap node install+delete commands — universal across MCA/CENM/CRAN.
+TPL_NODE_DELETION = resolve_template("Site_Install_Generation_and_Node_Deletion_commands.txt", "Node_Deletion_commands")
 TPL_6610 = resolve_template("6610 Controller Integration Procedure_25Q3_Updated_V12.txt", "6610")
 TPL_PORT_CONVERSION = resolve_template("Template_Port_Conversion_1G_to_10G_BBU_V1_1.txt", "Port_Conversion")
 TPL_CRAN_TRIP1 = resolve_template("CRAN_TO_CRAN_Rehome_Pre-integration_Trip-1_Procedure_for_SA_Sites_V2.txt", "Trip-1")
@@ -62,7 +64,7 @@ TDIR_STATIC = Path(__file__).parent / "templates" / "Static"
 TDIR_MCA_IDL_CRAN = Path(__file__).parent / "templates" / "MCA" / "IDL_CRAN"
 TPL_NSB_MMBB = TDIR_NSB / "LTE+5G_MMBB_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V13.txt"
 TPL_NSB_TRIMODE = TDIR_NSB / "TRIMODE_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
-TPL_NSB_SMBB_LTE = TDIR_NSB / "LTE_Integration_NSB_Procedure_with_LTE_as_Primary_CMCLI_Updated_V1.txt"
+TPL_NSB_SMBB_LTE = TDIR_NSB / "LTE_Integration_NSB_Procedure_with_LTE_as_Primary_CMCLI_Updated_1.txt"
 
 # ============================================================
 # SHARED HELPERS
@@ -1937,17 +1939,160 @@ STATIC_OUTPUT_FILES = [
 ]
 
 
-def get_universal_static_outputs(log):
+def get_fa_code(ciq_wb):
+    """FA Code lives in the CIQ's 5G Info sheet only (same value repeated on every 5G cell row).
+    LTE-only (SMBB) sites have no 5G Info rows at all — confirmed to just leave it blank there
+    rather than guess a fallback column."""
+    if "5G Info" not in ciq_wb.sheetnames:
+        return None
+    ws = ciq_wb["5G Info"]
+    header = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    if "FA Code" not in header:
+        return None
+    idx = header.index("FA Code")
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if idx < len(row) and is_populated(row[idx]):
+            return row[idx]
+    return None
+
+
+def fill_integration_checklist(fpath, ciq_wb, mm_objs, log):
+    """Integration_Checklist_v3.xlsx: the real template already has labeled, highlighted cells
+    (A1="Site ID's :", A2='FA Code :', A3='Support Engineer Name : ') — confirmed layout is
+    the value appended directly onto the label in the SAME cell, no separate value column
+    (both labels already end in ':' with no trailing space, so plain concatenation reproduces
+    e.g. "Site ID's :KYL06026/KYL07626R" exactly). Support Engineer Name stays untouched —
+    not derivable from the CIQ, manual entry."""
+    import openpyxl
+    wb = openpyxl.load_workbook(fpath)
+    ws = wb["Checklist"] if "Checklist" in wb.sheetnames else wb.worksheets[0]
+    site_ids = "/".join(r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as"))
+    fa_code = get_fa_code(ciq_wb)
+    site_label = ws["A1"].value or "Site ID's :"
+    fa_label = ws["A2"].value or "FA Code :"
+    ws["A1"] = site_label + site_ids
+    ws["A2"] = fa_label + (str(fa_code) if fa_code is not None else "")
+    # Column-B-style boolean checklist cells display as a literal "TRUE"/"FALSE" word by
+    # default (confirmed: no version of this file, ever, has had real Form Control checkboxes —
+    # checked full git history). Glyph number format keeps the cell a real toggle-able boolean
+    # underneath, just displays ☑ (checked) / ☐ (unchecked) instead of the word.
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.data_type == "b":
+                cell.number_format = '"☑";;"☐"'
+    log(f"{'✓' if site_ids else '✗'} Integration Checklist · Site ID's -> {site_ids or 'NOT FOUND'}")
+    log(f"{'✓' if fa_code is not None else '✗'} Integration Checklist · FA Code -> {fa_code if fa_code is not None else 'NOT FOUND'}")
+    import io
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def fill_global_local_script_order(fpath, mm_objs, log):
+    """Global Local Script Execution Order.xlsx: Node_1/Node_2/Node_3 sheets, one per Mixed Mode
+    Info row in row order (same sibling-order convention as SMBB's xLTE_SiteID2x/3x). Each
+    sheet's own 'Node ID :' label (B1) and every 'XXSITEIDXX' placeholder inside that sheet's
+    script filenames get that sheet's node ID. A site with fewer than 3 nodes leaves the
+    unused Node_2/Node_3 sheet(s) untouched (confirmed — not deleted)."""
+    import openpyxl
+    wb = openpyxl.load_workbook(fpath)
+    site_ids = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
+    for i, sheet_name in enumerate(["Node_1", "Node_2", "Node_3"]):
+        if sheet_name not in wb.sheetnames:
+            continue
+        if i >= len(site_ids):
+            log(f"· Global Local Script Order · {sheet_name} -> no corresponding CIQ node, left blank")
+            continue
+        node_id = site_ids[i]
+        ws = wb[sheet_name]
+        ws["B1"] = node_id
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and "XXSITEIDXX" in cell.value:
+                    cell.value = cell.value.replace("XXSITEIDXX", str(node_id))
+        log(f"✓ Global Local Script Order · {sheet_name} -> {node_id}")
+    import io
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def detect_board_swap_nodes(ciq_wb, mm_objs, precheck_text):
+    """Same board-swap detection as report_detect.detect_node_board_changes (the MCA Integration
+    Report pipeline), reimplemented locally so the file-generation pipeline (generate_mca/
+    generate_cenm/generate_cran) doesn't need to self-import app.py as a module. Returns just the
+    node names — [(node, pre_board, post_board), ...] trimmed to node names only."""
+    _, pre_nodes_set = extract_precheck_sectors(precheck_text)
+    swapped = []
+    for row in mm_objs:
+        primary = row.get("Node to be built as")
+        if primary not in pre_nodes_set:
+            continue  # new node, not a swap
+        e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        is_lte_primary = str(primary).strip().upper() == str(e_name or "").strip().upper()
+        r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) if is_lte_primary else find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        if not r:
+            r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+        post_board = hw_string(r)
+        pre_board = pre_hw_string(precheck_text, primary)
+        if pre_board and post_board and pre_board.strip() != post_board.strip():
+            swapped.append(primary)
+    return swapped
+
+
+def generate_node_deletion_templates(ciq_wb, mm_objs, edp_index, classification, precheck_text, user_id, date_str, log):
+    """Site_Install_Generation_and_Node_Deletion_commands.txt — triggered for MCA/CENM/CRAN
+    whenever a node is being deleted from ENM (classification['deleted_nodes'], computed before
+    any scope-specific zeroing) OR has a board swap (detect_board_swap_nodes). One filled file
+    per triggered node. xxxxIP_ADDDESS_SITExxxx = EDP's IPV6_ENODEB_OAM_IP for that node — if the
+    node isn't found in EDP (expected for a deleted node no longer tracked there), the token is
+    left in place rather than guessed, per confirmed behavior."""
+    if TPL_NODE_DELETION is None or not TPL_NODE_DELETION.exists():
+        return [], []
+    base_tpl = TPL_NODE_DELETION.read_text(encoding="utf-8")
+    deleted_nodes = set(classification.get("deleted_nodes") or [])
+    board_swap_nodes = set(detect_board_swap_nodes(ciq_wb, mm_objs, precheck_text))
+    trigger_nodes = sorted(deleted_nodes | board_swap_nodes)
+    outputs, summary_rows = [], []
+    for node in trigger_nodes:
+        reason = []
+        if node in deleted_nodes:
+            reason.append("deleted node")
+        if node in board_swap_nodes:
+            reason.append("board swap")
+        row = edp_row_for(edp_index, node)
+        ip = edp_get(edp_index, row, "IPV6_ENODEB_OAM_IP")
+        tpl = base_tpl.replace("xxSite_IDxx", str(node))
+        if ip:
+            tpl = tpl.replace("xxxxIP_ADDDESS_SITExxxx", str(ip))
+            summary_rows.append({"Item": f"{node} · IP Address", "Source": "EDP · IPV6_ENODEB_OAM_IP", "Value": ip, "Note": " & ".join(reason)})
+            log(f"✓ {node} · Node Deletion template · IP -> {ip} ({' & '.join(reason)})")
+        else:
+            summary_rows.append({"Item": f"{node} · IP Address", "Source": "EDP · IPV6_ENODEB_OAM_IP", "Value": "NOT FOUND", "Note": f"{' & '.join(reason)} — placeholder left in output"})
+            log(f"✗ {node} · Node Deletion template · IP NOT FOUND in EDP, placeholder left in output ({' & '.join(reason)})")
+        outputs.append((f"{node}_Site_Install_and_Node_Deletion_Filled.txt", tpl))
+    return outputs, summary_rows
+
+
+def get_universal_static_outputs(ciq_wb, mm_objs, log):
     """Returns a list of (filename, bytes) for the static reference files that ship alongside
-    Final Connections / Pre Fibers for every scope, unmodified — no CIQ/EDP data goes into these."""
+    Final Connections / Pre Fibers for every scope. Integration_Checklist_v3.xlsx and
+    Global Local Script Execution Order.xlsx now get Site ID/FA Code/Node ID auto-filled from
+    the CIQ (see fill_integration_checklist / fill_global_local_script_order) — everything else
+    in STATIC_OUTPUT_FILES stays a pure, unmodified passthrough."""
     outputs = []
     for fname in STATIC_OUTPUT_FILES:
         fpath = TDIR_STATIC / fname
-        if fpath.exists():
-            outputs.append((fname, fpath.read_bytes()))
-            log(f"\u2713 Static output attached: {fname}")
-        else:
+        if not fpath.exists():
             log(f"\u2717 Static output not found: templates/Static/{fname}")
+            continue
+        if fname == "Integration_Checklist_v3.xlsx":
+            outputs.append((fname, fill_integration_checklist(fpath, ciq_wb, mm_objs, log)))
+        elif fname == "Global Local Script Execution Order.xlsx":
+            outputs.append((fname, fill_global_local_script_order(fpath, mm_objs, log)))
+        else:
+            outputs.append((fname, fpath.read_bytes()))
+        log(f"\u2713 Static output attached: {fname}")
     return outputs
 
 
@@ -2580,6 +2725,10 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     data2_scope_lines = generate_data2_testing_checks(ciq_wb, mm_objs, precheck_text, log)
     scope_of_work_lines += data2_scope_lines
 
+    del_outputs, del_summary = generate_node_deletion_templates(ciq_wb, mm_objs, edp_index, classification, precheck_text, user_id, date_str, log)
+    outputs += del_outputs
+    summary_rows += del_summary
+
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
 
@@ -2671,6 +2820,10 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     scope_of_work_lines += pc_scope_lines
     data2_scope_lines = generate_data2_testing_checks(ciq_wb, mm_objs, precheck_text, log)
     scope_of_work_lines += data2_scope_lines
+
+    del_outputs, del_summary = generate_node_deletion_templates(ciq_wb, mm_objs, edp_index, classification, precheck_text, user_id, date_str, log)
+    outputs += del_outputs
+    summary_rows += del_summary
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -2829,6 +2982,7 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     # Pre/Post Configuration stays CRAN's own distinct role-based format, untouched above.
     radio_swaps = classify_radio_swaps(precheck_text, ciq_wb)
     classification = classify_carriers(ciq_wb, mm_objs, precheck_text)
+    raw_deleted_nodes = classification.get("deleted_nodes")  # captured before the CRAN-specific zeroing below
     classification["deleted_nodes"] = []  # every CRAN rehome vacates a source node — not a noteworthy anomaly here, unlike MCA/CENM
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
@@ -2843,6 +2997,11 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     scope_of_work_lines += pc_scope_lines
     data2_scope_lines = generate_data2_testing_checks(ciq_wb, mm_objs, precheck_text, log)
     scope_of_work_lines += data2_scope_lines
+
+    del_outputs, del_summary = generate_node_deletion_templates(
+        ciq_wb, mm_objs, edp_index, {"deleted_nodes": raw_deleted_nodes}, precheck_text, user_id, date_str, log)
+    outputs += del_outputs
+    summary_rows += del_summary
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -3227,7 +3386,7 @@ elif st.session_state.qkx_page == "input":
 
             log("Done.")
 
-            binary_outputs += get_universal_static_outputs(log)
+            binary_outputs += get_universal_static_outputs(ciq_wb, mm_objs, log)
 
             st.session_state.qkx_results = {
                 "top_scope": top_scope, "scope_lines": scope_lines, "pre_line": pre_line, "post_line": post_line,
