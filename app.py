@@ -2480,6 +2480,78 @@ def build_mca_integration_report(pre_line, post_line, controller_objs, mm_objs, 
     return "\n".join(lines)
 
 
+def _xml_escape(text):
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _resolve_cell_text(sheet_xml, shared_strings_list, cell_ref):
+    """Returns (text, style_attr, kind) for a cell — text/kind are None if the cell holds a
+    non-text value (boolean/numeric) or doesn't exist at all; style_attr is None only if the
+    cell doesn't exist. Handles both shared-string (t="s") and inline-string (t="inlineStr")
+    cells — every text cell in these static templates is one or the other."""
+    m = re.search(r'<c r="' + re.escape(cell_ref) + r'"([^>]*?)(?:/>|>(.*?)</c>)', sheet_xml, re.S)
+    if not m:
+        return None, None, None
+    attrs, inner = m.group(1), m.group(2) or ""
+    style_m = re.search(r's="(\d+)"', attrs)
+    style_attr = f' s="{style_m.group(1)}"' if style_m else ""
+    if 't="s"' in attrs:
+        idx = int(re.search(r'<v>(\d+)</v>', inner).group(1))
+        text_m = re.search(r'<t[^>]*>(.*?)</t>', shared_strings_list[idx], re.S)
+        return (text_m.group(1) if text_m else ""), style_attr, "s"
+    elif 't="inlineStr"' in attrs:
+        text_m = re.search(r'<t[^>]*>(.*?)</t>', inner, re.S)
+        return (text_m.group(1) if text_m else ""), style_attr, "inlineStr"
+    return None, style_attr, None  # boolean/numeric/other — a cell we'd never touch here
+
+
+def _patch_text_cell(sheet_xml, cell_ref, style_attr, new_text):
+    """Replaces an EXISTING cell's content with new_text, preserving its style ('s=')
+    attribute exactly. Always re-emits as t="inlineStr" — simplest and safest, since it never
+    touches sharedStrings.xml (which other untouched cells may still reference)."""
+    m = re.search(r'<c r="' + re.escape(cell_ref) + r'"([^>]*?)(?:/>|>.*?</c>)', sheet_xml, re.S)
+    new_cell = f'<c r="{cell_ref}"{style_attr} t="inlineStr"><is><t xml:space="preserve">{_xml_escape(new_text)}</t></is></c>'
+    return sheet_xml[:m.start()] + new_cell + sheet_xml[m.end():]
+
+
+def _col_letters(cell_ref):
+    return re.match(r'([A-Z]+)(\d+)', cell_ref).group(1)
+
+
+def _col_to_num(letters):
+    n = 0
+    for ch in letters:
+        n = n * 26 + (ord(ch) - 64)
+    return n
+
+
+def _insert_cell_in_row(sheet_xml, row_num, cell_ref, new_text):
+    """Inserts a brand-new cell that doesn't exist in the row XML at all (Excel omits truly
+    empty cells from sheetData entirely) at the correct sorted column position among the
+    row's existing cells — confirmed necessary: Global Local Script Order's B1 cells are
+    empty in the pristine template and simply absent from the XML, not present-but-blank."""
+    row_m = re.search(r'(<row r="' + str(row_num) + r'"[^>]*>)(.*?)(</row>)', sheet_xml, re.S)
+    open_tag, body, close_tag = row_m.group(1), row_m.group(2), row_m.group(3)
+    new_cell = f'<c r="{cell_ref}" t="inlineStr"><is><t xml:space="preserve">{_xml_escape(new_text)}</t></is></c>'
+    target_col = _col_to_num(_col_letters(cell_ref))
+    insert_pos = len(body)
+    for m2 in re.finditer(r'<c r="([A-Z]+)\d+"[^/]*?(?:/>|>.*?</c>)', body):
+        if _col_to_num(m2.group(1)) > target_col:
+            insert_pos = m2.start()
+            break
+    new_body = body[:insert_pos] + new_cell + body[insert_pos:]
+    return sheet_xml[:row_m.start()] + open_tag + new_body + close_tag + sheet_xml[row_m.end():]
+
+
+def _patch_or_insert_cell(sheet_xml, cell_ref, new_text):
+    _, style_attr, kind = _resolve_cell_text(sheet_xml, [], cell_ref)
+    if style_attr is not None or kind is not None:
+        if re.search(r'<c r="' + re.escape(cell_ref) + r'"[^/]*?(?:/>|>.*?</c>)', sheet_xml, re.S):
+            return _patch_text_cell(sheet_xml, cell_ref, style_attr or "", new_text)
+    row_num = int(re.match(r'[A-Z]+(\d+)', cell_ref).group(1))
+    return _insert_cell_in_row(sheet_xml, row_num, cell_ref, new_text)
+
+
 def get_fa_code(ciq_wb):
     """FA Code lives in the CIQ's 5G Info sheet only (same value repeated on every 5G cell row).
     LTE-only (SMBB) sites have no 5G Info rows at all — confirmed to just leave it blank there
@@ -2499,38 +2571,48 @@ def get_fa_code(ciq_wb):
 
 def fill_integration_checklist(fpath, ciq_wb, mm_objs, log):
     """Integration_Checklist_v3.xlsx: the real template already has labeled, highlighted cells
-    (A1=\"Site ID's :\", A2='FA Code :', A3='Support Engineer Name : ') — confirmed layout is
-    the value appended directly onto the label in the SAME cell, no separate value column
-    (both labels already end in ':' with no trailing space, so plain concatenation reproduces
-    e.g. \"Site ID's :KYL06026/KYL07626R\" exactly). Support Engineer Name stays untouched —
-    not derivable from the CIQ, manual entry."""
-    import openpyxl
-    wb = openpyxl.load_workbook(fpath)
-    ws = wb["Checklist"] if "Checklist" in wb.sheetnames else wb.worksheets[0]
+    (A1="Site ID's :", A2='FA Code :', A3='Support Engineer Name : ') — value appended directly
+    onto the label in the SAME cell (both labels already end in ':' with no trailing space, so
+    plain concatenation reproduces e.g. "Site ID's :KYL06026/KYL07626R" exactly).
+
+    CRITICAL — never use openpyxl.load_workbook()+save() on this file. Confirmed by direct
+    testing: this template's column-B checklist cells are wired to Excel 365's native
+    Checkbox feature (xl/featurePropertyBag/featurePropertyBag.xml declares a "Checkbox" bag;
+    each boolean cell's style (s="15") has an <extLst><xfpb:xfComplement i="0"/></extLst>
+    pointing at it) — a plain openpyxl round-trip silently drops BOTH the featurePropertyBag
+    part AND the style's extLst (confirmed: neither survives), which is why the checkboxes
+    were showing as literal "TRUE"/"FALSE" text. Same category of destructive-round-trip bug
+    as the ActiveX macro checkboxes in mca_xlsm_surgical.py, different Excel feature. Fix here
+    is the same philosophy: raw zip/XML surgery, only patch the two label cells' text, copy
+    every other byte through untouched — this preserves the native checkbox wiring perfectly,
+    confirmed working with a single click-tested real checkbox before scaling to all 102."""
     site_ids = "/".join(r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as"))
     fa_code = get_fa_code(ciq_wb)
-    site_label = ws["A1"].value or "Site ID's :"
-    fa_label = ws["A2"].value or "FA Code :"
-    ws["A1"] = site_label + site_ids
-    ws["A2"] = fa_label + (str(fa_code) if fa_code is not None else "")
-    # Column-B-style checklist cells are TRUE/FALSE booleans (confirmed: no version of this
-    # file, ever, has had real Form Control checkboxes — checked full git history). A custom
-    # number format alone doesn't work here: Excel hard-codes boolean-typed cells to always
-    # display the literal word "TRUE"/"FALSE" and ignores any number format applied to them —
-    # confirmed by testing (the earlier boolean+numFmt attempt still showed "FALSE" in Excel).
-    # Converting the cell to a genuine numeric 1/0 makes Excel respect the custom format
-    # correctly, since number formats DO work normally on numeric cells.
-    for row in ws.iter_rows():
-        for cell in row:
-            if cell.data_type == "b":
-                cell.value = 1 if cell.value else 0
-                cell.number_format = '"☑";;"☐"'
+
+    with zipfile.ZipFile(fpath) as zin:
+        sheet1 = zin.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        shared_strings = zin.read("xl/sharedStrings.xml").decode("utf-8")
+        infos = {i.filename: i for i in zin.infolist()}
+        other_files = {n: zin.read(n) for n in zin.namelist() if n != "xl/worksheets/sheet1.xml"}
+
+    shared_strings_list = re.findall(r'<si>(.*?)</si>', shared_strings, re.S)
+    site_label, style_a1, _ = _resolve_cell_text(sheet1, shared_strings_list, "A1")
+    fa_label, style_a2, _ = _resolve_cell_text(sheet1, shared_strings_list, "A2")
+    site_label = site_label or "Site ID's :"
+    fa_label = fa_label or "FA Code :"
+
+    sheet1 = _patch_text_cell(sheet1, "A1", style_a1, site_label + site_ids)
+    sheet1 = _patch_text_cell(sheet1, "A2", style_a2, fa_label + (str(fa_code) if fa_code is not None else ""))
+
     log(f"{'✓' if site_ids else '✗'} Integration Checklist · Site ID's -> {site_ids or 'NOT FOUND'}")
     log(f"{'✓' if fa_code is not None else '✗'} Integration Checklist · FA Code -> {fa_code if fa_code is not None else 'NOT FOUND'}")
-    import io
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+
+    out_buf = io.BytesIO()
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in other_files.items():
+            zout.writestr(infos[name], data)
+        zout.writestr(infos["xl/worksheets/sheet1.xml"], sheet1.encode("utf-8"))
+    return out_buf.getvalue()
 
 
 def fill_global_local_script_order(fpath, mm_objs, log):
@@ -2538,28 +2620,51 @@ def fill_global_local_script_order(fpath, mm_objs, log):
     Info row in row order (same sibling-order convention as SMBB's xLTE_SiteID2x/3x). Each
     sheet's own 'Node ID :' label (B1) and every 'XXSITEIDXX' placeholder inside that sheet's
     script filenames get that sheet's node ID. A site with fewer than 3 nodes leaves the
-    unused Node_2/Node_3 sheet(s) untouched (confirmed — not deleted)."""
-    import openpyxl
-    wb = openpyxl.load_workbook(fpath)
+    unused Node_2/Node_3 sheet(s) untouched (confirmed — not deleted).
+
+    Same native-checkbox fragility as fill_integration_checklist (this file has the identical
+    featurePropertyBag Checkbox wiring across all 3 sheets) — raw zip/XML surgery only, never
+    openpyxl.load_workbook()+save()."""
     site_ids = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
+
+    with zipfile.ZipFile(fpath) as zin:
+        wb_xml = zin.read("xl/workbook.xml").decode("utf-8")
+        rels_xml = zin.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        shared_strings_xml = zin.read("xl/sharedStrings.xml").decode("utf-8")
+        infos = {i.filename: i for i in zin.infolist()}
+        all_files = {n: zin.read(n) for n in zin.namelist()}
+
+    shared_strings_list = re.findall(r'<si>(.*?)</si>', shared_strings_xml, re.S)
+    sheet_name_to_rid = dict(re.findall(r'<sheet name="([^"]+)"[^>]*r:id="(rId\d+)"', wb_xml))
+    rid_to_target = dict(re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"', rels_xml))
+
     for i, sheet_name in enumerate(["Node_1", "Node_2", "Node_3"]):
-        if sheet_name not in wb.sheetnames:
+        if sheet_name not in sheet_name_to_rid:
             continue
+        target = "xl/" + rid_to_target[sheet_name_to_rid[sheet_name]]
         if i >= len(site_ids):
             log(f"· Global Local Script Order · {sheet_name} -> no corresponding CIQ node, left blank")
             continue
         node_id = site_ids[i]
-        ws = wb[sheet_name]
-        ws["B1"] = node_id
-        for row in ws.iter_rows():
-            for cell in row:
-                if isinstance(cell.value, str) and "XXSITEIDXX" in cell.value:
-                    cell.value = cell.value.replace("XXSITEIDXX", str(node_id))
+        sheet_xml = all_files[target].decode("utf-8")
+
+        sheet_xml = _patch_or_insert_cell(sheet_xml, "B1", str(node_id))
+
+        for ref in re.findall(r'<c r="(\w+\d+)"', sheet_xml):
+            if ref == "B1":
+                continue
+            txt, style_attr2, _ = _resolve_cell_text(sheet_xml, shared_strings_list, ref)
+            if txt and "XXSITEIDXX" in txt:
+                sheet_xml = _patch_text_cell(sheet_xml, ref, style_attr2, txt.replace("XXSITEIDXX", str(node_id)))
+
+        all_files[target] = sheet_xml.encode("utf-8")
         log(f"✓ Global Local Script Order · {sheet_name} -> {node_id}")
-    import io
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+
+    out_buf = io.BytesIO()
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in all_files.items():
+            zout.writestr(infos[name], data)
+    return out_buf.getvalue()
 
 
 def detect_board_swap_nodes(ciq_wb, mm_objs, precheck_text):
