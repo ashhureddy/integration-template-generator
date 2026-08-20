@@ -1972,13 +1972,17 @@ def fill_integration_checklist(fpath, ciq_wb, mm_objs, log):
     fa_label = ws["A2"].value or "FA Code :"
     ws["A1"] = site_label + site_ids
     ws["A2"] = fa_label + (str(fa_code) if fa_code is not None else "")
-    # Column-B-style boolean checklist cells display as a literal "TRUE"/"FALSE" word by
-    # default (confirmed: no version of this file, ever, has had real Form Control checkboxes —
-    # checked full git history). Glyph number format keeps the cell a real toggle-able boolean
-    # underneath, just displays ☑ (checked) / ☐ (unchecked) instead of the word.
+    # Column-B-style checklist cells are TRUE/FALSE booleans (confirmed: no version of this
+    # file, ever, has had real Form Control checkboxes — checked full git history). A custom
+    # number format alone doesn't work here: Excel hard-codes boolean-typed cells to always
+    # display the literal word "TRUE"/"FALSE" and ignores any number format applied to them —
+    # confirmed by testing (the earlier boolean+numFmt attempt still showed "FALSE" in Excel).
+    # Converting the cell to a genuine numeric 1/0 makes Excel respect the custom format
+    # correctly, since number formats DO work normally on numeric cells.
     for row in ws.iter_rows():
         for cell in row:
             if cell.data_type == "b":
+                cell.value = 1 if cell.value else 0
                 cell.number_format = '"☑";;"☐"'
     log(f"{'✓' if site_ids else '✗'} Integration Checklist · Site ID's -> {site_ids or 'NOT FOUND'}")
     log(f"{'✓' if fa_code is not None else '✗'} Integration Checklist · FA Code -> {fa_code if fa_code is not None else 'NOT FOUND'}")
