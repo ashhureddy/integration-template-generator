@@ -1153,7 +1153,11 @@ MCA_CRAN_IDL_REGISTRY = {
         ("G2 BBU+G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-2) and (L-2-1).txt", "L-2"),
         ("G2 BBU+G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-2B) and (L-2B-1).txt", "L-2B"),
     ],
-    ("G2", "G2", "G2", "G3"): [("G2 BBU+G2 BBU+G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-3B) and (L-3B-1).txt", "")],
+    ("G2", "G2", "G2", "G3"): [
+        ("G2 BBU+G2 BBU+G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-3) and (L-3-1).txt", "L-3"),
+        ("G2 BBU+G2 BBU+G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-3B) and (L-3B-1).txt", "L-3B"),
+    ],
+    ("G2", "G3", "G3"): [("G2 BBU + G3 BBU + G3 BBU  6673 Connections Via Dafi Build Type (L-5B) and (L-5B-1).txt", "")],
     ("G2", "G3", "G4"): [("G2 BBU+G4 BBU+ G3 BBU 6673 Connections Via Dafi Build Type (L-10) and (L-10-1)].txt", "")],
     ("G3", "G4", "G4"): [("G4 BBU+G4 BBU+G3 BBU 6673 Connections Via Dafi Build Type (L-11) and (L-11-1)].txt", "")],
     ("G2", "G3", "G4", "G4"): [("G2 BBU + G4 BBU + G4 BBU + G3 BBU 6673 Connections Via Dafi Build Type (L-12) and (L-12-1).txt", "")],
@@ -2899,7 +2903,12 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     dss_outputs, dss_summary, dss_labels = generate_dss(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += dss_outputs
     summary_rows += dss_summary
-    idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log)
+    has_cran_node = any(str(r.get("Node to be built as", "")).strip().upper().endswith("F") for r in mm_objs)
+    if has_cran_node:
+        idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(
+            ciq_wb, mm_objs, user_id, date_str, log, template_dir=TDIR_MCA_IDL_CRAN, registry=MCA_CRAN_IDL_REGISTRY)
+    else:
+        idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log)
     outputs += idl_outputs
     summary_rows += idl_summary
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
