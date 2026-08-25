@@ -1159,6 +1159,21 @@ MCA_CRAN_IDL_REGISTRY = {
     ("G2", "G3", "G4", "G4"): [("G2 BBU + G4 BBU + G4 BBU + G3 BBU 6673 Connections Via Dafi Build Type (L-12) and (L-12-1).txt", "")],
 }
 
+# CRAN scope (generate_cran — actual CRAN rehome, not an MCA site with an incidental "F" node)
+# has its own separate IDL registry — confirmed distinct logic from MCA_CRAN_IDL_REGISTRY above,
+# though both pull from the same templates/MCA/IDL_CRAN/ folder (single source of truth for these
+# .txt files; only the combo->file mapping differs per scope). Currently seeded with the 4 templates
+# confirmed for this scope; other combinations fall through to "IDL Template not found" until
+# their templates are confirmed for CRAN as well.
+CRAN_IDL_REGISTRY = {
+    ("G2", "G2", "G2", "G3"): [
+        ("G2 BBU+G2 BBU+G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-3) and (L-3-1).txt", "L-3"),
+        ("G2 BBU+G2 BBU+G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-3B) and (L-3B-1).txt", "L-3B"),
+    ],
+    ("G2", "G3", "G3"): [("G2 BBU + G3 BBU + G3 BBU  6673 Connections Via Dafi Build Type (L-5B) and (L-5B-1).txt", "")],
+    ("G2", "G3", "G4", "G4"): [("G2 BBU + G4 BBU + G4 BBU + G3 BBU 6673 Connections Via Dafi Build Type (L-12) and (L-12-1).txt", "")],
+}
+
 IDL_SUFFIX_CANDIDATES = {
     "NODE_ID": ["NODE_ID", "Node_ID", "BBU_Node_ID"],
     "5G_NODE_ID": ["5G_NODE_ID", "5G_NodeID"],
@@ -3080,6 +3095,11 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     outputs += dss_outputs
     summary_rows += dss_summary
 
+    idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(
+        ciq_wb, mm_objs, user_id, date_str, log, template_dir=TDIR_MCA_IDL_CRAN, registry=CRAN_IDL_REGISTRY)
+    outputs += idl_outputs
+    summary_rows += idl_summary
+
     binary_outputs = [(f"Final_Connections_{target.get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))]
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
     if pre_fibers_bytes:
@@ -3093,6 +3113,7 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     raw_deleted_nodes = classification.get("deleted_nodes")  # captured before the CRAN-specific zeroing below
     classification["deleted_nodes"] = []  # every CRAN rehome vacates a source node — not a noteworthy anomaly here, unlike MCA/CENM
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
+    scope_of_work_lines += idl_scope_lines
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
     summary_rows += ngs_summary
     scope_of_work_lines += ngs_scope_lines
