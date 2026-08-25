@@ -1167,7 +1167,10 @@ IDL_SUFFIX_CANDIDATES = {
     "NODE_ID": ["NODE_ID", "Node_ID", "BBU_Node_ID"],
     "5G_NODE_ID": ["5G_NODE_ID", "5G_NodeID"],
     "GNB_ID": ["NODE_GNB_ID", "GNBID"],
-    "eNBId": ["Node_eNBId", "ENBID", "BBU_ENBID"],
+    # Confirmed casing gap: L-5B's own template uses "Node_eNBId" for one node but
+    # "NODE_eNBId" for another (same conceptual field) — exact-case matching missed the
+    # all-caps form entirely. Added as an extra candidate; purely additive.
+    "eNBId": ["Node_eNBId", "NODE_eNBId", "ENBID", "BBU_ENBID"],
 }
 
 
