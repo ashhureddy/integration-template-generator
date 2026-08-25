@@ -1713,11 +1713,29 @@ def fill_idl_template(template_text, node_slots, summary_rows, log, template_nam
                         break
         # bare "_NODE" tokens (e.g. ##1st_G3_NODE##) — filled entirely with the node's ID.
         # Same early-exit reasoning: stop at the first candidate prefix that actually exists.
+        # Confirmed real bug: L-5B has a 4-hash section-header form (####2nd_G3_NODE####) for
+        # this same bare-NODE case, which the 2-hash-only check never handled — and since
+        # "##2nd_G3_NODE##" is literally a SUBSTRING of "####2nd_G3_NODE####", replacing just
+        # the substring left the outer "##" pair behind (e.g. "####2nd_G3_NODE####" became
+        # "##B##" instead of "B"). Check the 4-hash divider form first, exactly like the
+        # concept-suffix loop above already does.
         if is_populated(node_label):
             for prefix in prefixes:
+                # Both hash-forms can exist as genuinely SEPARATE occurrences for the same
+                # prefix (e.g. L-5B has both a "####2nd_G3_NODE####" section header AND a
+                # separate "##2nd_G3_NODE##" reference inside the cmedit body) — check and
+                # replace both before deciding whether this prefix matched anything, so the
+                # first one found doesn't short-circuit the second.
                 node_divider = f"##{prefix}_NODE##"
+                node_divider_4hash = f"####{prefix}_NODE####"
+                found_any = False
+                if node_divider_4hash in tpl:
+                    tpl = tpl.replace(node_divider_4hash, str(node_label))
+                    found_any = True
                 if node_divider in tpl:
                     tpl = tpl.replace(node_divider, str(node_label))
+                    found_any = True
+                if found_any:
                     break
     return tpl
 
