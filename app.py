@@ -1230,12 +1230,23 @@ def fill_idl_template(template_text, node_slots, summary_rows, log, template_nam
         values = _idl_node_values(row)
         node_label = row.get("Node to be built as")
         for concept, value in values.items():
+            # Confirmed real bug: without stopping at the first candidate that actually exists
+            # in this template, a node with multiple candidate prefixes could keep matching and
+            # overwriting placeholders meant for a DIFFERENT node of the same generation (e.g. one
+            # G4 node's absolute-position candidate colliding with another G4 node's group-rank
+            # candidate) — one node's data silently ended up in two slots, the other node's data
+            # nowhere. Stop as soon as one real placeholder is found and handled for this node.
+            matched = False
             for prefix in prefixes:
+                if matched:
+                    break
                 for suffix in IDL_SUFFIX_CANDIDATES[concept]:
                     placeholder = f"##{prefix}_{suffix}##"
                     divider_form = f"####{prefix}_{suffix}####"
                     if divider_form in tpl and is_populated(value):
                         tpl = tpl.replace(divider_form, str(value))
+                        matched = True
+                        break
                     if placeholder in tpl:
                         if is_populated(value):
                             tpl = tpl.replace(placeholder, str(value))
@@ -1244,12 +1255,16 @@ def fill_idl_template(template_text, node_slots, summary_rows, log, template_nam
                         else:
                             summary_rows.append({"Item": f"IDL · {node_label} · {placeholder}", "Source": template_name, "Value": "NOT FOUND", "Note": ""})
                             log(f"✗ IDL {template_name}: {placeholder} -> NOT FOUND")
-        # bare "_NODE" tokens (e.g. ##1st_G3_NODE##) — filled entirely with the node's ID
+                        matched = True
+                        break
+        # bare "_NODE" tokens (e.g. ##1st_G3_NODE##) — filled entirely with the node's ID.
+        # Same early-exit reasoning: stop at the first candidate prefix that actually exists.
         if is_populated(node_label):
             for prefix in prefixes:
                 node_divider = f"##{prefix}_NODE##"
                 if node_divider in tpl:
                     tpl = tpl.replace(node_divider, str(node_label))
+                    break
     return tpl
 
 
@@ -1283,17 +1298,22 @@ def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log, template_d
         scope_lines.append(f"IDL Connections:\tIDL Template not found\t{'+'.join(combo)}")
         return outputs, summary_rows, scope_lines
 
-    # Confirmed real bug: every CRAN IDL template treats the "F"-ending hub node as the
-    # HIGHEST-numbered node in its generation (e.g. L-5B's hub is always "3rd_G3", the LTE-
-    # bridging relay is "2nd_G3") — never based on Mixed Mode Info row order. Using raw row
-    # order let the hub's absolute-position ordinal collide with another same-generation
-    # node's group-relative rank (both could compute to e.g. "2nd_G3"), and whichever node
-    # got processed first won the placeholder — sometimes filling the relay's slot with the
-    # hub's own (eNBId-less) data. Pinning the F-node last before numbering removes the
-    # collision outright; a no-op for non-CRAN sites with no F-node.
-    f_nodes = [n for n in nodes if str(n["row"].get("Node to be built as") or "").strip().upper().endswith("F")]
-    non_f_nodes = [n for n in nodes if n not in f_nodes]
-    nodes = non_f_nodes + f_nodes
+    # Confirmed real bug (two parts) — every CRAN IDL template treats the "F"-ending hub node
+    # as the LAST/highest-numbered node in its generation, and numbers all OTHER generations in
+    # site order (e.g. G2 before G3 before G4) — never based on raw Mixed Mode Info row order.
+    # A real CIQ can list a G3 node before its G2 node, or a hub before its peers, which shifted
+    # absolute-position numbers and caused two different nodes to compute the SAME candidate
+    # prefix (confirmed: e.g. an L-5B site with the hub or relay out of "expected" order, an
+    # L-11 site with the hub listed first). Canonicalizing the order before computing any
+    # ordinal — by generation, then hub-last within a generation — removes the ambiguity at
+    # its source; a no-op for single-node generations and non-CRAN sites with no F-node.
+    GEN_ORDER_RANK = {"G2": 0, "G3": 1, "G4": 2}
+
+    def _idl_sort_key(n):
+        is_f = str(n["row"].get("Node to be built as") or "").strip().upper().endswith("F")
+        return (GEN_ORDER_RANK.get(n["gen"], 99), is_f)
+
+    nodes = sorted(nodes, key=_idl_sort_key)
 
     gen_counts = {}
     for n in nodes:
@@ -1302,8 +1322,20 @@ def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log, template_d
     for i, n in enumerate(nodes, start=1):
         g = n["gen"]
         group_seen[g] = group_seen.get(g, 0) + 1
-        candidates = [f"{_ordinal(i)}_{g}", f"{_ordinal(group_seen[g])}_{g}"]
-        if gen_counts[g] == 1:
+        if gen_counts[g] > 1:
+            # Confirmed real bug: different templates use different conventions for a
+            # multi-node generation — some number by absolute site position (e.g. L-5B's two
+            # G3 nodes: "2nd_G3"/"3rd_G3"), others by rank within the generation itself (e.g.
+            # L-11's two G4 nodes: "1st_G4"/"2nd_G4", restarting regardless of the hub's
+            # position). Trying absolute position first broke the latter case whenever another
+            # generation's node shifted everyone's position. Trying the group-relative rank
+            # first, falling back to absolute position, satisfies both: whichever a specific
+            # template doesn't actually use simply doesn't match anything and is skipped, and
+            # the early-exit in fill_idl_template stops each node from later reusing whatever
+            # candidate the correct node was supposed to claim.
+            candidates = [f"{_ordinal(group_seen[g])}_{g}", f"{_ordinal(i)}_{g}"]
+        else:
+            candidates = [f"{_ordinal(i)}_{g}", f"{_ordinal(group_seen[g])}_{g}"]
             candidates.append(g)
             # Confirmed gap: some templates label the sole node of a generation by "how many
             # other nodes are at the site" rather than its absolute position — e.g. the lone G3
