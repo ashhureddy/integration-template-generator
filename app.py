@@ -1243,10 +1243,16 @@ def fill_idl_template(template_text, node_slots, summary_rows, log, template_nam
                 for suffix in IDL_SUFFIX_CANDIDATES[concept]:
                     placeholder = f"##{prefix}_{suffix}##"
                     divider_form = f"####{prefix}_{suffix}####"
+                    # Confirmed real bug: the 4-hash and 2-hash forms can both exist as
+                    # genuinely separate occurrences for the SAME prefix+suffix (e.g. one
+                    # template has a "####G2_NODE_ID####" section header AND many
+                    # "##G2_NODE_ID##" references throughout its cmedit body) — breaking
+                    # immediately after the first one matched left the other unfilled. Check
+                    # and replace both before deciding whether to move on.
+                    found_any = False
                     if divider_form in tpl and is_populated(value):
                         tpl = tpl.replace(divider_form, str(value))
-                        matched = True
-                        break
+                        found_any = True
                     if placeholder in tpl:
                         if is_populated(value):
                             tpl = tpl.replace(placeholder, str(value))
@@ -1255,6 +1261,8 @@ def fill_idl_template(template_text, node_slots, summary_rows, log, template_nam
                         else:
                             summary_rows.append({"Item": f"IDL · {node_label} · {placeholder}", "Source": template_name, "Value": "NOT FOUND", "Note": ""})
                             log(f"✗ IDL {template_name}: {placeholder} -> NOT FOUND")
+                        found_any = True
+                    if found_any:
                         matched = True
                         break
         # bare "_NODE" tokens (e.g. ##1st_G3_NODE##) — filled entirely with the node's ID.
