@@ -804,8 +804,12 @@ def dss_filter_row(row):
     return out
 
 def dss_get_primary_node_info(mm_objs, gnb_name, gnb_id):
+    # Confirmed bug: Mixed Mode Info's gNBId is often text while 5G Info's gNBId loads as a
+    # number (different cell formatting between sheets) — a strict == comparison silently
+    # never matches, leaving MMBB_Primary_Node_Name/LTE_Site_ID/LTE_eNBID unresolved even
+    # when the row is right there. Compare both sides as strings.
     for r in mm_objs:
-        if r.get("gNodeB Name") == gnb_name and r.get("gNBId") == gnb_id:
+        if str(r.get("gNodeB Name", "")).strip() == str(gnb_name).strip() and str(r.get("gNBId", "")).strip() == str(gnb_id).strip():
             out = {}
             if r.get("Node to be built as"):
                 out["primary_node"] = r.get("Node to be built as")
@@ -1279,6 +1283,18 @@ def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log, template_d
         scope_lines.append(f"IDL Connections:\tIDL Template not found\t{'+'.join(combo)}")
         return outputs, summary_rows, scope_lines
 
+    # Confirmed real bug: every CRAN IDL template treats the "F"-ending hub node as the
+    # HIGHEST-numbered node in its generation (e.g. L-5B's hub is always "3rd_G3", the LTE-
+    # bridging relay is "2nd_G3") — never based on Mixed Mode Info row order. Using raw row
+    # order let the hub's absolute-position ordinal collide with another same-generation
+    # node's group-relative rank (both could compute to e.g. "2nd_G3"), and whichever node
+    # got processed first won the placeholder — sometimes filling the relay's slot with the
+    # hub's own (eNBId-less) data. Pinning the F-node last before numbering removes the
+    # collision outright; a no-op for non-CRAN sites with no F-node.
+    f_nodes = [n for n in nodes if str(n["row"].get("Node to be built as") or "").strip().upper().endswith("F")]
+    non_f_nodes = [n for n in nodes if n not in f_nodes]
+    nodes = non_f_nodes + f_nodes
+
     gen_counts = {}
     for n in nodes:
         gen_counts[n["gen"]] = gen_counts.get(n["gen"], 0) + 1
@@ -1289,6 +1305,13 @@ def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log, template_d
         candidates = [f"{_ordinal(i)}_{g}", f"{_ordinal(group_seen[g])}_{g}"]
         if gen_counts[g] == 1:
             candidates.append(g)
+            # Confirmed gap: some templates label the sole node of a generation by "how many
+            # other nodes are at the site" rather than its absolute position — e.g. the lone G3
+            # in a 3xG2+1xG3 site is written as "3rd_G3" (3 = the other 3 nodes), not "4th_G3"
+            # (its actual position). Purely additive: only ever adds a candidate, never removes
+            # or changes one, so this can't affect any placeholder that already fills correctly.
+            if len(nodes) > 1:
+                candidates.append(f"{_ordinal(len(nodes) - 1)}_{g}")
         n["prefixes"] = list(dict.fromkeys(candidates))  # dedupe, preserve order
 
     site_id = mm_objs[0].get("Node to be built as", "site")
