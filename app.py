@@ -3098,13 +3098,22 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     fills = [
         ("xxMacro_MMBB_SiteIdxx", macro.get("Node to be built as"), "CIQ · Mixed Mode Info (MMBB)"),
         ("xxMacro_MMBB_gNB_Namexx", macro.get("gNodeB Name"), "CIQ · Mixed Mode Info (MMBB)"),
-        ("xxMacro_MMBB_gNBIdxx", macro.get("gNBId"), "CIQ · Mixed Mode Info (MMBB)"),
+        # Confirmed real bug: the template's own legend and every actual cmedit command use
+        # "xxMacro_5G_gNBIdxx" for the macro node's gNBId — "xxMacro_MMBB_gNBIdxx" (the token
+        # this code filled instead) doesn't exist anywhere in any of the 3 CRAN templates, so
+        # the macro's gNBId never populated in any generated CRAN rehome output.
+        ("xxMacro_5G_gNBIdxx", macro.get("gNBId"), "CIQ · Mixed Mode Info (MMBB)"),
         ("xxTarget_5G_IPV6_ENODEB_BEARER_IPxx", target_bearer, "EDP · IPV6_ENODEB_BEARER_IP"),
         ("xxTarget_5G_gNBIdxx", target.get("gNBId"), "CIQ · Mixed Mode Info (Target CRAN)"),
         ("xxTarget_SiteIdxx", target.get("Node to be built as"), "CIQ · Mixed Mode Info (Target CRAN)"),
         ("xxLTE_SiteIDxx", lte.get("Node to be built as"), "CIQ · Mixed Mode Info (LTE)"),
         ("xxLTE_SiteIdxx", lte.get("Node to be built as"), "CIQ · Mixed Mode Info (LTE)"),
         ("xxSiteIDxx", target.get("Node to be built as"), "ambiguous — defaulted to Target, VERIFY"),
+        # Confirmed real bug: a SEPARATE lowercase-"d" form of this token exists in Trip-1 and
+        # NSA (never in Trip-2), always in a CommonBeamforming/NRSectorCarrier (5G radio tilt)
+        # context — never filled at all before. Same ambiguity as xxSiteIDxx above, so defaulted
+        # to Target the same way, pending confirmation.
+        ("xxSiteIdxx", target.get("Node to be built as"), "ambiguous — defaulted to Target, VERIFY"),
         ("xxSource_SiteIdxx", source_id, "CIQ · Sector Del_Movement · Source Node name"),
         ("xxUserIDxx", user_id, "manual input"),
         ("xxDATExx", date_str, "manual input"),
