@@ -4541,17 +4541,17 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
         return tbl
 
 def add_chunked_tables(title, cells, full_param_list):
-        if not cells: return
-        # Reduced chunk size to 3 so columns have enough horizontal space
-        chunk_size = 3
-        chunks = [full_param_list[i:i + chunk_size] for i in range(0, len(full_param_list), chunk_size)]
+    if not cells: return
+    # Reduced chunk size to 3 so columns have enough horizontal space
+    chunk_size = 3
+    chunks = [full_param_list[i:i + chunk_size] for i in range(0, len(full_param_list), chunk_size)]
         
-        for i, chunk in enumerate(chunks):
-            suffix = f" (Part {i+1} of {len(chunks)})" if len(chunks) > 1 else ""
-            story.append(Paragraph(f"{title}{suffix}", styles["Heading4"]))
-            tbl = build_table_for_group(cells, chunk)
-            if tbl: 
-                story.extend([tbl, Spacer(1, 8)])
+    for i, chunk in enumerate(chunks):
+        suffix = f" (Part {i+1} of {len(chunks)})" if len(chunks) > 1 else ""
+        story.append(Paragraph(f"{title}{suffix}", styles["Heading4"]))
+        tbl = build_table_for_group(cells, chunk)
+        if tbl: 
+           story.extend([tbl, Spacer(1, 8)])
 
     for node, res in node_results.items():
         if not res["lte"] and not res["nr"]: continue
