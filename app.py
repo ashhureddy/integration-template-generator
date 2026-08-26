@@ -4564,7 +4564,6 @@ def add_chunked_tables(title, cells, full_param_list):
 
     doc.build(story)
     return buf.getvalue()
-
     
 # ============================================================
 # UI
