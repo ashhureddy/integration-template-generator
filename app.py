@@ -4155,7 +4155,8 @@ def build_sector_move_map(ciq_wb):
             }
     return move_map
 
-def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node, scope="MCA"):
+def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, scope="MCA"):
+    """Returns list of {'parameter','category','pre','ciq','post','color','note'}."""
     has_pre = scope not in NO_PRE_SCOPES
     ldn = f"EUtranCellFDD={cell_id}"
     on_cell = onsite_tables["lte_cell"].get(ldn, {})
@@ -4272,54 +4273,6 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, scope
                      "post": post_v, "color": color, "note": note})
 
     return results
-
-    def sector_lookup(tables, cell_id_key):
-        return tables["nr_sector"].get(f"NRSectorCarrier={cell_id_key}", {})
-
-    on_sec = sector_lookup(onsite_tables, cell_id)
-    pre_sec = sector_lookup(pre_tables, pre_sector_id) if has_pre else {}
-
-    results = []
-    for param, cell_key in CATEGORY_A_NR.items():
-        pre_v = pre_cell.get(cell_key) if has_pre else None
-        ciq_v = ciq_row.get(CATEGORY_A_NR_CIQ_KEYS[param]) if ciq_row else None
-        expected = ciq_v if (is_new or not has_pre) else pre_v
-        color, note = verdict(on_cell.get(cell_key), expected, "A")
-        results.append({"parameter": param, "category": "A", "pre": pre_v, "ciq": ciq_v,
-                         "post": on_cell.get(cell_key), "color": color, "note": note})
-
-    SECTOR_LEVEL_B_PARAMS = {"arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL"}
-    for param, (cell_key, ciq_key) in CATEGORY_B_NR.items():
-        ciq_v = ciq_row.get(ciq_key) if (ciq_row and ciq_key) else None
-        if param in SECTOR_LEVEL_B_PARAMS:
-            pre_v = pre_sec.get(cell_key) if has_pre else None
-            post_v = on_sec.get(cell_key)
-        else:
-            pre_v = pre_cell.get(cell_key) if has_pre else None
-            post_v = on_cell.get(cell_key)
-        color, note = verdict(post_v, ciq_v, "B")
-        if has_pre and color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
-            color, note = "amber", "matches Pre, not yet retuned to CIQ"
-        results.append({"parameter": param, "category": "B", "pre": pre_v, "ciq": ciq_v,
-                         "post": post_v, "color": color, "note": note})
-
-    for label, cell_key in [("TX", "noOfTxAntennas"), ("RX", "noOfRxAntennas")]:
-        pre_v = pre_sec.get(cell_key)
-        post_v = on_sec.get(cell_key)
-        color, note = verdict(post_v, pre_v, "B")
-        results.append({"parameter": label, "category": "B", "pre": pre_v, "ciq": None,
-                         "post": post_v, "color": color, "note": note})
-
-    ciq_v = ciq_row.get("configuredMaxTxPower") if ciq_row else None
-    pre_v = pre_sec.get("configuredMaxTxPower")
-    post_v = on_sec.get("configuredMaxTxPower")
-    color, note = verdict(post_v, ciq_v, "B")
-    results.append({"parameter": "ConfiguredOutputPower", "category": "B", "pre": pre_v, "ciq": ciq_v,
-                     "post": post_v, "color": color, "note": note})
-
-    return results
-
-
 # ============================================================
 # File-to-node matching + orchestration
 # ============================================================
