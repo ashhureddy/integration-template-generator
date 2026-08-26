@@ -4271,7 +4271,7 @@ def pivot_naming_results(cells):
             row[f"{key}_ciq"] = r.get("ciq")
             row[f"{key}_post"] = r.get("post")
             row[f"{key}_color"] = r.get("color")
-            if r["color"] == "red":
+            if r["color"] in ("red", "amber"):
                 comments.append(f"{r['parameter']}: {r['note']}")
         row["comment"] = " / ".join(dict.fromkeys(comments))
         rows.append(row)
@@ -4378,7 +4378,78 @@ def _rilink_for_sector(onsite_tables, sector_suffix):
     return None
 
 
-def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, all_onsite_tables=None, all_pre_tables=None):
+_PORT_BLANKS = {"", "N/A", "NA", "NONE", "NOT USED", "-", "--"}
+
+
+def _ciq_bbu_ports(ciq_row, gen):
+    """CIQ's BBU-side (DUS/XMU) letter port(s) for this sector — the port the sector is
+    ACTUALLY meant to be scripted on (e.g. 'A' for the 700 Alpha sector). LTE carries it in
+    'DUS / XMU Port' (+ its expansion column); 5G Info carries it in 'Port 1'..'Port 4'
+    (multiple ports = one radio cabled to several BBU ports, any of them is a valid match).
+    'Radio Port' is a DIFFERENT thing (the DATA-n port on the radio) and stays with the
+    'sector carrier' check — never used here."""
+    keys = (["DUS / XMU Port", "DUS / XMU Port Expansion"] if gen == "lte"
+            else ["Port 1", "Port 2", "Port 3", "Port 4"])
+    ports = []
+    for k in keys:
+        v = ciq_row.get(k)
+        if v is None:
+            continue
+        whole = str(v).strip().upper()
+        # Check the whole value against the blank set BEFORE splitting — otherwise "N/A"
+        # splits into the two bogus ports "N" and "A".
+        if whole in _PORT_BLANKS:
+            continue
+        for part in re.split(r'[,/;]', whole):
+            s = part.strip().upper().replace("_", "")
+            if s and s not in _PORT_BLANKS and s not in ports:
+                ports.append(s)
+    return ports
+
+
+def _bbu_port_from_rilink(rl):
+    """riPortRef1 is the BBU/DU side of the RiLink and carries the letter port
+    (e.g. 'FieldReplaceableUnit=DUS-1,RiPort=A'). riPortRef2 is the radio side (DATA-n)."""
+    m = re.search(r'RiPort=([A-Za-z]+\d*)', (rl.get("riPortRef1") or ""))
+    return m.group(1).strip().upper().replace("_", "") if m else None
+
+
+def _find_rilink_for_cell(cell_id, sector_suffix, gen, node, onsite_by_node, pre_by_node):
+    """Returns (rilink_dict, node_it_was_found_on). Own node is always searched FIRST — the
+    sector must be scripted on that node's own port. Only if nothing is found there do we look
+    at the other nodes, which is the real C-band case: a sector's radio can be moved from one
+    node's pole to another node's, so the RiLink legitimately lives on the other node. The
+    node it was found on is returned so it can be surfaced instead of silently accepted.
+    For CRAN F-node sites with more than one pole, extra poles are never introduced here —
+    only sectors present in the CIQ are ever looked up at all."""
+    onsite_by_node = onsite_by_node or {}
+    pre_by_node = pre_by_node or {}
+    order = ([node] if node in onsite_by_node else []) + [n for n in onsite_by_node if n != node]
+    rru = None
+    if gen == "lte":
+        own = [onsite_by_node.get(node) or {}, pre_by_node.get(node) or {}]
+        others = [t for n, t in onsite_by_node.items() if n != node] + \
+                 [t for n, t in pre_by_node.items() if n != node]
+        rru = _lte_cell_to_rru(own + others, cell_id)
+        if not rru:
+            return None, None
+    for n in order:
+        t = onsite_by_node.get(n) or {}
+        if gen == "nr":
+            rl = _rilink_for_sector(t, sector_suffix)
+        else:
+            rl = None
+            for candidate in t.get("rilink", {}).values():
+                if f"FieldReplaceableUnit={rru}," in (candidate.get("riPortRef2") or ""):
+                    rl = candidate
+                    break
+        if rl:
+            return rl, n
+    return None, None
+
+
+def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, all_onsite_tables=None,
+                              all_pre_tables=None, node=None, onsite_by_node=None, pre_by_node=None):
     """FDD naming / Rilinks / sector carrier / ISDLONLY / NRCELL CU naming — confirmed against
     blueprint row 1 (temp_blueprint.xlsx, both sheets): CIQ vs On-site only, no Pre column at
     all for this table in either MCA or N2E_NSB. Columns generated per gen ('lte' or 'nr') —
@@ -4400,22 +4471,56 @@ def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, a
         results.append({"parameter": "FDD naming", "ciq": cell_id,
                          "post": cell_id if exists else None, "color": color, "note": note})
 
-    rl = None
-    if gen == "nr":
-        rl = _rilink_for_sector(onsite_tables, sector_suffix)
-    else:
-        rru = _lte_cell_to_rru([onsite_tables, pre_tables] + (all_onsite_tables or []) + (all_pre_tables or []), cell_id)
-        if rru:
-            for candidate in onsite_tables.get("rilink", {}).values():
-                ref2 = candidate.get("riPortRef2") or ""
-                if f"FieldReplaceableUnit={rru}," in ref2:
-                    rl = candidate
-                    break
+    # Rilinks = WHICH BBU (DUS/XMU) letter port the sector is actually scripted on, compared
+    # against the port CIQ specifies for it (e.g. 700 Alpha -> Port A). Onsite it must be that
+    # same port ON THAT NODE. Merely existing + ENABLED is not enough — a RiLink on the wrong
+    # port passes that weaker test while the sector is physically cabled wrong.
+    rl, rl_node = _find_rilink_for_cell(cell_id, sector_suffix, gen, node, onsite_by_node, pre_by_node)
+    if rl is None and onsite_by_node is None:
+        # Backwards-compatible path when the per-node maps weren't passed in.
+        if gen == "nr":
+            rl = _rilink_for_sector(onsite_tables, sector_suffix)
+        else:
+            rru = _lte_cell_to_rru([onsite_tables, pre_tables] + (all_onsite_tables or []) + (all_pre_tables or []), cell_id)
+            if rru:
+                for candidate in onsite_tables.get("rilink", {}).values():
+                    if f"FieldReplaceableUnit={rru}," in (candidate.get("riPortRef2") or ""):
+                        rl = candidate
+                        break
+        rl_node = node
 
+    ciq_ports = _ciq_bbu_ports(ciq_row, gen)
+    ciq_port_text = "/".join(ciq_ports) if ciq_ports else None
+    onsite_port = _bbu_port_from_rilink(rl) if rl else None
     rl_state = rl.get("operationalState") if rl else None
-    color = "green" if (rl and rl_state == "ENABLED") else "red"
-    note = "Matching — RiLink scripted and enabled" if color == "green" else "RiLink not scripted or not enabled onsite"
-    results.append({"parameter": "Rilinks", "ciq": "Scripted", "post": rl_state, "color": color, "note": note})
+    moved = bool(rl_node) and bool(node) and rl_node != node
+    post_text = None
+    if onsite_port:
+        post_text = onsite_port + (f" @ {rl_node}" if moved else "")
+    elif rl:
+        post_text = rl_state
+
+    if rl is None:
+        color, note = "red", "RiLink not scripted onsite for this sector"
+    elif rl_state != "ENABLED":
+        color = "red"
+        note = f"RiLink scripted on Port {onsite_port or '?'} but operationalState is {rl_state}"
+    elif not onsite_port:
+        color, note = "amber", "RiLink enabled but BBU port could not be read from riPortRef1"
+    elif not ciq_ports:
+        color, note = "amber", f"Scripted on Port {onsite_port} — CIQ has no BBU port to verify against"
+    elif onsite_port not in ciq_ports:
+        color = "red"
+        note = (f"Scripted on Port {onsite_port}, CIQ says Port {ciq_port_text} — "
+                f"verify the cabling/script on this node")
+    elif moved:
+        color = "amber"
+        note = (f"Port {onsite_port} matches CIQ but the RiLink is on {rl_node}, not {node} — "
+                f"sector moved to another node's pole, confirm this is intended")
+    else:
+        color, note = "green", f"Matching — scripted and enabled on Port {onsite_port}"
+    results.append({"parameter": "Rilinks", "ciq": ciq_port_text, "post": post_text,
+                     "color": color, "note": note})
 
     ciq_radio_port = str(ciq_row.get("Radio Port") or "").strip().upper().replace("_", "")
     onsite_radio_port = None
@@ -4628,7 +4733,8 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
         node_results[node]["lte"].append((cell_id, results))
         node_results[node]["naming_lte"].append((cell_id, verify_naming_and_config(
             cell_id, ciq_row, on_t, pre_t, "lte",
-            all_onsite_tables=list(onsite_by_node.values()), all_pre_tables=list(pre_by_node.values()))))
+            all_onsite_tables=list(onsite_by_node.values()), all_pre_tables=list(pre_by_node.values()),
+            node=node, onsite_by_node=onsite_by_node, pre_by_node=pre_by_node)))
 
     for cell_id, ciq_row in nr_ciq.items():
         node = next((n for n in node_names if cell_id.startswith(n)), None)
@@ -4640,7 +4746,8 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
         node_results[node]["nr"].append((cell_id, results))
         node_results[node]["naming_nr"].append((cell_id, verify_naming_and_config(
             cell_id, ciq_row, on_t, pre_t, "nr",
-            all_onsite_tables=list(onsite_by_node.values()), all_pre_tables=list(pre_by_node.values()))))
+            all_onsite_tables=list(onsite_by_node.values()), all_pre_tables=list(pre_by_node.values()),
+            node=node, onsite_by_node=onsite_by_node, pre_by_node=pre_by_node)))
 
     for node, res in node_results.items():
         res["_wide_lte"] = pivot_param_results(res["lte"], "lte", has_pre)
@@ -4723,7 +4830,8 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=
     site_id_text = ", ".join(site_ids) if site_ids else "N/A"
     meta_text = f"<b>Scope:</b> {scope} &nbsp;&nbsp; <b>FA Code:</b> {fa_code or 'N/A'} &nbsp;&nbsp; <b>Site ID(s):</b> {site_id_text}"
     header_tbl = Table([[logo_img, P(f"{scope} Parameter Verification Report", title_style)],
-                         ["", P(meta_text, meta_style)]], colWidths=[1.2 * inch, 9.5 * inch])
+                         ["", P(meta_text, meta_style)]],
+                        colWidths=[1.2 * inch, doc.width - 1.2 * inch])
     header_tbl.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("SPAN", (0, 0), (0, 1)),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2), ("TOPPADDING", (0, 0), (-1, -1), 2),
@@ -4736,68 +4844,134 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=
         sub_cols: e.g. ['pre','ciq','post'] or ['ciq','post']
         comment_groups: restricts the Comments column to only mismatches among the params
         shown in THIS table — confirmed the blueprint's two tables each have their own
-        separate Comments column, not one combined across both."""
+        separate Comments column, not one combined across both.
+
+        LAYOUT: column widths are computed from the real available page width instead of a
+        fixed 0.5in per sub-column. With 7 parameters x 3 sub-columns the fixed widths came to
+        ~14in on a 10.4in page, so reportlab silently ran the columns off the right edge —
+        that was the cause of the broken/clipped tables. Parameter groups are now split across
+        as many continuation tables as needed so no column is ever narrower than MIN_SUB, and
+        the Comments column is only emitted on the last chunk (and not at all when the table
+        has no comment groups) so its width goes to the data instead of sitting empty."""
         if not wide_rows:
             return
-        story.append(P(title, ParagraphStyle("h4", parent=styles["Heading4"], spaceBefore=4, spaceAfter=2)))
 
-        top_header = [P("Sector", hdr_style)]
-        sub_header = [P("", hdr_style)]
-        col_widths = [0.95 * inch]
-        span_cmds = []
-        col_idx = 1
-        for label, key_prefix, sub_cols in param_groups:
-            span_start = col_idx
-            for sc in sub_cols:
-                top_header.append(P("", hdr_style))
-                sub_header.append(P(sc.upper() if sc != "post" else "ON SITE", hdr_style))
-                col_widths.append(0.5 * inch)
-                col_idx += 1
-            span_cmds.append(("SPAN", (span_start, 0), (col_idx - 1, 0)))
-            top_header[span_start] = P(label, hdr_style)
-        top_header.append(P("Comments", hdr_style))
-        sub_header.append(P("", hdr_style))
-        col_widths.append(2.6 * inch)
+        SECTOR_W = 1.3 * inch
+        COMMENT_W = 2.15 * inch
+        MIN_SUB = 0.44 * inch
+        # 6pt of slack for the per-cell LEFT/RIGHT padding, so wrapped Comments text can never
+        # push a hair past the right margin.
+        avail = doc.width - 6
+
+        want_comments = bool(comment_groups)
+        budget = avail - SECTOR_W - (COMMENT_W if want_comments else 0)
+        max_sub = max(1, int(budget // MIN_SUB))
+
+        # Split the parameter groups into chunks that each fit the page; a group is never
+        # split across two tables, so a Pre/CIQ/On-site triplet always stays together.
+        chunks, cur, cur_n = [], [], 0
+        for g in param_groups:
+            n = len(g[2])
+            if cur and cur_n + n > max_sub:
+                chunks.append(cur)
+                cur, cur_n = [], 0
+            cur.append(g)
+            cur_n += n
+        if cur:
+            chunks.append(cur)
 
         shown_params = {kp for _, kp, _ in param_groups}
-        data = [top_header, sub_header]
-        row_color_cells = []  # (row_idx, col_idx, color) for value cells
-        for r_i, row in enumerate(wide_rows, start=2):
-            data_row = [P(row["sector"], sector_style)]
-            c_i = 1
-            for label, key_prefix, sub_cols in param_groups:
-                color = row.get(f"{key_prefix}_color")
-                for sc in sub_cols:
-                    val = row.get(f"{key_prefix}_{sc}")
-                    data_row.append(P(val))
-                    if color:
-                        row_color_cells.append((r_i, c_i, color))
-                    c_i += 1
-            comment_text = ""
-            if comment_groups:
-                comments = []
-                for params, fixed_text in comment_groups:
-                    triggered = [p for p in params if p in shown_params and row.get(f"{p}_color") == "red"]
-                    if not triggered:
-                        continue
-                    comments.append(fixed_text if fixed_text else row.get(f"{triggered[0]}_note", "Mismatch"))
-                comment_text = " / ".join(dict.fromkeys(comments))
-            data_row.append(P(comment_text, note_style))
-            data.append(data_row)
 
-        tbl = Table(data, repeatRows=2, colWidths=col_widths)
-        style_cmds = [
-            ("BACKGROUND", (0, 0), (-1, 0), HEADER_BG), ("BACKGROUND", (0, 1), (-1, 1), SUBHEADER_BG),
-            ("GRID", (0, 0), (-1, -1), 0.4, pv_colors.HexColor("#BFBFBF")),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5), ("SPAN", (0, 0), (0, 1)),
-            ("ROWBACKGROUNDS", (0, 2), (-1, -1), [pv_colors.white]),
-        ] + span_cmds
-        for r_i, c_i, color in row_color_cells:
-            style_cmds.append(("BACKGROUND", (c_i, r_i), (c_i, r_i), COLOR_MAP.get(color, pv_colors.white)))
-        tbl.setStyle(TableStyle(style_cmds))
-        story.append(tbl)
-        story.append(Spacer(1, 8))
+        for ch_i, chunk in enumerate(chunks):
+            last = (ch_i == len(chunks) - 1)
+            with_comments = want_comments and last
+            chunk_title = title if ch_i == 0 else f"{title} (continued)"
+            story.append(P(chunk_title, ParagraphStyle("h4", parent=styles["Heading4"],
+                                                        spaceBefore=6, spaceAfter=3)))
+
+            n_sub = sum(len(sc) for _, _, sc in chunk)
+            free = avail - SECTOR_W - (COMMENT_W if with_comments else 0)
+            sub_w = free / n_sub
+            # Any slack left over when a chunk is short goes to Comments so the page is filled
+            # edge to edge rather than leaving a ragged right margin.
+            if sub_w > 1.1 * inch:
+                sub_w = 1.1 * inch
+            used = SECTOR_W + n_sub * sub_w + (COMMENT_W if with_comments else 0)
+            comment_w = COMMENT_W + max(0, avail - used) if with_comments else 0
+            sector_w = SECTOR_W if with_comments else SECTOR_W + max(0, avail - used)
+
+            top_header = [P("Sector", hdr_style)]
+            sub_header = [P("", hdr_style)]
+            col_widths = [sector_w]
+            span_cmds = []
+            group_edges = []  # last column index of each group, for the divider lines
+            col_idx = 1
+            for label, key_prefix, sub_cols in chunk:
+                span_start = col_idx
+                for sc in sub_cols:
+                    top_header.append(P("", hdr_style))
+                    sub_header.append(P("ON SITE" if sc == "post" else sc.upper(), hdr_style))
+                    col_widths.append(sub_w)
+                    col_idx += 1
+                span_cmds.append(("SPAN", (span_start, 0), (col_idx - 1, 0)))
+                top_header[span_start] = P(label, hdr_style)
+                group_edges.append(col_idx - 1)
+            if with_comments:
+                top_header.append(P("Comments", hdr_style))
+                sub_header.append(P("", hdr_style))
+                col_widths.append(comment_w)
+
+            data = [top_header, sub_header]
+            row_color_cells = []
+            for r_i, row in enumerate(wide_rows, start=2):
+                data_row = [P(row["sector"], sector_style)]
+                c_i = 1
+                for label, key_prefix, sub_cols in chunk:
+                    color = row.get(f"{key_prefix}_color")
+                    for sc in sub_cols:
+                        data_row.append(P(row.get(f"{key_prefix}_{sc}")))
+                        if color:
+                            row_color_cells.append((r_i, c_i, color))
+                        c_i += 1
+                if with_comments and comment_groups == "row":
+                    # Naming table: the combined per-sector comment was already built by
+                    # pivot_naming_results (it carries the Rilinks port/node detail).
+                    data_row.append(P(row.get("comment", ""), note_style))
+                elif with_comments:
+                    comments = []
+                    for params, fixed_text in comment_groups:
+                        triggered = [p for p in params if p in shown_params and row.get(f"{p}_color") == "red"]
+                        if not triggered:
+                            continue
+                        comments.append(fixed_text if fixed_text else row.get(f"{triggered[0]}_note", "Mismatch"))
+                    data_row.append(P(" / ".join(dict.fromkeys(comments)), note_style))
+                data.append(data_row)
+
+            tbl = Table(data, repeatRows=2, colWidths=col_widths, hAlign="LEFT")
+            style_cmds = [
+                ("BACKGROUND", (0, 0), (-1, 0), HEADER_BG), ("BACKGROUND", (0, 1), (-1, 1), SUBHEADER_BG),
+                ("GRID", (0, 0), (-1, -1), 0.3, pv_colors.HexColor("#CFCFCF")),
+                ("BOX", (0, 0), (-1, -1), 0.7, pv_colors.HexColor("#1F3864")),
+                ("LINEBELOW", (0, 1), (-1, 1), 0.7, pv_colors.HexColor("#1F3864")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("SPAN", (0, 0), (0, 1)),
+                ("ROWBACKGROUNDS", (0, 2), (-1, -1), [pv_colors.white, pv_colors.HexColor("#F4F7FC")]),
+            ] + span_cmds
+            if with_comments:
+                style_cmds.append(("SPAN", (len(col_widths) - 1, 0), (len(col_widths) - 1, 1)))
+            # Vertical rule after each parameter group so the Pre/CIQ/On-site triplets read as
+            # blocks instead of one undifferentiated wall of columns.
+            for edge in group_edges:
+                style_cmds.append(("LINEAFTER", (edge, 0), (edge, len(data) - 1),
+                                    0.7, pv_colors.HexColor("#8EA9DB")))
+            style_cmds.append(("LINEAFTER", (0, 0), (0, len(data) - 1), 0.7, pv_colors.HexColor("#8EA9DB")))
+            for r_i, c_i, color in row_color_cells:
+                style_cmds.append(("BACKGROUND", (c_i, r_i), (c_i, r_i), COLOR_MAP.get(color, pv_colors.white)))
+            tbl.setStyle(TableStyle(style_cmds))
+            story.append(tbl)
+            story.append(Spacer(1, 7))
 
     def naming_groups():
         cols = ["ciq", "post"]
@@ -4843,9 +5017,11 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=
         # A node can have 4G cells, 5G cells, or both — 5G table generated whenever 5G cells
         # are present, even if the node's primary identity is 4G (MMBB), confirmed required.
         if res.get("naming_lte"):
-            build_wide_table(res["_wide_naming_lte"], naming_groups(), "4G Naming & Configuration")
+            build_wide_table(res["_wide_naming_lte"], naming_groups(), "4G Naming & Configuration",
+                              comment_groups="row")
         if res.get("naming_nr"):
-            build_wide_table(res["_wide_naming_nr"], naming_groups_nr(), "5G Naming & Configuration")
+            build_wide_table(res["_wide_naming_nr"], naming_groups_nr(), "5G Naming & Configuration",
+                              comment_groups="row")
         # Confirmed exact blueprint row order (temp_blueprint.xlsx): Naming table first, then
         # ALL "Earfcn/TX-RX/etc" tables grouped together (4G then 5G), THEN all "PCI/TAC"
         # tables grouped together (4G then 5G) — type-first ordering, not generation-first.
