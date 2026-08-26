@@ -7,6 +7,9 @@ import time
 import zipfile
 from datetime import date
 from pathlib import Path
+# Note: reportlab is imported lazily inside build_parameter_verification_pdf() below, not here —
+# a new feature's dependency must never be able to crash the whole app on startup if it isn't
+# installed yet. Every other page (including Generate Report) must keep working regardless.
 
 # ============================================================
 # CONFIG
@@ -3884,6 +3887,546 @@ def render_checks_panel_static(container, top_scope, scope_lines):
             st.markdown('<div class="qkx-checklist">' + "".join(html_rows) + "</div>", unsafe_allow_html=True)
 
 
+
+
+# ============================================================
+# PARAMETER VERIFICATION (MCA / N2E / NSB) — CIQ vs Pre logs vs Onsite logs
+# Category A (rachRootSequence, PCI/nRPCI, Cellrange): expected = Pre for pre-existing/moved
+#   sectors (via Sector Del_Movement for cross-node moves), CIQ for newly added sectors.
+# Category B (EarfcnDL/UL, arfcnDL/UL, bSChannelBwDL/UL, cellLocalId, ssbFrequency, Cell ID,
+#   Bandwidth, noOfTx/RxAntennas, configuredOutputPower, TAC, NR TAC, nCI): expected = CIQ
+#   always; Pre != CIQ is amber (expected retune change), not a failure.
+# NOTE: reportlab is imported lazily inside build_parameter_verification_pdf() only — a new
+# feature dependency must never crash the whole app on startup if it isn't installed yet.
+# ============================================================
+
+
+
+# ============================================================
+# AMOS/moshell hget & get command output parser
+# (validated against real .log / _onsite.txt captures)
+# ============================================================
+
+RULE_RE = re.compile(r'^=+$')
+CMD_RE = re.compile(r'^\S+>\s*h?get\s+(\S+)\s+(.+)$')
+ANY_PROMPT_RE = re.compile(r'^\S+>\s*\S')
+
+
+def _col_bounds(header_line):
+    return [(m.start(), m.group()) for m in re.finditer(r'\S+', header_line)]
+
+
+def _clean_value(raw):
+    raw = raw.strip()
+    if raw == '':
+        return None
+    m = re.match(r'^-?\d+\s+\(([A-Z_]+)\)$', raw)
+    if m:
+        return m.group(1)
+    m = re.match(r'^\[\d+\]\s*=\s*(.+)$', raw)
+    if m:
+        return m.group(1).strip()
+    if re.match(r'^i\[\d+\]\s*=$', raw):
+        return None
+    if raw.lower() == 'true':
+        return True
+    if raw.lower() == 'false':
+        return False
+    return raw
+
+
+def _rebuild_header(lines, start, n):
+    parts = []
+    j = start
+    while j < n and not RULE_RE.match(lines[j].strip()):
+        if lines[j].strip() == '':
+            break
+        parts.append(lines[j])
+        j += 1
+    if not parts or j >= n or not RULE_RE.match(lines[j].strip()):
+        return None, None, j
+    wrap_width = len(parts[0]) if len(parts) > 1 else None
+    return ''.join(parts), wrap_width, j
+
+
+def parse_hget_blocks(text):
+    lines = text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    i = 0
+    n = len(lines)
+    while i < n:
+        m = CMD_RE.match(lines[i].strip())
+        if not m:
+            i += 1
+            continue
+        mo_pattern, attrs_str = m.group(1), m.group(2)
+        block_start = i
+        i += 1
+        header_line = None
+        wrap_width = None
+        j = i
+        limit = min(i + 40, n)
+        while j < limit:
+            stripped = lines[j].strip()
+            if ANY_PROMPT_RE.match(stripped):
+                break
+            if RULE_RE.match(stripped):
+                header_line, wrap_width, j = _rebuild_header(lines, j + 1, n)
+                break
+            j += 1
+        if header_line is None:
+            i = block_start + 1
+            continue
+        j += 1
+
+        col_positions = _col_bounds(header_line)
+        # Confirmed real format: some commands (e.g. onsite's "get . cellrange") render as a
+        # PIVOTED "MO / Attribute / Value" table instead of the normal wide table — one row per
+        # (instance, single-attribute) pair rather than one row per instance with all attributes
+        # as columns. Detect and pivot it into the same {instance: {attr: value}} shape.
+        is_pivot = [c for _, c in col_positions] == ['MO', 'Attribute', 'Value']
+        rows = {}
+        k = j
+        while k < n and not RULE_RE.match(lines[k].strip()):
+            line = lines[k]
+            if line.strip() == '':
+                k += 1
+                continue
+            if ANY_PROMPT_RE.match(line.strip()):
+                break
+            row_text = line
+            k += 1
+            if wrap_width is not None:
+                while len(row_text) >= wrap_width and k < n:
+                    nxt = lines[k]
+                    if nxt.strip() == '' or RULE_RE.match(nxt.strip()) or ANY_PROMPT_RE.match(nxt.strip()):
+                        break
+                    row_text += nxt
+                    k += 1
+            bounds = [p[0] for p in col_positions] + [len(row_text)]
+            values = {}
+            for idx, (pos, colname) in enumerate(col_positions):
+                raw = row_text[bounds[idx]:bounds[idx + 1]]
+                values[colname] = _clean_value(raw)
+            if is_pivot:
+                instance = values.get('MO')
+                attr_name = values.get('Attribute')
+                attr_val = values.get('Value')
+                if instance and attr_name:
+                    rows.setdefault(instance, {})[attr_name] = attr_val
+            else:
+                instance = values.get(col_positions[0][1])
+                if instance:
+                    rows[instance] = values
+
+        yield {
+            "mo_type": mo_pattern,
+            "attrs_requested": attrs_str.split('|'),
+            "columns": [c for _, c in col_positions],
+            "rows": rows,
+        }
+        i = k
+
+
+def parse_hget_text(text):
+    return list(parse_hget_blocks(text))
+
+
+def merge_by_instance(blocks, mo_type_filter):
+    merged = {}
+    for b in blocks:
+        if mo_type_filter not in b["mo_type"]:
+            continue
+        for instance, vals in b["rows"].items():
+            merged.setdefault(instance, {}).update(vals)
+    return merged
+
+
+def merge_by_instance_prefix(blocks, instance_prefix):
+    merged = {}
+    for b in blocks:
+        for instance, vals in b["rows"].items():
+            if instance.startswith(instance_prefix):
+                merged.setdefault(instance, {}).update(vals)
+    return merged
+
+
+def top_level(instance_ldn):
+    return ',' not in instance_ldn
+
+
+def pv_load_node_tables(text):
+    """Parse one node's log text into {'lte_cell', 'nr_cell', 'nr_sector', 'lte_sector'} tables."""
+    blocks = parse_hget_text(text)
+    lte = {k: v for k, v in merge_by_instance_prefix(blocks, 'EUtranCellFDD=').items() if top_level(k)}
+    nr_cell = {k: v for k, v in merge_by_instance_prefix(blocks, 'NRCellDU=').items() if top_level(k)}
+    nr_sector = merge_by_instance(blocks, 'Sector')
+    lte_sector = merge_by_instance(blocks, '^SectorCarrier')
+    return {"lte_cell": lte, "nr_cell": nr_cell, "nr_sector": nr_sector, "lte_sector": lte_sector}
+
+
+
+
+# ============================================================
+# CIQ-linked comparison logic
+# ============================================================
+
+CATEGORY_A_LTE = {"rachRootSequence": "rachRootSequence", "PCI": "physicalLayerCellId", "Cellrange": "cellRange"}
+CATEGORY_A_NR = {"nRPCI": "nRPCI", "Cellrange": "cellRange"}
+CATEGORY_B_LTE = {
+    "EarfcnDL": ("earfcndl", "earfcnDl"), "EarfcnUL": ("earfcnul", "earfcnUl"),
+    "Bandwidth": ("dlChannelBandwidth", "dlChannelBandwidth"), "TAC": ("tac", None),
+    "CellID": ("cellId", "cellId"),
+}
+CATEGORY_B_NR = {
+    "arfcnDL": ("arfcnDL", "arfcnDL"), "arfcnUL": ("arfcnUL", "arfcnUL"),
+    "bSChannelBwDL": ("bSChannelBwDL", "bSChannelBwDL"), "bSChannelBwUL": ("bSChannelBwUL", "bSChannelBwUL"),
+    "cellLocalId": ("cellLocalId", "cellLocalId"), "NRTAC": ("nRTAC", "nRTAC"), "nCI": ("nCI", "nCI"),
+}
+
+
+def norm(v):
+    if v is None:
+        return None
+    return str(v).strip()
+
+
+def verdict(post_val, expected_val, category):
+    """Returns (color, note). category: 'A' or 'B'."""
+    p, e = norm(post_val), norm(expected_val)
+    if p is None and e is None:
+        return "gray", "no data"
+    if p is None:
+        return "red", "missing onsite"
+    if e is None:
+        return "amber", "no baseline to compare"
+    if p == e:
+        return "green", "match"
+    return "red", f"expected {e}, got {p}"
+
+
+def build_sector_move_map(ciq_wb):
+    """{target_sector_name: {'source_sector': str, 'source_node': str}} from Sector Del_Movement."""
+    move_map = {}
+    if "Sector Del_Movement" not in ciq_wb.sheetnames:
+        return move_map
+    ws = ciq_wb["Sector Del_Movement"]
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return move_map
+    headers = [str(h).strip() if h is not None else "" for h in rows[0]]
+    for r in rows[1:]:
+        d = dict(zip(headers, r))
+        target_sector = d.get("Target Sector")
+        if target_sector:
+            move_map[str(target_sector).strip()] = {
+                "source_sector": d.get("Source Sector"),
+                "source_node": d.get("Source Node name"),
+            }
+    return move_map
+
+
+def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node):
+    """Returns list of {'parameter','category','pre','ciq','post','color','note'}."""
+    ldn = f"EUtranCellFDD={cell_id}"
+    on_cell = onsite_tables["lte_cell"].get(ldn, {})
+    pre_cell = pre_tables["lte_cell"].get(ldn, {})
+
+    is_new = "existing" not in str(ciq_row.get("Carrier Cell Intention", "")).lower()
+    move_info = move_map.get(cell_id)
+    if move_info and move_info.get("source_sector"):
+        src_node = move_info.get("source_node")
+        src_tables = source_pre_tables_by_node.get(src_node)
+        if src_tables:
+            pre_cell = src_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
+
+    def sector_lookup(tables, cell):
+        ref = cell.get("sectorCarrierRef")
+        return tables["lte_sector"].get(ref, {}) if ref else {}
+
+    on_sec = sector_lookup(onsite_tables, on_cell)
+    pre_sec = sector_lookup(pre_tables, pre_cell)
+
+    results = []
+    for param, cell_key in CATEGORY_A_LTE.items():
+        pre_v = pre_cell.get(cell_key)
+        ciq_v = ciq_row.get({"rachRootSequence": "rachRootSequence", "PCI": "PCI", "Cellrange": "cellRange"}.get(param))
+        expected = ciq_v if is_new else pre_v
+        color, note = verdict(on_cell.get(cell_key), expected, "A")
+        results.append({"parameter": param, "category": "A", "pre": pre_v, "ciq": ciq_v,
+                         "post": on_cell.get(cell_key), "color": color, "note": note})
+
+    for param, (cell_key, ciq_key) in CATEGORY_B_LTE.items():
+        ciq_v = ciq_row.get(ciq_key) if ciq_key else None
+        pre_v = pre_cell.get(cell_key)
+        post_v = on_cell.get(cell_key)
+        color, note = verdict(post_v, ciq_v, "B")
+        if color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
+            color, note = "amber", "matches Pre, not yet retuned to CIQ"
+        results.append({"parameter": param, "category": "B", "pre": pre_v, "ciq": ciq_v,
+                         "post": post_v, "color": color, "note": note})
+
+    for label, cell_key in [("TX", "noOfTxAntennas"), ("RX", "noOfRxAntennas")]:
+        ciq_v = ciq_row.get(cell_key)
+        pre_v = pre_sec.get(cell_key)
+        post_v = on_sec.get(cell_key)
+        color, note = verdict(post_v, ciq_v, "B")
+        results.append({"parameter": label, "category": "B", "pre": pre_v, "ciq": ciq_v,
+                         "post": post_v, "color": color, "note": note})
+
+    ciq_v = ciq_row.get("configuredOutputPower")
+    pre_v = pre_sec.get("configuredMaxTxPower")
+    post_v = on_sec.get("configuredMaxTxPower")
+    color, note = verdict(post_v, ciq_v, "B")
+    results.append({"parameter": "ConfiguredOutputPower", "category": "B", "pre": pre_v, "ciq": ciq_v,
+                     "post": post_v, "color": color, "note": note})
+
+    return results
+
+
+def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node):
+    ldn = f"NRCellDU={cell_id}"
+    on_cell = onsite_tables["nr_cell"].get(ldn, {})
+    pre_cell = pre_tables["nr_cell"].get(ldn, {})
+
+    # KNOWN LIMITATION: unlike eUtran Parameters' "Carrier Cell Intention" column, 5G Info has
+    # no equivalent new-vs-existing classification column at all — confirmed by checking its
+    # full header list. A cell explicitly listed in Sector Del_Movement is reliably "existing/
+    # moved", so that case is handled correctly below. For everything else, is_new can't be
+    # determined from 5G Info alone; defaulting to False (treat as existing, use Pre as
+    # expected) is the safer assumption for Category A params, since PCI/nRPCI errors are more
+    # consequential than a newly-added cell being compared against a nonexistent Pre baseline —
+    # but this needs a real classification source to be reliable. Flagging rather than guessing.
+    move_info = move_map.get(cell_id)
+    is_new = False
+    pre_sector_source_tables = pre_tables
+    pre_sector_id = cell_id
+    if move_info and move_info.get("source_sector"):
+        src_node = move_info.get("source_node")
+        src_tables = source_pre_tables_by_node.get(src_node)
+        if src_tables:
+            pre_cell = src_tables["nr_cell"].get(f"NRCellDU={move_info['source_sector']}", pre_cell)
+            pre_sector_source_tables = src_tables
+            pre_sector_id = move_info["source_sector"]
+
+    def sector_lookup(tables, cell_id_key):
+        # Confirmed real key format: this block's instances are "NRSectorCarrier=<cell_id>",
+        # not the bare cell name.
+        return tables["nr_sector"].get(f"NRSectorCarrier={cell_id_key}", {})
+
+    on_sec = sector_lookup(onsite_tables, cell_id)
+    pre_sec = sector_lookup(pre_sector_source_tables, pre_sector_id)
+
+    CATEGORY_A_NR_CIQ_KEYS = {"nRPCI": "nRPCI", "Cellrange": "CellRange"}  # confirmed: 5G Info uses "CellRange", not "cellRange"
+    results = []
+    for param, cell_key in CATEGORY_A_NR.items():
+        pre_v = pre_cell.get(cell_key)
+        ciq_v = ciq_row.get(CATEGORY_A_NR_CIQ_KEYS[param]) if ciq_row else None
+        expected = ciq_v if is_new else pre_v
+        color, note = verdict(on_cell.get(cell_key), expected, "A")
+        results.append({"parameter": param, "category": "A", "pre": pre_v, "ciq": ciq_v,
+                         "post": on_cell.get(cell_key), "color": color, "note": note})
+
+    # Confirmed real bug: arfcnDL/arfcnUL/bSChannelBwDL/bSChannelBwUL only exist in the
+    # NRSectorCarrier ("Sector") table, not NRCellDU — reading them from the cell table
+    # silently returned None always. cellLocalId/nRTAC/nCI live on the cell itself.
+    SECTOR_LEVEL_B_PARAMS = {"arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL"}
+    for param, (cell_key, ciq_key) in CATEGORY_B_NR.items():
+        ciq_v = ciq_row.get(ciq_key) if (ciq_row and ciq_key) else None
+        if param in SECTOR_LEVEL_B_PARAMS:
+            pre_v = pre_sec.get(cell_key)
+            post_v = on_sec.get(cell_key)
+        else:
+            pre_v = pre_cell.get(cell_key)
+            post_v = on_cell.get(cell_key)
+        color, note = verdict(post_v, ciq_v, "B")
+        if color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
+            color, note = "amber", "matches Pre, not yet retuned to CIQ"
+        results.append({"parameter": param, "category": "B", "pre": pre_v, "ciq": ciq_v,
+                         "post": post_v, "color": color, "note": note})
+
+    for label, cell_key in [("TX", "noOfTxAntennas"), ("RX", "noOfRxAntennas")]:
+        pre_v = pre_sec.get(cell_key)
+        post_v = on_sec.get(cell_key)
+        color, note = verdict(post_v, pre_v, "B")  # no CIQ column confirmed for NR TX/RX yet
+        results.append({"parameter": label, "category": "B", "pre": pre_v, "ciq": None,
+                         "post": post_v, "color": color, "note": note})
+
+    ciq_v = ciq_row.get("configuredMaxTxPower") if ciq_row else None
+    pre_v = pre_sec.get("configuredMaxTxPower")
+    post_v = on_sec.get("configuredMaxTxPower")
+    color, note = verdict(post_v, ciq_v, "B")
+    results.append({"parameter": "ConfiguredOutputPower", "category": "B", "pre": pre_v, "ciq": ciq_v,
+                     "post": post_v, "color": color, "note": note})
+
+    return results
+
+
+# ============================================================
+# File-to-node matching + orchestration
+# ============================================================
+
+def match_file_to_node(filename, node_names):
+    """Match an uploaded log filename to a CIQ node name. Confirmed real naming:
+    pre logs are '<NODE>.log', onsite logs are '<NODE>_onsite.txt' — but matches any
+    '<NODE>' prefix followed by '.', '_', or end-of-basename, to tolerate minor variations.
+    Longest node name wins first, to avoid a shorter node name being a false-positive
+    prefix of a longer one (e.g. 'DXL0233' vs 'DXL02330')."""
+    base = re.sub(r'\.(log|txt)$', '', filename, flags=re.IGNORECASE)
+    for node in sorted(node_names, key=len, reverse=True):
+        node_u = str(node).strip()
+        if not node_u:
+            continue
+        if base == node_u or base.startswith(node_u + '_') or base.startswith(node_u + '.'):
+            return node
+    return None
+
+
+def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files):
+    """pre_files / onsite_files: list of (filename, text_content) tuples.
+    Returns {
+        'node_results': {node: {'lte': [(cell_id, [param_result,...]), ...], 'nr': [...]}},
+        'unmatched_pre': [filename,...], 'unmatched_onsite': [filename,...],
+        'nodes_missing_pre': [node,...], 'nodes_missing_onsite': [node,...],
+    }"""
+    node_names = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
+
+    pre_by_node, onsite_by_node = {}, {}
+    unmatched_pre, unmatched_onsite = [], []
+    for fname, text in pre_files:
+        node = match_file_to_node(fname, node_names)
+        if node:
+            pre_by_node[node] = pv_load_node_tables(text)
+        else:
+            unmatched_pre.append(fname)
+    for fname, text in onsite_files:
+        node = match_file_to_node(fname, node_names)
+        if node:
+            onsite_by_node[node] = pv_load_node_tables(text)
+        else:
+            unmatched_onsite.append(fname)
+
+    nodes_missing_pre = [n for n in node_names if n not in pre_by_node]
+    nodes_missing_onsite = [n for n in node_names if n not in onsite_by_node]
+
+    empty_tables = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}}
+    source_pre_by_node = pre_by_node  # for Sector Del_Movement lookups across nodes
+
+    lte_ciq, nr_ciq = {}, {}
+    if "eUtran Parameters" in ciq_wb.sheetnames:
+        ws = ciq_wb["eUtran Parameters"]
+        hdr = [c.value for c in ws[1]]
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            d = dict(zip(hdr, row))
+            if d.get("EutranCellFDDId"):
+                lte_ciq[d["EutranCellFDDId"]] = d
+    if "5G Info" in ciq_wb.sheetnames:
+        ws = ciq_wb["5G Info"]
+        hdr = [c.value for c in ws[1]]
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            d = dict(zip(hdr, row))
+            if d.get("NRCellDU"):
+                nr_ciq[d["NRCellDU"]] = d
+
+    move_map = build_sector_move_map(ciq_wb)
+
+    node_results = {n: {"lte": [], "nr": []} for n in node_names}
+    for cell_id, ciq_row in lte_ciq.items():
+        node = next((n for n in node_names if cell_id.startswith(n)), None)
+        if not node:
+            continue
+        pre_t = pre_by_node.get(node, empty_tables)
+        on_t = onsite_by_node.get(node, empty_tables)
+        results = compare_lte_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node)
+        node_results[node]["lte"].append((cell_id, results))
+
+    for cell_id, ciq_row in nr_ciq.items():
+        node = next((n for n in node_names if cell_id.startswith(n)), None)
+        if not node:
+            continue
+        pre_t = pre_by_node.get(node, empty_tables)
+        on_t = onsite_by_node.get(node, empty_tables)
+        results = compare_nr_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node)
+        node_results[node]["nr"].append((cell_id, results))
+
+    return {
+        "node_results": node_results,
+        "unmatched_pre": unmatched_pre,
+        "unmatched_onsite": unmatched_onsite,
+        "nodes_missing_pre": nodes_missing_pre,
+        "nodes_missing_onsite": nodes_missing_onsite,
+    }
+
+
+def build_parameter_verification_pdf(scope, node_results):
+    """node_results: {node: {'lte': [(cell_id, [param_result,...]),...], 'nr': [...]}}
+    Returns PDF bytes."""
+    # Confirmed real bug (fixed once already, reintroduced by reusing an un-patched template
+    # file): COLOR_MAP/TEXT_COLOR_MAP must live INSIDE this function, since they depend on
+    # pv_colors, which is only imported here — defining them at module level raises a
+    # NameError at import time, unconditionally, before the function is ever called.
+    from reportlab.lib import colors as pv_colors
+    from reportlab.lib.pagesizes import landscape, letter
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+
+    COLOR_MAP = {
+        "green": pv_colors.HexColor("#C6EFCE"),
+        "red": pv_colors.HexColor("#FFC7CE"),
+        "amber": pv_colors.HexColor("#FFEB9C"),
+        "gray": pv_colors.HexColor("#E0E0E0"),
+    }
+    TEXT_COLOR_MAP = {
+        "green": pv_colors.HexColor("#006100"),
+        "red": pv_colors.HexColor("#9C0006"),
+        "amber": pv_colors.HexColor("#9C6500"),
+        "gray": pv_colors.HexColor("#555555"),
+    }
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(letter), topMargin=0.4 * inch, bottomMargin=0.4 * inch,
+                             leftMargin=0.4 * inch, rightMargin=0.4 * inch)
+
+    styles = getSampleStyleSheet()
+    story = [Paragraph(f"{scope} Parameter Verification Report", styles["Title"]), Spacer(1, 12)]
+
+    header = ["Sector", "Parameter", "Pre", "CIQ", "Post", "Status"]
+
+    for node, res in node_results.items():
+        story.append(Paragraph(f"Node: {node}", styles["Heading2"]))
+        for label, cells in (("4G Sectors", res.get("lte", [])), ("5G Sectors", res.get("nr", []))):
+            if not cells:
+                continue
+            story.append(Paragraph(label, styles["Heading3"]))
+            data = [header]
+            row_colors = []
+            for cell_id, results in cells:
+                for r in results:
+                    data.append([cell_id, r["parameter"], str(r["pre"]) if r["pre"] is not None else "",
+                                 str(r["ciq"]) if r["ciq"] is not None else "",
+                                 str(r["post"]) if r["post"] is not None else "", r["note"]])
+                    row_colors.append(r["color"])
+            tbl = Table(data, repeatRows=1, colWidths=[1.5 * inch, 1.4 * inch, 0.9 * inch, 0.9 * inch, 0.9 * inch, 3.4 * inch])
+            style_cmds = [
+                ("BACKGROUND", (0, 0), (-1, 0), pv_colors.HexColor("#4472C4")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), pv_colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("GRID", (0, 0), (-1, -1), 0.5, pv_colors.grey),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+            for i, color_key in enumerate(row_colors, start=1):
+                bg = COLOR_MAP.get(color_key, pv_colors.white)
+                fg = TEXT_COLOR_MAP.get(color_key, pv_colors.black)
+                style_cmds.append(("BACKGROUND", (5, i), (5, i), bg))
+                style_cmds.append(("TEXTCOLOR", (5, i), (5, i), fg))
+            tbl.setStyle(TableStyle(style_cmds))
+            story.append(tbl)
+            story.append(Spacer(1, 10))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
 # ============================================================
 # UI
 # ============================================================
@@ -4002,18 +4545,24 @@ if st.session_state.qkx_page == "home":
             _qkx_go("family")
         if st.button("\U0001F4CB  MCA - Generate Report", use_container_width=True, key="qkx_card_mca_report"):
             _qkx_go("input", "MCA", report_only=True)
+        if st.button("\U0001F50D  MCA - Parameter Verification", use_container_width=True, key="qkx_card_mca_pv"):
+            _qkx_go("paramcheck", "MCA")
     with c2:
         st.caption("Nokia to Ericsson site integration")
         if st.button("N2E", use_container_width=True, key="qkx_card_n2e"):
             _qkx_go("input", "N2E")
         if st.button("\U0001F4CB  N2E - Generate Report", use_container_width=True, key="qkx_card_n2e_report"):
             _qkx_go("input", "N2E", report_only=True)
+        if st.button("\U0001F50D  N2E - Parameter Verification", use_container_width=True, key="qkx_card_n2e_pv"):
+            _qkx_go("paramcheck", "N2E")
     with c3:
         st.caption("New site build")
         if st.button("NSB", use_container_width=True, key="qkx_card_nsb"):
             _qkx_go("input", "NSB")
         if st.button("\U0001F4CB  NSB - Generate Report", use_container_width=True, key="qkx_card_nsb_report"):
             _qkx_go("input", "NSB", report_only=True)
+        if st.button("\U0001F50D  NSB - Parameter Verification", use_container_width=True, key="qkx_card_nsb_pv"):
+            _qkx_go("paramcheck", "NSB")
 
     st.divider()
     st.subheader("Instructions")
@@ -4332,3 +4881,102 @@ elif st.session_state.qkx_page == "input":
             importlib.reload(nsb_report_ui)
             nsb_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, edp_index, uid, dstr,
                                   postcheck_text=postcheck_text, controller_checks_text=controller_checks_text)
+
+
+# ---- PARAMETER VERIFICATION (MCA / N2E / NSB) ----
+elif st.session_state.qkx_page == "paramcheck":
+    pv_scope = st.session_state.qkx_scope
+    if st.button("← Back", key="pv_back"):
+        _qkx_go("home")
+    st.subheader(f"Parameter Verification — {pv_scope}")
+    st.caption("Compares CIQ vs Pre logs vs Onsite logs, flags mismatches. "
+               "Upload the CIQ, then all Pre logs and Onsite logs for every node at the site — "
+               "each file is matched to its node automatically by filename.")
+
+    with st.container(border=True):
+        pv_ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"], key="pv_ciq")
+        pv_pre_files = st.file_uploader("Pre logs (.log / .txt) — one or more, one per node",
+                                         type=["log", "txt"], accept_multiple_files=True, key="pv_pre")
+        pv_onsite_files = st.file_uploader("Onsite logs (.log / .txt) — one or more, one per node",
+                                            type=["log", "txt"], accept_multiple_files=True, key="pv_onsite")
+        pv_run = st.button("Verify parameters", type="primary", key="pv_run",
+                            disabled=not (pv_ciq_file and pv_pre_files and pv_onsite_files))
+
+    if pv_run:
+        with st.spinner("Parsing logs and comparing against CIQ..."):
+            import openpyxl
+            pv_wb = openpyxl.load_workbook(io.BytesIO(pv_ciq_file.getvalue()), data_only=True)
+            pv_ws = pv_wb["Mixed Mode Info"]
+            pv_rows = list(pv_ws.iter_rows(values_only=True))
+            pv_headers = [str(h).strip() if h is not None else "" for h in pv_rows[0]]
+            pv_mm_objs = [dict(zip(pv_headers, r)) for r in pv_rows[1:] if any(c is not None for c in r)]
+
+            pv_pre_inputs = [(f.name, f.getvalue().decode("utf-8", errors="replace")) for f in pv_pre_files]
+            pv_onsite_inputs = [(f.name, f.getvalue().decode("utf-8", errors="replace")) for f in pv_onsite_files]
+
+            pv_result = run_parameter_verification(pv_wb, pv_mm_objs, pv_pre_inputs, pv_onsite_inputs)
+            st.session_state.pv_results = pv_result
+            st.session_state.pv_scope_ran = pv_scope
+
+    if st.session_state.get("pv_results") and st.session_state.get("pv_scope_ran") == pv_scope:
+        pv_result = st.session_state.pv_results
+
+        if pv_result["unmatched_pre"] or pv_result["unmatched_onsite"]:
+            with st.expander("⚠ Files that didn't match any node in the CIQ", expanded=True):
+                for fn in pv_result["unmatched_pre"]:
+                    st.write(f"Pre log: **{fn}** — no matching node found in Mixed Mode Info")
+                for fn in pv_result["unmatched_onsite"]:
+                    st.write(f"Onsite log: **{fn}** — no matching node found in Mixed Mode Info")
+
+        if pv_result["nodes_missing_pre"] or pv_result["nodes_missing_onsite"]:
+            with st.expander("⚠ CIQ nodes with missing logs", expanded=True):
+                for n in pv_result["nodes_missing_pre"]:
+                    st.write(f"**{n}** — no Pre log uploaded")
+                for n in pv_result["nodes_missing_onsite"]:
+                    st.write(f"**{n}** — no Onsite log uploaded")
+
+        total_green = total_amber = total_red = 0
+        for node, res in pv_result["node_results"].items():
+            for cell_id, results in res["lte"] + res["nr"]:
+                for r in results:
+                    if r["color"] == "green":
+                        total_green += 1
+                    elif r["color"] == "amber":
+                        total_amber += 1
+                    elif r["color"] == "red":
+                        total_red += 1
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Matches", total_green)
+        m2.metric("Expected changes", total_amber)
+        m3.metric("Mismatches", total_red)
+
+        for node, res in pv_result["node_results"].items():
+            if not res["lte"] and not res["nr"]:
+                continue
+            with st.expander(f"Node: {node}", expanded=True):
+                for label, cells in (("4G Sectors", res["lte"]), ("5G Sectors", res["nr"])):
+                    if not cells:
+                        continue
+                    st.markdown(f"**{label}**")
+                    rows = []
+                    for cell_id, results in cells:
+                        for r in results:
+                            rows.append({"Sector": cell_id, "Parameter": r["parameter"],
+                                         "Pre": r["pre"], "CIQ": r["ciq"], "Post": r["post"],
+                                         "Status": r["note"], "_color": r["color"]})
+                    df = pd.DataFrame(rows)
+                    color_map = {"green": "#C6EFCE", "red": "#FFC7CE", "amber": "#FFEB9C", "gray": "#E0E0E0"}
+
+                    def _pv_style_row(row):
+                        bg = color_map.get(row["_color"], "white")
+                        return [f"background-color: {bg}"] * len(row)
+
+                    styled = df.drop(columns=["_color"]).style.apply(
+                        lambda row: _pv_style_row(df.loc[row.name]), axis=1)
+                    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+        pv_pdf_bytes = build_parameter_verification_pdf(pv_scope, pv_result["node_results"])
+        st.download_button("Download PDF report", pv_pdf_bytes,
+                            file_name=f"{pv_scope}_Parameter_Verification.pdf",
+                            mime="application/pdf", key="pv_dl_pdf")
