@@ -4421,7 +4421,7 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
     from reportlab.lib import colors as pv_colors
     from reportlab.lib.pagesizes import landscape, letter
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
     import io
 
@@ -4442,6 +4442,11 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
     doc = SimpleDocTemplate(buf, pagesize=landscape(letter), topMargin=0.3 * inch, bottomMargin=0.3 * inch,
                              leftMargin=0.3 * inch, rightMargin=0.3 * inch)
     styles = getSampleStyleSheet()
+    
+    # Styles to force proper text wrapping inside the cells
+    cell_style = ParagraphStyle(name='CellStyle', fontSize=6, leading=7, alignment=1) # Center aligned
+    comment_style = ParagraphStyle(name='CommentStyle', fontSize=6, leading=7, alignment=0) # Left aligned
+    
     story = [Paragraph(f"{scope} Parameter Verification Report", styles["Title"]), Spacer(1, 10)]
 
     sub_cols = ["pre", "CIQ", "On site"] if has_pre else ["CIQ", "On site"]
@@ -4466,11 +4471,11 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
             ("BACKGROUND", (0, 0), (-1, 1), pv_colors.HexColor("#1F4E78")),
             ("TEXTCOLOR", (0, 0), (-1, 1), pv_colors.white),
             ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 6.5), 
+            ("FONTSIZE", (0, 0), (-1, -1), 6), 
             ("LEFTPADDING", (0, 0), (-1, -1), 2), 
             ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("GRID", (0, 0), (-1, -1), 0.5, pv_colors.grey),
@@ -4485,7 +4490,7 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
 
         row_idx = 2
         for cell_id, results in cells:
-            row_data = [cell_id]
+            row_data = [Paragraph(cell_id, cell_style)]
             comments = []
             res_map = {r["parameter"]: r for r in results}
             
@@ -4493,9 +4498,14 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
                 r = res_map.get(p)
                 if r:
                     if has_pre:
-                        row_data.append(str(r["pre"]) if r["pre"] is not None else "")
-                    row_data.append(str(r["ciq"]) if r["ciq"] is not None else "")
-                    row_data.append(str(r["post"]) if r["post"] is not None else "")
+                        pre_v = str(r["pre"]) if r["pre"] is not None else ""
+                        row_data.append(Paragraph(pre_v, cell_style))
+                    
+                    ciq_v = str(r["ciq"]) if r["ciq"] is not None else ""
+                    post_v = str(r["post"]) if r["post"] is not None else ""
+                    
+                    row_data.append(Paragraph(ciq_v, cell_style))
+                    row_data.append(Paragraph(post_v, cell_style))
                     
                     if r["color"] in ["red", "amber"]:
                         comments.append(f"{p}: {r['note']}")
@@ -4506,12 +4516,13 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
                 else:
                     row_data.extend([""] * sub_col_count)
             
-            row_data.append(" | ".join(comments) if comments else "Match")
+            comment_text = " | ".join(comments) if comments else "Match"
+            row_data.append(Paragraph(comment_text, comment_style))
             data.append(row_data)
             row_idx += 1
         
         sector_w = 1.3 * inch
-        comments_w = 2.0 * inch
+        comments_w = 2.2 * inch
         rem_width = 10.4 * inch - sector_w - comments_w
         data_col_w = rem_width / (len(param_list) * sub_col_count)
         
@@ -4523,8 +4534,8 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
 
     def add_chunked_tables(title, cells, full_param_list):
         if not cells: return
-        # Chunk the parameters into groups of 5 max to prevent PDF squishing
-        chunk_size = 5
+        # Reduced chunk size to 3 so columns have enough horizontal space
+        chunk_size = 3
         chunks = [full_param_list[i:i + chunk_size] for i in range(0, len(full_param_list), chunk_size)]
         
         for i, chunk in enumerate(chunks):
@@ -5000,9 +5011,6 @@ elif st.session_state.qkx_page == "input":
             importlib.reload(nsb_report_ui)
             nsb_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, edp_index, uid, dstr,
                                   postcheck_text=postcheck_text, controller_checks_text=controller_checks_text)
-
-
-# ---- PARAMETER VERIFICATION (MCA / N2E / NSB) ----
 
 
 # ---- PARAMETER VERIFICATION (MCA / N2E / NSB) ----
