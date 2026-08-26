@@ -5020,7 +5020,8 @@ elif st.session_state.qkx_page == "paramcheck":
         m2.metric("Expected changes", total_amber)
         m3.metric("Mismatches", total_red)
 
-blueprint_groups = {
+# Ensure exactly 8 spaces (or 2 tabs) before these lines:
+        blueprint_groups = {
             "4G Sectors (Category B)": ["EarfcnDL", "EarfcnUL", "TX", "RX", "Bandwidth", "ConfiguredOutputPower", "CellID"],
             "5G Sectors (Category B)": ["arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "ConfiguredOutputPower", "cellLocalId", "ssbFrequency", "TX", "RX"],
             "4G Sectors (Category A)": ["rachRootSequence", "PCI", "Cellrange", "TAC"],
@@ -5056,18 +5057,20 @@ blueprint_groups = {
                 continue
             with st.expander(f"Node: {node}", expanded=True):
                 if res["lte"]:
-                    st.markdown("**4G Sectors**")
+                    st.markdown("**4G Sectors (Category B)**")
                     df_4g_b = build_blueprint_df(res["lte"], blueprint_groups["4G Sectors (Category B)"], pv_has_pre)
                     st.dataframe(df_4g_b, use_container_width=True, hide_index=True)
                     
+                    st.markdown("**4G Sectors (Category A)**")
                     df_4g_a = build_blueprint_df(res["lte"], blueprint_groups["4G Sectors (Category A)"], pv_has_pre)
                     st.dataframe(df_4g_a, use_container_width=True, hide_index=True)
                 
                 if res["nr"]:
-                    st.markdown("**5G Sectors**")
+                    st.markdown("**5G Sectors (Category B)**")
                     df_5g_b = build_blueprint_df(res["nr"], blueprint_groups["5G Sectors (Category B)"], pv_has_pre)
                     st.dataframe(df_5g_b, use_container_width=True, hide_index=True)
                     
+                    st.markdown("**5G Sectors (Category A)**")
                     df_5g_a = build_blueprint_df(res["nr"], blueprint_groups["5G Sectors (Category A)"], pv_has_pre)
                     st.dataframe(df_5g_a, use_container_width=True, hide_index=True)
 
