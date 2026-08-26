@@ -4341,18 +4341,24 @@ def match_file_to_node(filename, node_names):
 
 def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="MCA"):
     has_pre = scope not in NO_PRE_SCOPES
-    node_names = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
+    node_names = [str(r.get("Node to be built as") or "").strip() for r in mm_objs if str(r.get("Node to be built as") or "").strip()]
 
-    # Build prefix map so 5G cells (e.g. DXFN...) map back to their primary Node (e.g. DXL...)
-    prefix_to_node = {}
+    # Bulletproof prefix mapping: map Primary, eNodeB, and gNodeB names to the Primary Node
+    prefix_to_nodes = {}
     for r in mm_objs:
-        node = r.get("Node to be built as")
+        node = str(r.get("Node to be built as") or "").strip()
         if not node: continue
-        prefix_to_node[str(node).strip()] = node
-        if r.get("eNodeB Name") and str(r.get("eNodeB Name")).strip(): 
-            prefix_to_node[str(r.get("eNodeB Name")).strip()] = node
-        if r.get("gNodeB Name") and str(r.get("gNodeB Name")).strip(): 
-            prefix_to_node[str(r.get("gNodeB Name")).strip()] = node
+        
+        prefix_to_nodes.setdefault(node, set()).add(node)
+        
+        e_name = str(r.get("eNodeB Name") or "").strip()
+        if e_name: prefix_to_nodes.setdefault(e_name, set()).add(node)
+            
+        g_name = str(r.get("gNodeB Name") or "").strip()
+        if g_name: prefix_to_nodes.setdefault(g_name, set()).add(node)
+
+    # Sort prefixes by length descending so longer prefixes match first
+    sorted_prefixes = sorted(prefix_to_nodes.keys(), key=len, reverse=True)
 
     global_pre = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}}
     global_onsite = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}}
@@ -4381,33 +4387,35 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
     lte_ciq, nr_ciq = {}, {}
     if "eUtran Parameters" in ciq_wb.sheetnames:
         ws = ciq_wb["eUtran Parameters"]
-        hdr = [c.value for c in ws[1]]
+        # Use strip() to protect against accidental spaces in the CIQ headers
+        hdr = [str(c.value).strip() if c.value else "" for c in ws[1]]
         for row in ws.iter_rows(min_row=2, values_only=True):
             d = dict(zip(hdr, row))
             if d.get("EutranCellFDDId"):
-                lte_ciq[d["EutranCellFDDId"]] = d
+                lte_ciq[str(d["EutranCellFDDId"]).strip()] = d
     if "5G Info" in ciq_wb.sheetnames:
         ws = ciq_wb["5G Info"]
-        hdr = [c.value for c in ws[1]]
+        hdr = [str(c.value).strip() if c.value else "" for c in ws[1]]
         for row in ws.iter_rows(min_row=2, values_only=True):
             d = dict(zip(hdr, row))
             if d.get("NRCellDU"):
-                nr_ciq[d["NRCellDU"]] = d
+                nr_ciq[str(d["NRCellDU"]).strip()] = d
 
     move_map = build_sector_move_map(ciq_wb) if has_pre else {}
 
     node_results = {n: {"lte": [], "nr": []} for n in node_names}
+    
     for cell_id, ciq_row in lte_ciq.items():
-        node = next((n for p, n in prefix_to_node.items() if cell_id.startswith(p)), None)
-        if not node: continue
-        results = compare_lte_cell(cell_id, ciq_row, global_pre, global_onsite, move_map, scope=scope)
-        node_results[node]["lte"].append((cell_id, results))
+        matched_nodes = next((prefix_to_nodes[p] for p in sorted_prefixes if cell_id.startswith(p)), [])
+        for node in matched_nodes:
+            results = compare_lte_cell(cell_id, ciq_row, global_pre, global_onsite, move_map, scope=scope)
+            node_results[node]["lte"].append((cell_id, results))
 
     for cell_id, ciq_row in nr_ciq.items():
-        node = next((n for p, n in prefix_to_node.items() if cell_id.startswith(p)), None)
-        if not node: continue
-        results = compare_nr_cell(cell_id, ciq_row, global_pre, global_onsite, move_map, scope=scope)
-        node_results[node]["nr"].append((cell_id, results))
+        matched_nodes = next((prefix_to_nodes[p] for p in sorted_prefixes if cell_id.startswith(p)), [])
+        for node in matched_nodes:
+            results = compare_nr_cell(cell_id, ciq_row, global_pre, global_onsite, move_map, scope=scope)
+            node_results[node]["nr"].append((cell_id, results))
 
     return {
         "node_results": node_results,
@@ -4532,9 +4540,9 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
         tbl.setStyle(TableStyle(style_cmds))
         return tbl
 
-    def add_chunked_tables(title, cells, full_param_list):
+def add_chunked_tables(title, cells, full_param_list):
         if not cells: return
-        # Reduced chunk size to 3 so columns have enough horizontal space
+        # Change this chunk_size to 3 to give the massive 5G numbers room to breathe!
         chunk_size = 3
         chunks = [full_param_list[i:i + chunk_size] for i in range(0, len(full_param_list), chunk_size)]
         
