@@ -4296,7 +4296,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
     has_pre = scope not in NO_PRE_SCOPES
     node_names = [str(r.get("Node to be built as") or "").strip() for r in mm_objs if str(r.get("Node to be built as") or "").strip()]
 
-    # Bulletproof prefix mapping: map Primary, eNodeB, and gNodeB names to the Primary Node
+    # Build prefix map so 5G cells (e.g. DXFN...) map back to their primary Node (e.g. DXL...)
     prefix_to_nodes = {}
     for r in mm_objs:
         node = str(r.get("Node to be built as") or "").strip()
@@ -4340,7 +4340,6 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
     lte_ciq, nr_ciq = {}, {}
     if "eUtran Parameters" in ciq_wb.sheetnames:
         ws = ciq_wb["eUtran Parameters"]
-        # Use strip() to protect against accidental spaces in the CIQ headers
         hdr = [str(c.value).strip() if c.value else "" for c in ws[1]]
         for row in ws.iter_rows(min_row=2, values_only=True):
             d = dict(zip(hdr, row))
@@ -4377,7 +4376,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
         "nodes_missing_pre": nodes_missing_pre,
         "nodes_missing_onsite": nodes_missing_onsite,
     }
-    
+
 def build_parameter_verification_pdf(scope, node_results, has_pre=True):
     from reportlab.lib import colors as pv_colors
     from reportlab.lib.pagesizes import landscape, letter
@@ -4404,9 +4403,8 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
                              leftMargin=0.3 * inch, rightMargin=0.3 * inch)
     styles = getSampleStyleSheet()
     
-    # Styles to force proper text wrapping inside the cells
-    cell_style = ParagraphStyle(name='CellStyle', fontSize=6, leading=7, alignment=1) # Center aligned
-    comment_style = ParagraphStyle(name='CommentStyle', fontSize=6, leading=7, alignment=0) # Left aligned
+    cell_style = ParagraphStyle(name='CellStyle', fontSize=6, leading=7, alignment=1)
+    comment_style = ParagraphStyle(name='CommentStyle', fontSize=6, leading=7, alignment=0)
     
     story = [Paragraph(f"{scope} Parameter Verification Report", styles["Title"]), Spacer(1, 10)]
 
@@ -4493,18 +4491,18 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
         tbl.setStyle(TableStyle(style_cmds))
         return tbl
 
-def add_chunked_tables(title, cells, full_param_list):
-    if not cells: return
-    # Reduced chunk size to 3 so columns have enough horizontal space
-    chunk_size = 3
-    chunks = [full_param_list[i:i + chunk_size] for i in range(0, len(full_param_list), chunk_size)]
+    def add_chunked_tables(title, cells, full_param_list):
+        if not cells: return
+        # Chunk the parameters to prevent PDF squishing
+        chunk_size = 3
+        chunks = [full_param_list[i:i + chunk_size] for i in range(0, len(full_param_list), chunk_size)]
         
-    for i, chunk in enumerate(chunks):
-        suffix = f" (Part {i+1} of {len(chunks)})" if len(chunks) > 1 else ""
-        story.append(Paragraph(f"{title}{suffix}", styles["Heading4"]))
-        tbl = build_table_for_group(cells, chunk)
-        if tbl: 
-           story.extend([tbl, Spacer(1, 8)])
+        for i, chunk in enumerate(chunks):
+            suffix = f" (Part {i+1} of {len(chunks)})" if len(chunks) > 1 else ""
+            story.append(Paragraph(f"{title}{suffix}", styles["Heading4"]))
+            tbl = build_table_for_group(cells, chunk)
+            if tbl: 
+                story.extend([tbl, Spacer(1, 8)])
 
     for node, res in node_results.items():
         if not res["lte"] and not res["nr"]: continue
