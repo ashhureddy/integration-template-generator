@@ -4632,25 +4632,25 @@ if st.session_state.qkx_page == "home":
         st.caption("Pre-existing sites — MCA, CENM, or CRAN rehome")
         if st.button("MCA", use_container_width=True, key="qkx_card_mca"):
             _qkx_go("family")
-        if st.button("\U0001F4CB  MCA - Generate Report", use_container_width=True, key="qkx_card_mca_report"):
+        if st.button("\ MCA - Generate Report", use_container_width=True, key="qkx_card_mca_report"):
             _qkx_go("input", "MCA", report_only=True)
-        if st.button("\U0001F50D  MCA - Parameter Verification", use_container_width=True, key="qkx_card_mca_pv"):
+        if st.button("\ MCA - Parameter Verification", use_container_width=True, key="qkx_card_mca_pv"):
             _qkx_go("paramcheck", "MCA")
     with c2:
         st.caption("Nokia to Ericsson site integration")
         if st.button("N2E", use_container_width=True, key="qkx_card_n2e"):
             _qkx_go("input", "N2E")
-        if st.button("\U0001F4CB  N2E - Generate Report", use_container_width=True, key="qkx_card_n2e_report"):
+        if st.button("\ N2E - Generate Report", use_container_width=True, key="qkx_card_n2e_report"):
             _qkx_go("input", "N2E", report_only=True)
-        if st.button("\U0001F50D  N2E - Parameter Verification", use_container_width=True, key="qkx_card_n2e_pv"):
+        if st.button("\ N2E - Parameter Verification", use_container_width=True, key="qkx_card_n2e_pv"):
             _qkx_go("paramcheck", "N2E")
     with c3:
         st.caption("New site build")
         if st.button("NSB", use_container_width=True, key="qkx_card_nsb"):
             _qkx_go("input", "NSB")
-        if st.button("\U0001F4CB  NSB - Generate Report", use_container_width=True, key="qkx_card_nsb_report"):
+        if st.button("\ NSB - Generate Report", use_container_width=True, key="qkx_card_nsb_report"):
             _qkx_go("input", "NSB", report_only=True)
-        if st.button("\U0001F50D  NSB - Parameter Verification", use_container_width=True, key="qkx_card_nsb_pv"):
+        if st.button("\ NSB - Parameter Verification", use_container_width=True, key="qkx_card_nsb_pv"):
             _qkx_go("paramcheck", "NSB")
 
     st.divider()
