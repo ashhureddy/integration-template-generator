@@ -5044,7 +5044,7 @@ elif st.session_state.qkx_page == "paramcheck":
 
                     def _pv_style_row(row):
                         bg = color_map.get(row["_color"], "white")
-                        return [f"background-color: {bg}"] * len(row)
+                        return [f"background-color: {bg}"] * (len(row) -1)
 
                     styled = df.drop(columns=["_color"]).style.apply(
                         lambda row: _pv_style_row(df.loc[row.name]), axis=1)
