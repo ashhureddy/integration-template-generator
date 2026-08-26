@@ -3891,17 +3891,29 @@ def render_checks_panel_static(container, top_scope, scope_lines):
 
 
 
+
+
 # ============================================================
 # PARAMETER VERIFICATION (MCA / N2E / NSB) — CIQ vs Pre logs vs Onsite logs
-# Confirmed against the blueprint (temp_blueprint.xlsx) directly, twice:
-# - MCA sheet: rachRootSequence/PCI/Cellrange/TAC (4G) and rachRootSequence/nRPCI/Cellrange/
-#   NRTAC/nCI (5G) sit under the 3-way pre/CIQ/On-site table with the rule "Matching as per pre
-#   for pre-existing / CIQ for newly added" — Category A. Everything else with a pre-vs-CIQ-
-#   vs-onsite table but no such rule is Category B: expected = CIQ always; Pre != CIQ is amber
-#   (expected retune change), not a failure.
-# - N2E_NSB sheet: EVERY parameter has ONLY CIQ/On-site columns, no pre column anywhere at all
-#   — N2E (Nokia-to-Ericsson) has no prior Ericsson state, NSB is a brand-new site. For these
-#   two scopes every parameter is simply Post-must-match-CIQ, no Pre log needed at all.
+# Confirmed against the blueprint (temp_blueprint.xlsx) DIRECTLY by inspecting the raw sheet
+# grid (merged cells, column layout) — NOT just header text. Real layout is WIDE: one ROW PER
+# SECTOR, each parameter as its own 3-column group (Pre/CIQ/On-site) placed side by side across
+# the sheet, with ONE shared Comments column per row combining whatever mismatch groups
+# triggered — never one row per (sector, parameter) with its own comment.
+# - MCA sheet has TWO separate tables per generation: one for rachRootSequence/PCI/Cellrange/
+#   TAC (4G) or .../nRPCI/.../NRTAC/nCI (5G) — the "pre-existing vs newly-added" rule; another
+#   for EarfcnDL/UL/TX/RX/Bandwidth/ConfiguredOutputPower/CellID (4G) or arfcnDL/UL/bSChannelBw/
+#   ConfiguredOutputPower/cellLocalId/ssbFrequency (5G) — expected = CIQ always.
+# - N2E_NSB sheet: EVERY parameter has ONLY CIQ/On-site columns, no Pre column anywhere at all.
+# - Row 1 (both sheets): FDD naming / Rilinks / sector carrier / ISDLONLY / NRCELL CU naming —
+#   CIQ vs On-site only. Confirmed real onsite sources: FDD naming = EUtranCellFDD exists
+#   onsite with CIQ's naming; Rilinks = RiLink MO scripted+ENABLED for this sector's radio;
+#   sector carrier = that RiLink's DATA-port (riPortRef2) matches CIQ's Radio Port; ISDLONLY =
+#   onsite isDlOnly consistent with onsite TX=0 (LTE only); NRCELL CU naming = NRCellCU exists
+#   onsite matching CIQ (NR only). LTE radios (RRU-n) carry no sector name of their own —
+#   resolved via RetSubUnit.userLabel (lists cells sharing an AntennaUnitGroup) ->
+#   AntennaNearUnit.rfPortRef (that group's RRU-n) -> RiLink (matching riPortRef2), with a
+#   cross-node fallback for co-located sites sharing one antenna.
 # NOTE: reportlab is imported lazily inside build_parameter_verification_pdf() only — a new
 # feature dependency must never crash the whole app on startup if it isn't installed yet.
 # ============================================================
@@ -4061,13 +4073,52 @@ def top_level(instance_ldn):
 
 
 def pv_load_node_tables(text):
-    """Parse one node's log text into {'lte_cell', 'nr_cell', 'nr_sector', 'lte_sector'} tables."""
+    """Parse one node's log text into {'lte_cell', 'nr_cell', 'nr_sector', 'lte_sector',
+    'rilink', 'nrcellcu', 'retsubunit', 'antennanearunit'} tables."""
     blocks = parse_hget_text(text)
     lte = {k: v for k, v in merge_by_instance_prefix(blocks, 'EUtranCellFDD=').items() if top_level(k)}
     nr_cell = {k: v for k, v in merge_by_instance_prefix(blocks, 'NRCellDU=').items() if top_level(k)}
     nr_sector = merge_by_instance(blocks, 'Sector')
     lte_sector = merge_by_instance(blocks, '^SectorCarrier')
-    return {"lte_cell": lte, "nr_cell": nr_cell, "nr_sector": nr_sector, "lte_sector": lte_sector}
+    rilink = merge_by_instance(blocks, 'RiLink')
+    nrcellcu = {k: v for k, v in merge_by_instance_prefix(blocks, 'NRCellCU=').items() if top_level(k)}
+    # Confirmed real chain (LTE RRU-to-sector correlation, since RiLink's own naming carries
+    # no sector info for LTE): RetSubUnit.userLabel lists "<label>__<cell1>;<cell2>;..." for its
+    # AntennaUnitGroup=N; AntennaNearUnit.rfPortRef gives that same AntennaUnitGroup=N's
+    # FieldReplaceableUnit=RRU-n. Chaining cell -> AntennaUnitGroup=N -> RRU-n -> RiLink
+    # (matching riPortRef1) resolves the mapping RiLink's own naming can't provide for LTE.
+    retsubunit = merge_by_instance_prefix(blocks, 'AntennaUnitGroup=')
+    retsubunit = {k: v for k, v in retsubunit.items() if ',RetSubUnit=' in k}
+    antennanearunit = merge_by_instance_prefix(blocks, 'AntennaUnitGroup=')
+    antennanearunit = {k: v for k, v in antennanearunit.items() if ',AntennaNearUnit=' in k and ',RetSubUnit=' not in k}
+    return {"lte_cell": lte, "nr_cell": nr_cell, "nr_sector": nr_sector, "lte_sector": lte_sector,
+            "rilink": rilink, "nrcellcu": nrcellcu, "retsubunit": retsubunit, "antennanearunit": antennanearunit}
+
+
+def _lte_cell_to_rru(all_tables_list, cell_id):
+    """all_tables_list: list of table-dicts to search (own node first, others as fallback for
+    co-located antenna sharing — confirmed real: DXL04017 cells appear in DXL02330's RetSubUnit
+    data). Returns 'RRU-n' or None."""
+    for onsite_tables in all_tables_list:
+        antenna_group = None
+        for mo_name, attrs in onsite_tables.get("retsubunit", {}).items():
+            label = attrs.get("userLabel") or ""
+            cells_part = label.split("__", 1)[1] if "__" in label else ""
+            cells = [c.strip() for c in cells_part.split(";") if c.strip()]
+            if cell_id in cells:
+                m = re.match(r'AntennaUnitGroup=(\d+)', mo_name)
+                if m:
+                    antenna_group = m.group(1)
+                    break
+        if antenna_group is None:
+            continue
+        for mo_name, attrs in onsite_tables.get("antennanearunit", {}).items():
+            if mo_name.startswith(f"AntennaUnitGroup={antenna_group},"):
+                ref = attrs.get("rfPortRef") or ""
+                m = re.search(r'FieldReplaceableUnit=(RRU-\d+)', ref)
+                if m:
+                    return m.group(1)
+    return None
 
 
 
@@ -4125,14 +4176,106 @@ def verdict(post_val, expected_val, category):
     """Returns (color, note). category: 'A' or 'B'."""
     p, e = norm(post_val), norm(expected_val)
     if p is None and e is None:
-        return "gray", "no data"
+        return "gray", "No data available"
     if p is None:
-        return "red", "missing onsite"
+        return "red", "Not found onsite"
     if e is None:
-        return "amber", "no baseline to compare"
+        return "amber", "No baseline to verify against"
     if p == e:
-        return "green", "match"
-    return "red", f"expected {e}, got {p}"
+        return "green", ""
+    return "red", None  # note filled in by blueprint_comment() below
+
+
+# ============================================================
+# Blueprint-exact comment text (temp_blueprint.xlsx) — no generic "match"/"expected X got Y".
+# ============================================================
+
+def blueprint_comment(param, color, is_new, gen):
+    """gen: 'lte' or 'nr'. Returns the blueprint's own comment text for this scenario."""
+    if color == "green":
+        return "Matching"
+    if param in ("rachRootSequence", "PCI", "nRPCI", "Cellrange", "TAC", "NRTAC", "nCI"):
+        if is_new:
+            return "Mismatch found on the newly added sectors — matching as per CIQ expected"
+        return "Mismatch found on the Pre existing sectors — matching as per pre expected"
+    if gen == "lte" and param in ("EarfcnDL", "EarfcnUL", "Bandwidth", "CellID"):
+        return "Mismatch found on [Parameter - BW/Erfcndl/erfcnul/cell id], Verify the Revision history for retune."
+    if gen == "lte" and param in ("TX", "RX", "ConfiguredOutputPower"):
+        return "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"
+    if gen == "nr" and param in ("arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "cellLocalId", "ssbFrequency"):
+        return "Mismatch found on [Parameter - BW/arfcndl/arfcnul/celllocalid/SSBFREQUENCY], Verify the Revision history for retune."
+    if gen == "nr" and param == "ConfiguredOutputPower":
+        return "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"
+    return "Mismatch found"
+
+
+COMMENT_GROUPS_LTE = [
+    (("rachRootSequence", "PCI", "Cellrange", "TAC"), None),  # uses per-row is_new-aware text, not a fixed string
+    (("EarfcnDL", "EarfcnUL", "Bandwidth", "CellID"),
+     "Mismatch found on [Parameter - BW/Erfcndl/erfcnul/cell id], Verify the Revision history for retune."),
+    (("TX", "RX", "ConfiguredOutputPower"),
+     "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"),
+]
+COMMENT_GROUPS_NR = [
+    (("rachRootSequence", "nRPCI", "Cellrange", "NRTAC", "nCI"), None),
+    (("arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "cellLocalId", "ssbFrequency"),
+     "Mismatch found on [Parameter - BW/arfcndl/arfcnul/celllocalid/SSBFREQUENCY], Verify the Revision history for retune."),
+    (("ConfiguredOutputPower",),
+     "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"),
+]
+
+
+def pivot_param_results(cells, gen, has_pre):
+    """Confirmed against the blueprint directly (temp_blueprint.xlsx): the actual layout is
+    WIDE, one ROW PER SECTOR, with each parameter as its own group of 3 columns (Pre/CIQ/On
+    site) placed side by side, and ONE shared Comments cell per row combining whatever mismatch
+    groups were triggered — not one row per (sector, parameter) with a comment each. Returns
+    list of {'sector', <param>_pre/ciq/post/color per param, 'comment'}."""
+    groups = COMMENT_GROUPS_LTE if gen == "lte" else COMMENT_GROUPS_NR
+    rows = []
+    for cell_id, results in cells:
+        by_param = {r["parameter"]: r for r in results}
+        row = {"sector": cell_id}
+        for param, r in by_param.items():
+            row[f"{param}_pre"] = r.get("pre")
+            row[f"{param}_ciq"] = r.get("ciq")
+            row[f"{param}_post"] = r.get("post")
+            row[f"{param}_color"] = r.get("color")
+            row[f"{param}_note"] = r.get("note")
+        comments = []
+        for params, fixed_text in groups:
+            triggered = [p for p in params if p in by_param and by_param[p]["color"] == "red"]
+            if not triggered:
+                continue
+            if fixed_text:
+                comments.append(fixed_text)
+            else:
+                # Category A group: use whichever triggered param's own note (already carries
+                # the correct pre-existing-vs-newly-added blueprint text for this sector).
+                comments.append(by_param[triggered[0]]["note"])
+        row["comment"] = " / ".join(dict.fromkeys(comments))  # dedupe, preserve order
+        rows.append(row)
+    return rows
+
+
+def pivot_naming_results(cells):
+    """Same wide-row pivot as pivot_param_results, for the FDD naming/Rilinks/sector carrier/
+    ISDLONLY/NRCELL CU naming table (blueprint row 1) — one row per sector, each check as its
+    own CIQ/On-site column pair, one combined comment."""
+    rows = []
+    for cell_id, results in cells:
+        row = {"sector": cell_id}
+        comments = []
+        for r in results:
+            key = r["parameter"].replace(" ", "_")
+            row[f"{key}_ciq"] = r.get("ciq")
+            row[f"{key}_post"] = r.get("post")
+            row[f"{key}_color"] = r.get("color")
+            if r["color"] == "red":
+                comments.append(f"{r['parameter']}: {r['note']}")
+        row["comment"] = " / ".join(dict.fromkeys(comments))
+        rows.append(row)
+    return rows
 
 
 def build_sector_move_map(ciq_wb):
@@ -4155,7 +4298,8 @@ def build_sector_move_map(ciq_wb):
             }
     return move_map
 
-def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, scope="MCA"):
+
+def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node, scope="MCA"):
     """Returns list of {'parameter','category','pre','ciq','post','color','note'}."""
     has_pre = scope not in NO_PRE_SCOPES
     ldn = f"EUtranCellFDD={cell_id}"
@@ -4166,8 +4310,10 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, scop
     if has_pre:
         move_info = move_map.get(cell_id)
         if move_info and move_info.get("source_sector"):
-            # Look up directly in global table
-            pre_cell = pre_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
+            src_node = move_info.get("source_node")
+            src_tables = source_pre_tables_by_node.get(src_node)
+            if src_tables:
+                pre_cell = src_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
 
     def sector_lookup(tables, cell):
         ref = cell.get("sectorCarrierRef")
@@ -4181,68 +4327,188 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, scop
         pre_v = pre_cell.get(cell_key) if has_pre else None
         ciq_v = ciq_row.get(CATEGORY_A_LTE_CIQ_KEYS[param])
         expected = ciq_v if (is_new or not has_pre) else pre_v
-        color, note = verdict(on_cell.get(cell_key), expected, "A")
-        results.append({"parameter": param, "category": "A", "pre": pre_v, "ciq": ciq_v,
+        color, _ = verdict(on_cell.get(cell_key), expected, "A")
+        note = blueprint_comment(param, color, is_new, "lte")
+        results.append({"parameter": param, "pre": pre_v, "ciq": ciq_v,
                          "post": on_cell.get(cell_key), "color": color, "note": note})
 
     for param, (cell_key, ciq_key) in CATEGORY_B_LTE.items():
         ciq_v = ciq_row.get(ciq_key) if ciq_key else None
         pre_v = pre_cell.get(cell_key) if has_pre else None
         post_v = on_cell.get(cell_key)
-        color, note = verdict(post_v, ciq_v, "B")
+        color, _ = verdict(post_v, ciq_v, "B")
         if has_pre and color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
-            color, note = "amber", "matches Pre, not yet retuned to CIQ"
-        results.append({"parameter": param, "category": "B", "pre": pre_v, "ciq": ciq_v,
+            color, note = "amber", "Expected change — retune not yet applied onsite, still matches Pre"
+        else:
+            note = blueprint_comment(param, color, is_new, "lte")
+        results.append({"parameter": param, "pre": pre_v, "ciq": ciq_v,
                          "post": post_v, "color": color, "note": note})
 
     for label, cell_key in [("TX", "noOfTxAntennas"), ("RX", "noOfRxAntennas")]:
         ciq_v = ciq_row.get(cell_key)
         pre_v = pre_sec.get(cell_key) if has_pre else None
         post_v = on_sec.get(cell_key)
-        color, note = verdict(post_v, ciq_v, "B")
-        results.append({"parameter": label, "category": "B", "pre": pre_v, "ciq": ciq_v,
+        color, _ = verdict(post_v, ciq_v, "B")
+        note = blueprint_comment(label, color, is_new, "lte")
+        results.append({"parameter": label, "pre": pre_v, "ciq": ciq_v,
                          "post": post_v, "color": color, "note": note})
 
     ciq_v = ciq_row.get("configuredOutputPower")
     pre_v = pre_sec.get("configuredMaxTxPower") if has_pre else None
     post_v = on_sec.get("configuredMaxTxPower")
-    color, note = verdict(post_v, ciq_v, "B")
-    results.append({"parameter": "ConfiguredOutputPower", "category": "B", "pre": pre_v, "ciq": ciq_v,
+    color, _ = verdict(post_v, ciq_v, "B")
+    note = blueprint_comment("ConfiguredOutputPower", color, is_new, "lte")
+    results.append({"parameter": "ConfiguredOutputPower", "pre": pre_v, "ciq": ciq_v,
                      "post": post_v, "color": color, "note": note})
 
     return results
 
 
-def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, scope="MCA"):
+def _rilink_for_sector(onsite_tables, sector_suffix):
+    """Find the RiLink whose riPortRef2 (radio side) names this sector. Confirmed real naming:
+    5G radios are 'AAS-<band>_<sector>' (e.g. 'AAS-055619_N077A_1') — hyphen before the numeric
+    part, not underscore, so match without assuming a leading separator. LTE radios are just
+    'RRU-<n>' with no sector info in the name at all — cannot be matched this way; returns None,
+    which correctly surfaces as "not found" rather than a false match."""
+    rilinks = onsite_tables.get("rilink", {})
+    for rl in rilinks.values():
+        ref2 = rl.get("riPortRef2") or ""
+        if sector_suffix and sector_suffix in ref2:
+            return rl
+    return None
+
+
+def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, all_onsite_tables=None, all_pre_tables=None):
+    """FDD naming / Rilinks / sector carrier / ISDLONLY / NRCELL CU naming — confirmed against
+    blueprint row 1 (temp_blueprint.xlsx, both sheets): CIQ vs On-site only, no Pre column at
+    all for this table in either MCA or N2E_NSB. Columns generated per gen ('lte' or 'nr') —
+    FDD naming is LTE-only, NRCELL CU naming is NR-only; Rilinks/sector carrier apply to both.
+    pre_tables is used ONLY as a fallback source for the RetSubUnit/AntennaNearUnit RRU-mapping
+    chain (confirmed real: antenna wiring is static, so it's often only queried in Pre logs,
+    not re-queried onsite) — never for the Pre-vs-CIQ-vs-Post comparison itself, since this
+    table has no Pre column at all, in any scope.
+    Returns list of {'parameter','ciq','post','color','note'}."""
+    results = []
+    sector_suffix = cell_id.split("_", 1)[1] if "_" in cell_id else cell_id
+
+    if gen == "lte":
+        # FDD naming: does the EUtranCellFDD instance exist onsite exactly as CIQ names it —
+        # i.e. is the cell built with the naming CIQ specifies.
+        exists = f"EUtranCellFDD={cell_id}" in onsite_tables.get("lte_cell", {})
+        color = "green" if exists else "red"
+        note = "Matching" if exists else "Cell not found onsite with CIQ naming"
+        results.append({"parameter": "FDD naming", "ciq": cell_id,
+                         "post": cell_id if exists else None, "color": color, "note": note})
+
+    rl = None
+    if gen == "nr":
+        rl = _rilink_for_sector(onsite_tables, sector_suffix)
+    else:
+        rru = _lte_cell_to_rru([onsite_tables, pre_tables] + (all_onsite_tables or []) + (all_pre_tables or []), cell_id)
+        if rru:
+            for candidate in onsite_tables.get("rilink", {}).values():
+                ref2 = candidate.get("riPortRef2") or ""
+                if f"FieldReplaceableUnit={rru}," in ref2:
+                    rl = candidate
+                    break
+
+    rl_state = rl.get("operationalState") if rl else None
+    color = "green" if (rl and rl_state == "ENABLED") else "red"
+    note = "Matching — RiLink scripted and enabled" if color == "green" else "RiLink not scripted or not enabled onsite"
+    results.append({"parameter": "Rilinks", "ciq": "Scripted", "post": rl_state, "color": color, "note": note})
+
+    ciq_radio_port = str(ciq_row.get("Radio Port") or "").strip().upper().replace("_", "")
+    onsite_radio_port = None
+    if rl:
+        # Confirmed real: riPortRef2 (radio/RRU side) carries the DATA-n port for BOTH LTE and
+        # NR (e.g. LTE: 'RRU-1,RiPort=DATA_2'; NR: 'AAS-...,RiPort=DATA_1') — riPortRef1 is
+        # always the BBU-side letter port (A/B/C...), a different naming convention entirely.
+        m = re.search(r'RiPort=([A-Za-z0-9_]+)', rl.get("riPortRef2") or "")
+        if m:
+            onsite_radio_port = m.group(1).strip().upper().replace("_", "")
+    color = "green" if (ciq_radio_port and onsite_radio_port and ciq_radio_port == onsite_radio_port) else "red"
+    note = "Matching" if color == "green" else "Sector carrier port mismatch — verify radio/port scripted vs CIQ"
+    results.append({"parameter": "sector carrier", "ciq": ciq_row.get("Radio Port"),
+                     "post": onsite_radio_port, "color": color, "note": note})
+
+    if gen == "lte":
+        onsite_cell = onsite_tables.get("lte_cell", {}).get(f"EUtranCellFDD={cell_id}", {})
+        onsite_sec_ref = onsite_cell.get("sectorCarrierRef")
+        onsite_sec = onsite_tables.get("lte_sector", {}).get(onsite_sec_ref, {}) if onsite_sec_ref else {}
+        onsite_tx = onsite_sec.get("noOfTxAntennas")
+        onsite_isdlonly = onsite_cell.get("isDlOnly")
+        expected_isdlonly = (str(onsite_tx) == "0") if onsite_tx is not None else None
+        if expected_isdlonly is None or onsite_isdlonly is None:
+            color, note = "amber", "No data available to verify"
+        elif bool(onsite_isdlonly) == expected_isdlonly:
+            color, note = "green", "Matching"
+        else:
+            color, note = "red", "ISDLONLY inconsistent with onsite TX count"
+        results.append({"parameter": "ISDLONLY", "ciq": expected_isdlonly, "post": onsite_isdlonly,
+                         "color": color, "note": note})
+    # ISDLONLY is an FDD(LTE)-specific concept (EUtranCellFDD.isDlOnly) — no equivalent
+    # NRCellDU attribute exists, so it's skipped entirely for NR rather than shown as "no data".
+
+    if gen == "nr":
+        ciq_nrcellcu = ciq_row.get("NRCellCU")
+        exists = bool(ciq_nrcellcu) and f"NRCellCU={ciq_nrcellcu}" in onsite_tables.get("nrcellcu", {})
+        color = "green" if exists else "red"
+        note = "Matching" if exists else "NRCellCU naming not found onsite matching CIQ"
+        results.append({"parameter": "NRCELL CU naming", "ciq": ciq_nrcellcu,
+                         "post": ciq_nrcellcu if exists else None, "color": color, "note": note})
+
+    return results
+
+
+def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node, scope="MCA"):
     has_pre = scope not in NO_PRE_SCOPES
     ldn = f"NRCellDU={cell_id}"
     on_cell = onsite_tables["nr_cell"].get(ldn, {})
     pre_cell = pre_tables["nr_cell"].get(ldn, {}) if has_pre else {}
 
+    # KNOWN LIMITATION (MCA only — moot for N2E/NSB, which never use Pre at all): unlike
+    # eUtran Parameters' "Carrier Cell Intention" column, 5G Info has no equivalent new-vs-
+    # existing classification column at all — confirmed by checking its full header list. A
+    # cell explicitly listed in Sector Del_Movement is reliably "existing/moved", so that case
+    # is handled correctly below. For everything else, is_new can't be determined from 5G Info
+    # alone; defaulting to False (treat as existing, use Pre as expected) is the safer
+    # assumption, since PCI/nRPCI errors are more consequential than a newly-added cell being
+    # compared against a nonexistent Pre baseline — but this needs a real classification source
+    # to be fully reliable. Flagging rather than guessing.
     is_new = True if not has_pre else False
+    pre_sector_source_tables = pre_tables
     pre_sector_id = cell_id
     if has_pre:
         move_info = move_map.get(cell_id)
         if move_info and move_info.get("source_sector"):
-            # Look up directly in global table
-            pre_cell = pre_tables["nr_cell"].get(f"NRCellDU={move_info['source_sector']}", pre_cell)
-            pre_sector_id = move_info["source_sector"]
+            src_node = move_info.get("source_node")
+            src_tables = source_pre_tables_by_node.get(src_node)
+            if src_tables:
+                pre_cell = src_tables["nr_cell"].get(f"NRCellDU={move_info['source_sector']}", pre_cell)
+                pre_sector_source_tables = src_tables
+                pre_sector_id = move_info["source_sector"]
 
     def sector_lookup(tables, cell_id_key):
+        # Confirmed real key format: this block's instances are "NRSectorCarrier=<cell_id>",
+        # not the bare cell name.
         return tables["nr_sector"].get(f"NRSectorCarrier={cell_id_key}", {})
 
     on_sec = sector_lookup(onsite_tables, cell_id)
-    pre_sec = sector_lookup(pre_tables, pre_sector_id) if has_pre else {}
+    pre_sec = sector_lookup(pre_sector_source_tables, pre_sector_id) if has_pre else {}
 
     results = []
     for param, cell_key in CATEGORY_A_NR.items():
         pre_v = pre_cell.get(cell_key) if has_pre else None
         ciq_v = ciq_row.get(CATEGORY_A_NR_CIQ_KEYS[param]) if ciq_row else None
         expected = ciq_v if (is_new or not has_pre) else pre_v
-        color, note = verdict(on_cell.get(cell_key), expected, "A")
-        results.append({"parameter": param, "category": "A", "pre": pre_v, "ciq": ciq_v,
+        color, _ = verdict(on_cell.get(cell_key), expected, "A")
+        note = blueprint_comment(param, color, is_new, "nr")
+        results.append({"parameter": param, "pre": pre_v, "ciq": ciq_v,
                          "post": on_cell.get(cell_key), "color": color, "note": note})
 
+    # Confirmed real bug: arfcnDL/arfcnUL/bSChannelBwDL/bSChannelBwUL only exist in the
+    # NRSectorCarrier ("Sector") table, not NRCellDU — reading them from the cell table
+    # silently returned None always. cellLocalId/ssbFrequency live on the cell itself.
     SECTOR_LEVEL_B_PARAMS = {"arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL"}
     for param, (cell_key, ciq_key) in CATEGORY_B_NR.items():
         ciq_v = ciq_row.get(ciq_key) if (ciq_row and ciq_key) else None
@@ -4252,27 +4518,33 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, scope
         else:
             pre_v = pre_cell.get(cell_key) if has_pre else None
             post_v = on_cell.get(cell_key)
-        color, note = verdict(post_v, ciq_v, "B")
+        color, _ = verdict(post_v, ciq_v, "B")
         if has_pre and color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
-            color, note = "amber", "matches Pre, not yet retuned to CIQ"
-        results.append({"parameter": param, "category": "B", "pre": pre_v, "ciq": ciq_v,
+            color, note = "amber", "Expected change — retune not yet applied onsite, still matches Pre"
+        else:
+            note = blueprint_comment(param, color, is_new, "nr")
+        results.append({"parameter": param, "pre": pre_v, "ciq": ciq_v,
                          "post": post_v, "color": color, "note": note})
 
     for label, cell_key in [("TX", "noOfTxAntennas"), ("RX", "noOfRxAntennas")]:
         pre_v = pre_sec.get(cell_key)
         post_v = on_sec.get(cell_key)
-        color, note = verdict(post_v, pre_v, "B")
-        results.append({"parameter": label, "category": "B", "pre": pre_v, "ciq": None,
+        color, _ = verdict(post_v, pre_v, "B")  # no CIQ column confirmed for NR TX/RX yet
+        note = blueprint_comment(label, color, is_new, "nr")
+        results.append({"parameter": label, "pre": pre_v, "ciq": None,
                          "post": post_v, "color": color, "note": note})
 
     ciq_v = ciq_row.get("configuredMaxTxPower") if ciq_row else None
     pre_v = pre_sec.get("configuredMaxTxPower")
     post_v = on_sec.get("configuredMaxTxPower")
-    color, note = verdict(post_v, ciq_v, "B")
-    results.append({"parameter": "ConfiguredOutputPower", "category": "B", "pre": pre_v, "ciq": ciq_v,
+    color, _ = verdict(post_v, ciq_v, "B")
+    note = blueprint_comment("ConfiguredOutputPower", color, is_new, "nr")
+    results.append({"parameter": "ConfiguredOutputPower", "pre": pre_v, "ciq": ciq_v,
                      "post": post_v, "color": color, "note": note})
 
     return results
+
+
 # ============================================================
 # File-to-node matching + orchestration
 # ============================================================
@@ -4292,82 +4564,89 @@ def match_file_to_node(filename, node_names):
             return node
     return None
 
+
 def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="MCA"):
+    """pre_files / onsite_files: list of (filename, text_content) tuples. pre_files may be
+    empty for N2E/NSB, which never require a Pre log at all (confirmed against the blueprint —
+    no "pre" column exists anywhere in the N2E_NSB sheet).
+    Returns {
+        'node_results': {node: {'lte': [(cell_id, [param_result,...]), ...], 'nr': [...]}},
+        'unmatched_pre': [filename,...], 'unmatched_onsite': [filename,...],
+        'nodes_missing_pre': [node,...], 'nodes_missing_onsite': [node,...],
+    }"""
     has_pre = scope not in NO_PRE_SCOPES
-    node_names = [str(r.get("Node to be built as") or "").strip() for r in mm_objs if str(r.get("Node to be built as") or "").strip()]
+    node_names = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
 
-    # Build prefix map so 5G cells (e.g. DXFN...) map back to their primary Node (e.g. DXL...)
-    prefix_to_nodes = {}
-    for r in mm_objs:
-        node = str(r.get("Node to be built as") or "").strip()
-        if not node: continue
-        
-        prefix_to_nodes.setdefault(node, set()).add(node)
-        
-        e_name = str(r.get("eNodeB Name") or "").strip()
-        if e_name: prefix_to_nodes.setdefault(e_name, set()).add(node)
-            
-        g_name = str(r.get("gNodeB Name") or "").strip()
-        if g_name: prefix_to_nodes.setdefault(g_name, set()).add(node)
-
-    # Sort prefixes by length descending so longer prefixes match first
-    sorted_prefixes = sorted(prefix_to_nodes.keys(), key=len, reverse=True)
-
-    global_pre = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}}
-    global_onsite = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}}
-    
+    pre_by_node, onsite_by_node = {}, {}
     unmatched_pre, unmatched_onsite = [], []
-    nodes_with_pre, nodes_with_onsite = set(), set()
-    
     if has_pre:
         for fname, text in pre_files:
             node = match_file_to_node(fname, node_names)
-            if node: nodes_with_pre.add(node)
-            else: unmatched_pre.append(fname)
-            t = pv_load_node_tables(text)
-            for k in global_pre: global_pre[k].update(t[k])
-            
+            if node:
+                pre_by_node[node] = pv_load_node_tables(text)
+            else:
+                unmatched_pre.append(fname)
     for fname, text in onsite_files:
         node = match_file_to_node(fname, node_names)
-        if node: nodes_with_onsite.add(node)
-        else: unmatched_onsite.append(fname)
-        t = pv_load_node_tables(text)
-        for k in global_onsite: global_onsite[k].update(t[k])
+        if node:
+            onsite_by_node[node] = pv_load_node_tables(text)
+        else:
+            unmatched_onsite.append(fname)
 
-    nodes_missing_pre = [n for n in node_names if n not in nodes_with_pre] if has_pre else []
-    nodes_missing_onsite = [n for n in node_names if n not in nodes_with_onsite]
+    nodes_missing_pre = [n for n in node_names if n not in pre_by_node] if has_pre else []
+    nodes_missing_onsite = [n for n in node_names if n not in onsite_by_node]
+
+    empty_tables = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}, "rilink": {}, "nrcellcu": {}}
+    source_pre_by_node = pre_by_node  # for Sector Del_Movement lookups across nodes (MCA only)
 
     lte_ciq, nr_ciq = {}, {}
     if "eUtran Parameters" in ciq_wb.sheetnames:
         ws = ciq_wb["eUtran Parameters"]
-        hdr = [str(c.value).strip() if c.value else "" for c in ws[1]]
+        hdr = [c.value for c in ws[1]]
         for row in ws.iter_rows(min_row=2, values_only=True):
             d = dict(zip(hdr, row))
             if d.get("EutranCellFDDId"):
-                lte_ciq[str(d["EutranCellFDDId"]).strip()] = d
+                lte_ciq[d["EutranCellFDDId"]] = d
     if "5G Info" in ciq_wb.sheetnames:
         ws = ciq_wb["5G Info"]
-        hdr = [str(c.value).strip() if c.value else "" for c in ws[1]]
+        hdr = [c.value for c in ws[1]]
         for row in ws.iter_rows(min_row=2, values_only=True):
             d = dict(zip(hdr, row))
             if d.get("NRCellDU"):
-                nr_ciq[str(d["NRCellDU"]).strip()] = d
+                nr_ciq[d["NRCellDU"]] = d
 
     move_map = build_sector_move_map(ciq_wb) if has_pre else {}
 
-    node_results = {n: {"lte": [], "nr": []} for n in node_names}
-    
+    node_results = {n: {"lte": [], "nr": [], "naming_lte": [], "naming_nr": []} for n in node_names}
     for cell_id, ciq_row in lte_ciq.items():
-        matched_nodes = next((prefix_to_nodes[p] for p in sorted_prefixes if cell_id.startswith(p)), [])
-        for node in matched_nodes:
-            results = compare_lte_cell(cell_id, ciq_row, global_pre, global_onsite, move_map, scope=scope)
-            node_results[node]["lte"].append((cell_id, results))
+        node = next((n for n in node_names if cell_id.startswith(n)), None)
+        if not node:
+            continue
+        pre_t = pre_by_node.get(node, empty_tables)
+        on_t = onsite_by_node.get(node, empty_tables)
+        results = compare_lte_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node, scope=scope)
+        node_results[node]["lte"].append((cell_id, results))
+        node_results[node]["naming_lte"].append((cell_id, verify_naming_and_config(
+            cell_id, ciq_row, on_t, pre_t, "lte",
+            all_onsite_tables=list(onsite_by_node.values()), all_pre_tables=list(pre_by_node.values()))))
 
     for cell_id, ciq_row in nr_ciq.items():
-        matched_nodes = next((prefix_to_nodes[p] for p in sorted_prefixes if cell_id.startswith(p)), [])
-        for node in matched_nodes:
-            results = compare_nr_cell(cell_id, ciq_row, global_pre, global_onsite, move_map, scope=scope)
-            node_results[node]["nr"].append((cell_id, results))
+        node = next((n for n in node_names if cell_id.startswith(n)), None)
+        if not node:
+            continue
+        pre_t = pre_by_node.get(node, empty_tables)
+        on_t = onsite_by_node.get(node, empty_tables)
+        results = compare_nr_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node, scope=scope)
+        node_results[node]["nr"].append((cell_id, results))
+        node_results[node]["naming_nr"].append((cell_id, verify_naming_and_config(
+            cell_id, ciq_row, on_t, pre_t, "nr",
+            all_onsite_tables=list(onsite_by_node.values()), all_pre_tables=list(pre_by_node.values()))))
+
+    for node, res in node_results.items():
+        res["_wide_lte"] = pivot_param_results(res["lte"], "lte", has_pre)
+        res["_wide_nr"] = pivot_param_results(res["nr"], "nr", has_pre)
+        res["_wide_naming_lte"] = pivot_naming_results(res["naming_lte"])
+        res["_wide_naming_nr"] = pivot_naming_results(res["naming_nr"])
 
     return {
         "node_results": node_results,
@@ -4377,141 +4656,211 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
         "nodes_missing_onsite": nodes_missing_onsite,
     }
 
-def build_parameter_verification_pdf(scope, node_results, has_pre=True):
+
+import io
+
+COMMENT_GROUPS_LTE = [
+    (("rachRootSequence", "PCI", "Cellrange", "TAC"), None),
+    (("EarfcnDL", "EarfcnUL", "Bandwidth", "CellID"),
+     "Mismatch found on [Parameter - BW/Erfcndl/erfcnul/cell id], Verify the Revision history for retune."),
+    (("TX", "RX", "ConfiguredOutputPower"),
+     "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"),
+]
+COMMENT_GROUPS_NR = [
+    (("rachRootSequence", "nRPCI", "Cellrange", "NRTAC", "nCI"), None),
+    (("arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "cellLocalId", "ssbFrequency"),
+     "Mismatch found on [Parameter - BW/arfcndl/arfcnul/celllocalid/SSBFREQUENCY], Verify the Revision history for retune."),
+    (("ConfiguredOutputPower",),
+     "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"),
+]
+
+LOGO_B64 = "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"
+
+
+def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=None, site_ids=None):
+    """Confirmed against the blueprint (temp_blueprint.xlsx) directly: WIDE layout, one row
+    per sector, each parameter as its own Pre/CIQ/On-site column group side by side, one
+    combined Comments column per row — not one row per (sector, parameter)."""
+    import base64
     from reportlab.lib import colors as pv_colors
     from reportlab.lib.pagesizes import landscape, letter
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
-    import io
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
     COLOR_MAP = {
-        "green": pv_colors.HexColor("#C6EFCE"),
-        "red": pv_colors.HexColor("#FFC7CE"),
-        "amber": pv_colors.HexColor("#FFEB9C"),
+        "green": pv_colors.HexColor("#C6EFCE"), "red": pv_colors.HexColor("#FFC7CE"),
+        "amber": pv_colors.HexColor("#FFEB9C"), "gray": pv_colors.HexColor("#F2F2F2"),
     }
-    
-    blueprint_groups = {
-        "4G Sectors (Category B)": ["EarfcnDL", "EarfcnUL", "TX", "RX", "Bandwidth", "ConfiguredOutputPower", "CellID"],
-        "5G Sectors (Category B)": ["arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "ConfiguredOutputPower", "cellLocalId", "ssbFrequency", "TX", "RX"],
-        "4G Sectors (Category A)": ["rachRootSequence", "PCI", "Cellrange", "TAC"],
-        "5G Sectors (Category A)": ["rachRootSequence", "nRPCI", "Cellrange", "NRTAC", "nCI"]
-    }
+    HEADER_BG = pv_colors.HexColor("#1F3864")
+    SUBHEADER_BG = pv_colors.HexColor("#8EA9DB")
+    SECTION_BG = pv_colors.HexColor("#D9E2F3")
+
+    styles = getSampleStyleSheet()
+    cell_style = ParagraphStyle("cell", parent=styles["Normal"], fontSize=6.5, leading=8, alignment=TA_CENTER)
+    sector_style = ParagraphStyle("sector", parent=styles["Normal"], fontSize=6.5, leading=8, alignment=TA_LEFT)
+    note_style = ParagraphStyle("note", parent=styles["Normal"], fontSize=6, leading=7.5, alignment=TA_LEFT)
+    hdr_style = ParagraphStyle("hdr", parent=styles["Normal"], fontSize=6.5, leading=7.5,
+                                textColor=pv_colors.white, alignment=TA_CENTER, fontName="Helvetica-Bold")
+
+    def P(text, style=cell_style):
+        return Paragraph("" if text is None else str(text), style)
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(letter), topMargin=0.3 * inch, bottomMargin=0.3 * inch,
                              leftMargin=0.3 * inch, rightMargin=0.3 * inch)
-    styles = getSampleStyleSheet()
-    
-    cell_style = ParagraphStyle(name='CellStyle', fontSize=6, leading=7, alignment=1)
-    comment_style = ParagraphStyle(name='CommentStyle', fontSize=6, leading=7, alignment=0)
-    
-    story = [Paragraph(f"{scope} Parameter Verification Report", styles["Title"]), Spacer(1, 10)]
+    story = []
 
-    sub_cols = ["pre", "CIQ", "On site"] if has_pre else ["CIQ", "On site"]
-    sub_col_count = len(sub_cols)
+    try:
+        logo_bytes = base64.b64decode(LOGO_B64)
+        logo_img = Image(io.BytesIO(logo_bytes), width=1.0 * inch, height=0.35 * inch)
+    except Exception:
+        logo_img = P("MasTec", ParagraphStyle("logo", fontSize=14, textColor=pv_colors.HexColor("#1F3864")))
 
-    def build_table_for_group(cells, param_list):
-        if not cells or not param_list: 
-            return None
-        
-        row0 = ["Sector"]
-        row1 = [""]
-        
-        for p in param_list:
-            row0.extend([p] + [""] * (sub_col_count - 1))
-            row1.extend(sub_cols)
-            
-        row0.append("Comments")
-        row1.append("")
-        
-        data = [row0, row1]
-        style_cmds = [
-            ("BACKGROUND", (0, 0), (-1, 1), pv_colors.HexColor("#1F4E78")),
-            ("TEXTCOLOR", (0, 0), (-1, 1), pv_colors.white),
-            ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 6), 
-            ("LEFTPADDING", (0, 0), (-1, -1), 2), 
-            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("GRID", (0, 0), (-1, -1), 0.5, pv_colors.grey),
-            ("SPAN", (0, 0), (0, 1)), 
-            ("SPAN", (-1, 0), (-1, 1)) 
-        ]
-        
+    title_style = ParagraphStyle("title", parent=styles["Title"], fontSize=14, spaceAfter=0)
+    meta_style = ParagraphStyle("meta", parent=styles["Normal"], fontSize=8, leading=11)
+    site_id_text = ", ".join(site_ids) if site_ids else "N/A"
+    meta_text = f"<b>Scope:</b> {scope} &nbsp;&nbsp; <b>FA Code:</b> {fa_code or 'N/A'} &nbsp;&nbsp; <b>Site ID(s):</b> {site_id_text}"
+    header_tbl = Table([[logo_img, P(f"{scope} Parameter Verification Report", title_style)],
+                         ["", P(meta_text, meta_style)]], colWidths=[1.2 * inch, 9.5 * inch])
+    header_tbl.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("SPAN", (0, 0), (0, 1)),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2), ("TOPPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    story.append(header_tbl)
+    story.append(Spacer(1, 8))
+
+    def build_wide_table(wide_rows, param_groups, title, comment_groups=None):
+        """param_groups: [(display_label, key_prefix, sub_cols), ...]
+        sub_cols: e.g. ['pre','ciq','post'] or ['ciq','post']
+        comment_groups: restricts the Comments column to only mismatches among the params
+        shown in THIS table — confirmed the blueprint's two tables each have their own
+        separate Comments column, not one combined across both."""
+        if not wide_rows:
+            return
+        story.append(P(title, ParagraphStyle("h4", parent=styles["Heading4"], spaceBefore=4, spaceAfter=2)))
+
+        top_header = [P("Sector", hdr_style)]
+        sub_header = [P("", hdr_style)]
+        col_widths = [0.95 * inch]
+        span_cmds = []
         col_idx = 1
-        for p in param_list:
-            style_cmds.append(("SPAN", (col_idx, 0), (col_idx + sub_col_count - 1, 0)))
-            col_idx += sub_col_count
+        for label, key_prefix, sub_cols in param_groups:
+            span_start = col_idx
+            for sc in sub_cols:
+                top_header.append(P("", hdr_style))
+                sub_header.append(P(sc.upper() if sc != "post" else "ON SITE", hdr_style))
+                col_widths.append(0.5 * inch)
+                col_idx += 1
+            span_cmds.append(("SPAN", (span_start, 0), (col_idx - 1, 0)))
+            top_header[span_start] = P(label, hdr_style)
+        top_header.append(P("Comments", hdr_style))
+        sub_header.append(P("", hdr_style))
+        col_widths.append(2.6 * inch)
 
-        row_idx = 2
-        for cell_id, results in cells:
-            row_data = [Paragraph(cell_id, cell_style)]
-            comments = []
-            res_map = {r["parameter"]: r for r in results}
-            
-            for p in param_list:
-                r = res_map.get(p)
-                if r:
-                    if has_pre:
-                        pre_v = str(r["pre"]) if r["pre"] is not None else ""
-                        row_data.append(Paragraph(pre_v, cell_style))
-                    
-                    ciq_v = str(r["ciq"]) if r["ciq"] is not None else ""
-                    post_v = str(r["post"]) if r["post"] is not None else ""
-                    
-                    row_data.append(Paragraph(ciq_v, cell_style))
-                    row_data.append(Paragraph(post_v, cell_style))
-                    
-                    if r["color"] in ["red", "amber"]:
-                        comments.append(f"{p}: {r['note']}")
-                        
-                    col_pos = len(row_data) - 1
-                    bg = COLOR_MAP.get(r["color"], pv_colors.white)
-                    style_cmds.append(("BACKGROUND", (col_pos, row_idx), (col_pos, row_idx), bg))
-                else:
-                    row_data.extend([""] * sub_col_count)
-            
-            comment_text = " | ".join(comments) if comments else "Match"
-            row_data.append(Paragraph(comment_text, comment_style))
-            data.append(row_data)
-            row_idx += 1
-        
-        sector_w = 1.3 * inch
-        comments_w = 2.2 * inch
-        rem_width = 10.4 * inch - sector_w - comments_w
-        data_col_w = rem_width / (len(param_list) * sub_col_count)
-        
-        col_widths = [sector_w] + [data_col_w] * (len(param_list) * sub_col_count) + [comments_w]
-        
+        shown_params = {kp for _, kp, _ in param_groups}
+        data = [top_header, sub_header]
+        row_color_cells = []  # (row_idx, col_idx, color) for value cells
+        for r_i, row in enumerate(wide_rows, start=2):
+            data_row = [P(row["sector"], sector_style)]
+            c_i = 1
+            for label, key_prefix, sub_cols in param_groups:
+                color = row.get(f"{key_prefix}_color")
+                for sc in sub_cols:
+                    val = row.get(f"{key_prefix}_{sc}")
+                    data_row.append(P(val))
+                    if color:
+                        row_color_cells.append((r_i, c_i, color))
+                    c_i += 1
+            comment_text = ""
+            if comment_groups:
+                comments = []
+                for params, fixed_text in comment_groups:
+                    triggered = [p for p in params if p in shown_params and row.get(f"{p}_color") == "red"]
+                    if not triggered:
+                        continue
+                    comments.append(fixed_text if fixed_text else row.get(f"{triggered[0]}_note", "Mismatch"))
+                comment_text = " / ".join(dict.fromkeys(comments))
+            data_row.append(P(comment_text, note_style))
+            data.append(data_row)
+
         tbl = Table(data, repeatRows=2, colWidths=col_widths)
+        style_cmds = [
+            ("BACKGROUND", (0, 0), (-1, 0), HEADER_BG), ("BACKGROUND", (0, 1), (-1, 1), SUBHEADER_BG),
+            ("GRID", (0, 0), (-1, -1), 0.4, pv_colors.HexColor("#BFBFBF")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5), ("SPAN", (0, 0), (0, 1)),
+            ("ROWBACKGROUNDS", (0, 2), (-1, -1), [pv_colors.white]),
+        ] + span_cmds
+        for r_i, c_i, color in row_color_cells:
+            style_cmds.append(("BACKGROUND", (c_i, r_i), (c_i, r_i), COLOR_MAP.get(color, pv_colors.white)))
         tbl.setStyle(TableStyle(style_cmds))
-        return tbl
+        story.append(tbl)
+        story.append(Spacer(1, 8))
 
-    def add_chunked_tables(title, cells, full_param_list):
-        if not cells: return
-        # Chunk the parameters to prevent PDF squishing
-        chunk_size = 3
-        chunks = [full_param_list[i:i + chunk_size] for i in range(0, len(full_param_list), chunk_size)]
-        
-        for i, chunk in enumerate(chunks):
-            suffix = f" (Part {i+1} of {len(chunks)})" if len(chunks) > 1 else ""
-            story.append(Paragraph(f"{title}{suffix}", styles["Heading4"]))
-            tbl = build_table_for_group(cells, chunk)
-            if tbl: 
-                story.extend([tbl, Spacer(1, 8)])
+    def naming_groups():
+        cols = ["ciq", "post"]
+        return [
+            ("FDD naming", "FDD_naming", cols), ("Rilinks", "Rilinks", cols),
+            ("Sector carrier", "sector_carrier", cols), ("ISDLONLY", "ISDLONLY", cols),
+        ]
+
+    def naming_groups_nr():
+        cols = ["ciq", "post"]
+        return [
+            ("Rilinks", "Rilinks", cols), ("Sector carrier", "sector_carrier", cols),
+            ("NRCELL CU naming", "NRCELL_CU_naming", cols),
+        ]
+
+    def lte_param_groups_1():
+        c3 = ["pre", "ciq", "post"] if has_pre else ["ciq", "post"]
+        return [("EarfcnDL", "EarfcnDL", c3), ("EarfcnUL", "EarfcnUL", c3), ("TX", "TX", c3),
+                ("RX", "RX", c3), ("Bandwidth", "Bandwidth", c3),
+                ("ConfiguredOutputPower", "ConfiguredOutputPower", c3), ("CellID", "CellID", c3)]
+
+    def lte_param_groups_2():
+        c3 = ["pre", "ciq", "post"] if has_pre else ["ciq", "post"]
+        return [("rachRootSequence", "rachRootSequence", c3), ("PCI", "PCI", c3),
+                ("Cellrange", "Cellrange", c3), ("TAC", "TAC", c3)]
+
+    def nr_param_groups_1():
+        c3 = ["pre", "ciq", "post"] if has_pre else ["ciq", "post"]
+        return [("arfcnDL", "arfcnDL", c3), ("arfcnUL", "arfcnUL", c3),
+                ("bSChannelBwDL", "bSChannelBwDL", c3), ("bSChannelBwUL", "bSChannelBwUL", c3),
+                ("ConfiguredOutputPower", "ConfiguredOutputPower", c3),
+                ("cellLocalId", "cellLocalId", c3), ("ssbFrequency", "ssbFrequency", c3)]
+
+    def nr_param_groups_2():
+        c3 = ["pre", "ciq", "post"] if has_pre else ["ciq", "post"]
+        return [("rachRootSequence", "rachRootSequence", c3), ("nRPCI", "nRPCI", c3),
+                ("Cellrange", "Cellrange", c3), ("NRTAC", "NRTAC", c3), ("nCI", "nCI", c3)]
 
     for node, res in node_results.items():
-        if not res["lte"] and not res["nr"]: continue
-        story.append(Paragraph(f"Node: {node}", styles["Heading2"]))
-        
-        add_chunked_tables("4G Sectors (Category B)", res["lte"], blueprint_groups["4G Sectors (Category B)"])
-        add_chunked_tables("4G Sectors (Category A)", res["lte"], blueprint_groups["4G Sectors (Category A)"])
-        add_chunked_tables("5G Sectors (Category B)", res["nr"], blueprint_groups["5G Sectors (Category B)"])
-        add_chunked_tables("5G Sectors (Category A)", res["nr"], blueprint_groups["5G Sectors (Category A)"])
+        story.append(P(f"Node: {node}", ParagraphStyle("h3", parent=styles["Heading3"],
+                                                         backColor=SECTION_BG, spaceBefore=8, spaceAfter=4,
+                                                         borderPadding=3)))
+        # A node can have 4G cells, 5G cells, or both — 5G table generated whenever 5G cells
+        # are present, even if the node's primary identity is 4G (MMBB), confirmed required.
+        if res.get("naming_lte"):
+            build_wide_table(res["_wide_naming_lte"], naming_groups(), "4G Naming & Configuration")
+        if res.get("naming_nr"):
+            build_wide_table(res["_wide_naming_nr"], naming_groups_nr(), "5G Naming & Configuration")
+        # Confirmed exact blueprint row order (temp_blueprint.xlsx): Naming table first, then
+        # ALL "Earfcn/TX-RX/etc" tables grouped together (4G then 5G), THEN all "PCI/TAC"
+        # tables grouped together (4G then 5G) — type-first ordering, not generation-first.
+        if res.get("lte"):
+            build_wide_table(res["_wide_lte"], lte_param_groups_1(), "4G Sectors",
+                              comment_groups=[COMMENT_GROUPS_LTE[1], COMMENT_GROUPS_LTE[2]])
+        if res.get("nr"):
+            build_wide_table(res["_wide_nr"], nr_param_groups_1(), "5G Sectors",
+                              comment_groups=[COMMENT_GROUPS_NR[1], COMMENT_GROUPS_NR[2]])
+        if res.get("lte"):
+            build_wide_table(res["_wide_lte"], lte_param_groups_2(), "4G Sectors — PCI/TAC",
+                              comment_groups=[COMMENT_GROUPS_LTE[0]])
+        if res.get("nr"):
+            build_wide_table(res["_wide_nr"], nr_param_groups_2(), "5G Sectors — PCI/TAC",
+                              comment_groups=[COMMENT_GROUPS_NR[0]])
 
     doc.build(story)
     return buf.getvalue()
@@ -4632,25 +4981,25 @@ if st.session_state.qkx_page == "home":
         st.caption("Pre-existing sites — MCA, CENM, or CRAN rehome")
         if st.button("MCA", use_container_width=True, key="qkx_card_mca"):
             _qkx_go("family")
-        if st.button("MCA - Generate Report", use_container_width=True, key="qkx_card_mca_report"):
+        if st.button("\U0001F4CB  MCA - Generate Report", use_container_width=True, key="qkx_card_mca_report"):
             _qkx_go("input", "MCA", report_only=True)
-        if st.button("MCA - Parameter Verification", use_container_width=True, key="qkx_card_mca_pv"):
+        if st.button("\U0001F50D  MCA - Parameter Verification", use_container_width=True, key="qkx_card_mca_pv"):
             _qkx_go("paramcheck", "MCA")
     with c2:
         st.caption("Nokia to Ericsson site integration")
         if st.button("N2E", use_container_width=True, key="qkx_card_n2e"):
             _qkx_go("input", "N2E")
-        if st.button("N2E - Generate Report", use_container_width=True, key="qkx_card_n2e_report"):
+        if st.button("\U0001F4CB  N2E - Generate Report", use_container_width=True, key="qkx_card_n2e_report"):
             _qkx_go("input", "N2E", report_only=True)
-        if st.button("N2E - Parameter Verification", use_container_width=True, key="qkx_card_n2e_pv"):
+        if st.button("\U0001F50D  N2E - Parameter Verification", use_container_width=True, key="qkx_card_n2e_pv"):
             _qkx_go("paramcheck", "N2E")
     with c3:
         st.caption("New site build")
         if st.button("NSB", use_container_width=True, key="qkx_card_nsb"):
             _qkx_go("input", "NSB")
-        if st.button("NSB - Generate Report", use_container_width=True, key="qkx_card_nsb_report"):
+        if st.button("\U0001F4CB  NSB - Generate Report", use_container_width=True, key="qkx_card_nsb_report"):
             _qkx_go("input", "NSB", report_only=True)
-        if st.button("NSB - Parameter Verification", use_container_width=True, key="qkx_card_nsb_pv"):
+        if st.button("\U0001F50D  NSB - Parameter Verification", use_container_width=True, key="qkx_card_nsb_pv"):
             _qkx_go("paramcheck", "NSB")
 
     st.divider()
@@ -4973,6 +5322,9 @@ elif st.session_state.qkx_page == "input":
 
 
 # ---- PARAMETER VERIFICATION (MCA / N2E / NSB) ----
+
+
+# ---- PARAMETER VERIFICATION (MCA / N2E / NSB) ----
 elif st.session_state.qkx_page == "paramcheck":
     pv_scope = st.session_state.qkx_scope
     pv_has_pre = pv_scope not in ("N2E", "NSB")
@@ -4984,9 +5336,6 @@ elif st.session_state.qkx_page == "paramcheck":
                    "Upload the CIQ, then all Pre logs and Onsite logs for every node at the site — "
                    "each file is matched to its node automatically by filename.")
     else:
-        # Confirmed against the blueprint (temp_blueprint.xlsx, N2E_NSB sheet): every parameter
-        # has only CIQ/On site columns, no "pre" column anywhere — N2E has no prior Ericsson
-        # state to compare against, and NSB is a brand-new site. No Pre log needed at all here.
         st.caption("Compares CIQ vs Onsite logs, flags mismatches. "
                    f"{pv_scope} has no pre-existing state to compare against, so no Pre log is needed. "
                    "Upload the CIQ, then all Onsite logs for every node at the site — "
@@ -5017,11 +5366,28 @@ elif st.session_state.qkx_page == "paramcheck":
             pv_onsite_inputs = [(f.name, f.getvalue().decode("utf-8", errors="replace")) for f in pv_onsite_files]
 
             pv_result = run_parameter_verification(pv_wb, pv_mm_objs, pv_pre_inputs, pv_onsite_inputs, scope=pv_scope)
+
+            pv_fa_code = None
+            if "5G Info" in pv_wb.sheetnames:
+                pv_ws5g = pv_wb["5G Info"]
+                pv_hdr5g = [c.value for c in pv_ws5g[1]]
+                for row in pv_ws5g.iter_rows(min_row=2, values_only=True):
+                    d = dict(zip(pv_hdr5g, row))
+                    if d.get("FA Code"):
+                        pv_fa_code = d.get("FA Code")
+                        break
+            pv_site_ids = [r.get("Node to be built as") for r in pv_mm_objs if r.get("Node to be built as")]
+
             st.session_state.pv_results = pv_result
             st.session_state.pv_scope_ran = pv_scope
+            st.session_state.pv_fa_code = pv_fa_code
+            st.session_state.pv_site_ids = pv_site_ids
 
     if st.session_state.get("pv_results") and st.session_state.get("pv_scope_ran") == pv_scope:
         pv_result = st.session_state.pv_results
+
+        st.markdown(f"**FA Code:** {st.session_state.get('pv_fa_code') or 'N/A'}  |  "
+                    f"**Site ID(s):** {', '.join(st.session_state.get('pv_site_ids', [])) or 'N/A'}")
 
         if pv_result["unmatched_pre"] or pv_result["unmatched_onsite"]:
             with st.expander("⚠ Files that didn't match any node in the CIQ", expanded=True):
@@ -5039,75 +5405,104 @@ elif st.session_state.qkx_page == "paramcheck":
 
         total_green = total_amber = total_red = 0
         for node, res in pv_result["node_results"].items():
-            for cell_id, results in res["lte"] + res["nr"]:
-                for r in results:
-                    if r["color"] == "green":
-                        total_green += 1
-                    elif r["color"] == "amber":
-                        total_amber += 1
-                    elif r["color"] == "red":
-                        total_red += 1
+            for group in ("lte", "nr", "naming_lte", "naming_nr"):
+                for cell_id, results in res.get(group, []):
+                    for r in results:
+                        if r["color"] == "green":
+                            total_green += 1
+                        elif r["color"] == "amber":
+                            total_amber += 1
+                        elif r["color"] == "red":
+                            total_red += 1
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Matches", total_green)
         m2.metric("Expected changes", total_amber)
         m3.metric("Mismatches", total_red)
 
-# Ensure exactly 8 spaces (or 2 tabs) before these lines:
-        blueprint_groups = {
-            "4G Sectors (Category B)": ["EarfcnDL", "EarfcnUL", "TX", "RX", "Bandwidth", "ConfiguredOutputPower", "CellID"],
-            "5G Sectors (Category B)": ["arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "ConfiguredOutputPower", "cellLocalId", "ssbFrequency", "TX", "RX"],
-            "4G Sectors (Category A)": ["rachRootSequence", "PCI", "Cellrange", "TAC"],
-            "5G Sectors (Category A)": ["rachRootSequence", "nRPCI", "Cellrange", "NRTAC", "nCI"]
-        }
+        PV_COLOR_HEX = {"green": "#C6EFCE", "red": "#FFC7CE", "amber": "#FFEB9C", "gray": "#F2F2F2"}
 
-        def build_blueprint_df(cells, param_list, has_pre):
-            sub_cols = ["pre", "CIQ", "On site"] if has_pre else ["CIQ", "On site"]
-            cols = pd.MultiIndex.from_product([param_list, sub_cols])
-            cols = pd.MultiIndex.from_tuples([("sector", "")] + cols.tolist() + [("Comments", "")])
-            
-            rows = []
-            for cell_id, results in cells:
-                row_data = {("sector", ""): cell_id}
-                comments = []
-                for r in results:
-                    p = r["parameter"]
-                    if p in param_list:
-                        if has_pre:
-                            row_data[(p, "pre")] = r["pre"]
-                        row_data[(p, "CIQ")] = r["ciq"]
-                        row_data[(p, "On site")] = r["post"]
-                        if r["color"] in ["red", "amber"]:
-                            comments.append(f"{p}: {r['note']}")
-                
-                row_data[("Comments", "")] = " | ".join(comments) if comments else "Match"
-                rows.append(row_data)
-                
-            return pd.DataFrame(rows, columns=cols).fillna("")
+        def render_wide_naming(wide_rows, label, keys):
+            if not wide_rows:
+                return
+            st.markdown(f"**{label}**")
+            display_rows = []
+            colors_by_row = []
+            for row in wide_rows:
+                d = {"Sector": row["sector"]}
+                row_colors = {}
+                for disp, kp in keys:
+                    d[f"{disp} (CIQ)"] = row.get(f"{kp}_ciq")
+                    d[f"{disp} (On site)"] = row.get(f"{kp}_post")
+                    row_colors[f"{disp} (CIQ)"] = row.get(f"{kp}_color")
+                    row_colors[f"{disp} (On site)"] = row.get(f"{kp}_color")
+                d["Comments"] = row.get("comment", "")
+                display_rows.append(d)
+                colors_by_row.append(row_colors)
+            df = pd.DataFrame(display_rows)
+
+            def _style(row):
+                rc = colors_by_row[row.name]
+                return [f"background-color: {PV_COLOR_HEX.get(rc.get(col), 'white')}" if col in rc else "" for col in row.index]
+
+            st.dataframe(df.style.apply(_style, axis=1), use_container_width=True, hide_index=True)
+
+        def render_wide_params(wide_rows, label, keys):
+            if not wide_rows:
+                return
+            st.markdown(f"**{label}**")
+            display_rows = []
+            colors_by_row = []
+            for row in wide_rows:
+                d = {"Sector": row["sector"]}
+                row_colors = {}
+                for disp, kp in keys:
+                    if pv_has_pre:
+                        d[f"{disp} (Pre)"] = row.get(f"{kp}_pre")
+                        row_colors[f"{disp} (Pre)"] = row.get(f"{kp}_color")
+                    d[f"{disp} (CIQ)"] = row.get(f"{kp}_ciq")
+                    d[f"{disp} (On site)"] = row.get(f"{kp}_post")
+                    row_colors[f"{disp} (CIQ)"] = row.get(f"{kp}_color")
+                    row_colors[f"{disp} (On site)"] = row.get(f"{kp}_color")
+                d["Comments"] = row.get("comment", "")
+                display_rows.append(d)
+                colors_by_row.append(row_colors)
+            df = pd.DataFrame(display_rows)
+
+            def _style(row):
+                rc = colors_by_row[row.name]
+                return [f"background-color: {PV_COLOR_HEX.get(rc.get(col), 'white')}" if col in rc else "" for col in row.index]
+
+            st.dataframe(df.style.apply(_style, axis=1), use_container_width=True, hide_index=True)
+
+        NAMING_LTE_KEYS = [("FDD naming", "FDD_naming"), ("Rilinks", "Rilinks"),
+                           ("Sector carrier", "sector_carrier"), ("ISDLONLY", "ISDLONLY")]
+        NAMING_NR_KEYS = [("Rilinks", "Rilinks"), ("Sector carrier", "sector_carrier"),
+                          ("NRCELL CU naming", "NRCELL_CU_naming")]
+        LTE_KEYS_1 = [("EarfcnDL", "EarfcnDL"), ("EarfcnUL", "EarfcnUL"), ("TX", "TX"), ("RX", "RX"),
+                      ("Bandwidth", "Bandwidth"), ("ConfiguredOutputPower", "ConfiguredOutputPower"), ("CellID", "CellID")]
+        LTE_KEYS_2 = [("rachRootSequence", "rachRootSequence"), ("PCI", "PCI"),
+                      ("Cellrange", "Cellrange"), ("TAC", "TAC")]
+        NR_KEYS_1 = [("arfcnDL", "arfcnDL"), ("arfcnUL", "arfcnUL"), ("bSChannelBwDL", "bSChannelBwDL"),
+                     ("bSChannelBwUL", "bSChannelBwUL"), ("ConfiguredOutputPower", "ConfiguredOutputPower"),
+                     ("cellLocalId", "cellLocalId"), ("ssbFrequency", "ssbFrequency")]
+        NR_KEYS_2 = [("rachRootSequence", "rachRootSequence"), ("nRPCI", "nRPCI"),
+                     ("Cellrange", "Cellrange"), ("NRTAC", "NRTAC"), ("nCI", "nCI")]
 
         for node, res in pv_result["node_results"].items():
-            if not res["lte"] and not res["nr"]:
+            if not any(res.get(g) for g in ("lte", "nr", "naming_lte", "naming_nr")):
                 continue
             with st.expander(f"Node: {node}", expanded=True):
-                if res["lte"]:
-                    st.markdown("**4G Sectors (Category B)**")
-                    df_4g_b = build_blueprint_df(res["lte"], blueprint_groups["4G Sectors (Category B)"], pv_has_pre)
-                    st.dataframe(df_4g_b, use_container_width=True, hide_index=True)
-                    
-                    st.markdown("**4G Sectors (Category A)**")
-                    df_4g_a = build_blueprint_df(res["lte"], blueprint_groups["4G Sectors (Category A)"], pv_has_pre)
-                    st.dataframe(df_4g_a, use_container_width=True, hide_index=True)
-                
-                if res["nr"]:
-                    st.markdown("**5G Sectors (Category B)**")
-                    df_5g_b = build_blueprint_df(res["nr"], blueprint_groups["5G Sectors (Category B)"], pv_has_pre)
-                    st.dataframe(df_5g_b, use_container_width=True, hide_index=True)
-                    
-                    st.markdown("**5G Sectors (Category A)**")
-                    df_5g_a = build_blueprint_df(res["nr"], blueprint_groups["5G Sectors (Category A)"], pv_has_pre)
-                    st.dataframe(df_5g_a, use_container_width=True, hide_index=True)
+                render_wide_naming(res.get("_wide_naming_lte", []), "4G Naming & Configuration", NAMING_LTE_KEYS)
+                render_wide_naming(res.get("_wide_naming_nr", []), "5G Naming & Configuration", NAMING_NR_KEYS)
+                render_wide_params(res.get("_wide_lte", []), "4G Sectors", LTE_KEYS_1)
+                render_wide_params(res.get("_wide_nr", []), "5G Sectors", NR_KEYS_1)
+                render_wide_params(res.get("_wide_lte", []), "4G Sectors — PCI/TAC", LTE_KEYS_2)
+                render_wide_params(res.get("_wide_nr", []), "5G Sectors — PCI/TAC", NR_KEYS_2)
 
-        pv_pdf_bytes = build_parameter_verification_pdf(pv_scope, pv_result["node_results"], has_pre=pv_has_pre)
+        pv_pdf_bytes = build_parameter_verification_pdf(
+            pv_scope, pv_result["node_results"], has_pre=pv_has_pre,
+            fa_code=st.session_state.get("pv_fa_code"), site_ids=st.session_state.get("pv_site_ids"))
         st.download_button("Download PDF report", pv_pdf_bytes,
                             file_name=f"{pv_scope}_Parameter_Verification.pdf",
                             mime="application/pdf", key="pv_dl_pdf")
