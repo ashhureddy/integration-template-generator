@@ -5020,35 +5020,56 @@ elif st.session_state.qkx_page == "paramcheck":
         m2.metric("Expected changes", total_amber)
         m3.metric("Mismatches", total_red)
 
+blueprint_groups = {
+            "4G Sectors (Category B)": ["EarfcnDL", "EarfcnUL", "TX", "RX", "Bandwidth", "ConfiguredOutputPower", "CellID"],
+            "5G Sectors (Category B)": ["arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "ConfiguredOutputPower", "cellLocalId", "ssbFrequency", "TX", "RX"],
+            "4G Sectors (Category A)": ["rachRootSequence", "PCI", "Cellrange", "TAC"],
+            "5G Sectors (Category A)": ["rachRootSequence", "nRPCI", "Cellrange", "NRTAC", "nCI"]
+        }
+
+        def build_blueprint_df(cells, param_list, has_pre):
+            sub_cols = ["pre", "CIQ", "On site"] if has_pre else ["CIQ", "On site"]
+            cols = pd.MultiIndex.from_product([param_list, sub_cols])
+            cols = pd.MultiIndex.from_tuples([("sector", "")] + cols.tolist() + [("Comments", "")])
+            
+            rows = []
+            for cell_id, results in cells:
+                row_data = {("sector", ""): cell_id}
+                comments = []
+                for r in results:
+                    p = r["parameter"]
+                    if p in param_list:
+                        if has_pre:
+                            row_data[(p, "pre")] = r["pre"]
+                        row_data[(p, "CIQ")] = r["ciq"]
+                        row_data[(p, "On site")] = r["post"]
+                        if r["color"] in ["red", "amber"]:
+                            comments.append(f"{p}: {r['note']}")
+                
+                row_data[("Comments", "")] = " | ".join(comments) if comments else "Match"
+                rows.append(row_data)
+                
+            return pd.DataFrame(rows, columns=cols).fillna("")
+
         for node, res in pv_result["node_results"].items():
             if not res["lte"] and not res["nr"]:
                 continue
             with st.expander(f"Node: {node}", expanded=True):
-                for label, cells in (("4G Sectors", res["lte"]), ("5G Sectors", res["nr"])):
-                    if not cells:
-                        continue
-                    st.markdown(f"**{label}**")
-                    rows = []
-                    for cell_id, results in cells:
-                        for r in results:
-                            row = {"Sector": cell_id, "Parameter": r["parameter"]}
-                            if pv_has_pre:
-                                row["Pre"] = r["pre"]
-                            row["CIQ"] = r["ciq"]
-                            row["Post"] = r["post"]
-                            row["Status"] = r["note"]
-                            row["_color"] = r["color"]
-                            rows.append(row)
-                    df = pd.DataFrame(rows)
-                    color_map = {"green": "#C6EFCE", "red": "#FFC7CE", "amber": "#FFEB9C", "gray": "#E0E0E0"}
-
-                    def _pv_style_row(row):
-                        bg = color_map.get(row["_color"], "white")
-                        return [f"background-color: {bg}"] * (len(row) -1)
-
-                    styled = df.drop(columns=["_color"]).style.apply(
-                        lambda row: _pv_style_row(df.loc[row.name]), axis=1)
-                    st.dataframe(styled, use_container_width=True, hide_index=True)
+                if res["lte"]:
+                    st.markdown("**4G Sectors**")
+                    df_4g_b = build_blueprint_df(res["lte"], blueprint_groups["4G Sectors (Category B)"], pv_has_pre)
+                    st.dataframe(df_4g_b, use_container_width=True, hide_index=True)
+                    
+                    df_4g_a = build_blueprint_df(res["lte"], blueprint_groups["4G Sectors (Category A)"], pv_has_pre)
+                    st.dataframe(df_4g_a, use_container_width=True, hide_index=True)
+                
+                if res["nr"]:
+                    st.markdown("**5G Sectors**")
+                    df_5g_b = build_blueprint_df(res["nr"], blueprint_groups["5G Sectors (Category B)"], pv_has_pre)
+                    st.dataframe(df_5g_b, use_container_width=True, hide_index=True)
+                    
+                    df_5g_a = build_blueprint_df(res["nr"], blueprint_groups["5G Sectors (Category A)"], pv_has_pre)
+                    st.dataframe(df_5g_a, use_container_width=True, hide_index=True)
 
         pv_pdf_bytes = build_parameter_verification_pdf(pv_scope, pv_result["node_results"], has_pre=pv_has_pre)
         st.download_button("Download PDF report", pv_pdf_bytes,
