@@ -3889,13 +3889,19 @@ def render_checks_panel_static(container, top_scope, scope_lines):
 
 
 
+
+
 # ============================================================
 # PARAMETER VERIFICATION (MCA / N2E / NSB) — CIQ vs Pre logs vs Onsite logs
-# Category A (rachRootSequence, PCI/nRPCI, Cellrange): expected = Pre for pre-existing/moved
-#   sectors (via Sector Del_Movement for cross-node moves), CIQ for newly added sectors.
-# Category B (EarfcnDL/UL, arfcnDL/UL, bSChannelBwDL/UL, cellLocalId, ssbFrequency, Cell ID,
-#   Bandwidth, noOfTx/RxAntennas, configuredOutputPower, TAC, NR TAC, nCI): expected = CIQ
-#   always; Pre != CIQ is amber (expected retune change), not a failure.
+# Confirmed against the blueprint (temp_blueprint.xlsx) directly, twice:
+# - MCA sheet: rachRootSequence/PCI/Cellrange/TAC (4G) and rachRootSequence/nRPCI/Cellrange/
+#   NRTAC/nCI (5G) sit under the 3-way pre/CIQ/On-site table with the rule "Matching as per pre
+#   for pre-existing / CIQ for newly added" — Category A. Everything else with a pre-vs-CIQ-
+#   vs-onsite table but no such rule is Category B: expected = CIQ always; Pre != CIQ is amber
+#   (expected retune change), not a failure.
+# - N2E_NSB sheet: EVERY parameter has ONLY CIQ/On-site columns, no pre column anywhere at all
+#   — N2E (Nokia-to-Ericsson) has no prior Ericsson state, NSB is a brand-new site. For these
+#   two scopes every parameter is simply Post-must-match-CIQ, no Pre log needed at all.
 # NOTE: reportlab is imported lazily inside build_parameter_verification_pdf() only — a new
 # feature dependency must never crash the whole app on startup if it isn't installed yet.
 # ============================================================
@@ -4070,18 +4076,43 @@ def pv_load_node_tables(text):
 # CIQ-linked comparison logic
 # ============================================================
 
-CATEGORY_A_LTE = {"rachRootSequence": "rachRootSequence", "PCI": "physicalLayerCellId", "Cellrange": "cellRange"}
-CATEGORY_A_NR = {"nRPCI": "nRPCI", "Cellrange": "cellRange"}
+# ============================================================
+# Confirmed against the blueprint (temp_blueprint.xlsx) directly, twice:
+# - MCA sheet: rachRootSequence/PCI/Cellrange/TAC (4G) and rachRootSequence/nRPCI/Cellrange/
+#   NRTAC/nCI (5G) all sit under the "pre/CIQ/On site" 3-way table with the explicit rule
+#   "Matching as per pre for pre-existing / CIQ for newly added" — this is Category A.
+#   EarfcnDL/UL, Bandwidth, CellID, TX/RX, ConfiguredOutputPower (4G) and arfcnDL/UL,
+#   bSChannelBwDL/UL, cellLocalId, ssbFrequency, ConfiguredOutputPower (5G) also have a "pre"
+#   column but no such pre-vs-new rule — Category B, expected = CIQ always.
+# - N2E_NSB sheet: EVERY parameter, both tables, has ONLY "CIQ"/"On site" columns — no "pre"
+#   column anywhere at all. Confirmed real-world reason: N2E is Nokia-to-Ericsson (no prior
+#   Ericsson state exists) and NSB is a brand-new site (nothing existed before either way).
+#   So for these two scopes, every parameter — Category A concepts included — is simply
+#   "Post must match CIQ", with no Pre lookup, no is_new/move_map logic, no Pre-log upload
+#   needed at all.
+# ============================================================
+
+NO_PRE_SCOPES = {"N2E", "NSB"}
+
+CATEGORY_A_LTE = {"rachRootSequence": "rachRootSequence", "PCI": "physicalLayerCellId",
+                   "Cellrange": "cellRange", "TAC": "tac"}
+CATEGORY_A_LTE_CIQ_KEYS = {"rachRootSequence": "rachRootSequence", "PCI": "PCI",
+                            "Cellrange": "cellRange", "TAC": None}  # confirmed: eUtran Parameters has no TAC column
+CATEGORY_A_NR = {"rachRootSequence": "rachRootSequence", "nRPCI": "nRPCI",
+                  "Cellrange": "cellRange", "NRTAC": "nRTAC", "nCI": "nCI"}
+CATEGORY_A_NR_CIQ_KEYS = {"rachRootSequence": "rachRootSequence", "nRPCI": "nRPCI",
+                           "Cellrange": "CellRange", "NRTAC": "nRTAC", "nCI": "nCI"}  # confirmed: 5G Info uses "CellRange", not "cellRange"
 CATEGORY_B_LTE = {
     "EarfcnDL": ("earfcndl", "earfcnDl"), "EarfcnUL": ("earfcnul", "earfcnUl"),
-    "Bandwidth": ("dlChannelBandwidth", "dlChannelBandwidth"), "TAC": ("tac", None),
+    "Bandwidth": ("dlChannelBandwidth", "dlChannelBandwidth"),
     "CellID": ("cellId", "cellId"),
 }
 CATEGORY_B_NR = {
     "arfcnDL": ("arfcnDL", "arfcnDL"), "arfcnUL": ("arfcnUL", "arfcnUL"),
     "bSChannelBwDL": ("bSChannelBwDL", "bSChannelBwDL"), "bSChannelBwUL": ("bSChannelBwUL", "bSChannelBwUL"),
-    "cellLocalId": ("cellLocalId", "cellLocalId"), "NRTAC": ("nRTAC", "nRTAC"), "nCI": ("nCI", "nCI"),
+    "cellLocalId": ("cellLocalId", "cellLocalId"), "ssbFrequency": ("ssbFrequency", "ssbFrequency"),
 }
+
 
 
 def norm(v):
@@ -4125,56 +4156,58 @@ def build_sector_move_map(ciq_wb):
     return move_map
 
 
-def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node):
+def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node, scope="MCA"):
     """Returns list of {'parameter','category','pre','ciq','post','color','note'}."""
+    has_pre = scope not in NO_PRE_SCOPES
     ldn = f"EUtranCellFDD={cell_id}"
     on_cell = onsite_tables["lte_cell"].get(ldn, {})
-    pre_cell = pre_tables["lte_cell"].get(ldn, {})
+    pre_cell = pre_tables["lte_cell"].get(ldn, {}) if has_pre else {}
 
-    is_new = "existing" not in str(ciq_row.get("Carrier Cell Intention", "")).lower()
-    move_info = move_map.get(cell_id)
-    if move_info and move_info.get("source_sector"):
-        src_node = move_info.get("source_node")
-        src_tables = source_pre_tables_by_node.get(src_node)
-        if src_tables:
-            pre_cell = src_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
+    is_new = True if not has_pre else ("existing" not in str(ciq_row.get("Carrier Cell Intention", "")).lower())
+    if has_pre:
+        move_info = move_map.get(cell_id)
+        if move_info and move_info.get("source_sector"):
+            src_node = move_info.get("source_node")
+            src_tables = source_pre_tables_by_node.get(src_node)
+            if src_tables:
+                pre_cell = src_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
 
     def sector_lookup(tables, cell):
         ref = cell.get("sectorCarrierRef")
         return tables["lte_sector"].get(ref, {}) if ref else {}
 
     on_sec = sector_lookup(onsite_tables, on_cell)
-    pre_sec = sector_lookup(pre_tables, pre_cell)
+    pre_sec = sector_lookup(pre_tables, pre_cell) if has_pre else {}
 
     results = []
     for param, cell_key in CATEGORY_A_LTE.items():
-        pre_v = pre_cell.get(cell_key)
-        ciq_v = ciq_row.get({"rachRootSequence": "rachRootSequence", "PCI": "PCI", "Cellrange": "cellRange"}.get(param))
-        expected = ciq_v if is_new else pre_v
+        pre_v = pre_cell.get(cell_key) if has_pre else None
+        ciq_v = ciq_row.get(CATEGORY_A_LTE_CIQ_KEYS[param])
+        expected = ciq_v if (is_new or not has_pre) else pre_v
         color, note = verdict(on_cell.get(cell_key), expected, "A")
         results.append({"parameter": param, "category": "A", "pre": pre_v, "ciq": ciq_v,
                          "post": on_cell.get(cell_key), "color": color, "note": note})
 
     for param, (cell_key, ciq_key) in CATEGORY_B_LTE.items():
         ciq_v = ciq_row.get(ciq_key) if ciq_key else None
-        pre_v = pre_cell.get(cell_key)
+        pre_v = pre_cell.get(cell_key) if has_pre else None
         post_v = on_cell.get(cell_key)
         color, note = verdict(post_v, ciq_v, "B")
-        if color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
+        if has_pre and color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
             color, note = "amber", "matches Pre, not yet retuned to CIQ"
         results.append({"parameter": param, "category": "B", "pre": pre_v, "ciq": ciq_v,
                          "post": post_v, "color": color, "note": note})
 
     for label, cell_key in [("TX", "noOfTxAntennas"), ("RX", "noOfRxAntennas")]:
         ciq_v = ciq_row.get(cell_key)
-        pre_v = pre_sec.get(cell_key)
+        pre_v = pre_sec.get(cell_key) if has_pre else None
         post_v = on_sec.get(cell_key)
         color, note = verdict(post_v, ciq_v, "B")
         results.append({"parameter": label, "category": "B", "pre": pre_v, "ciq": ciq_v,
                          "post": post_v, "color": color, "note": note})
 
     ciq_v = ciq_row.get("configuredOutputPower")
-    pre_v = pre_sec.get("configuredMaxTxPower")
+    pre_v = pre_sec.get("configuredMaxTxPower") if has_pre else None
     post_v = on_sec.get("configuredMaxTxPower")
     color, note = verdict(post_v, ciq_v, "B")
     results.append({"parameter": "ConfiguredOutputPower", "category": "B", "pre": pre_v, "ciq": ciq_v,
@@ -4183,30 +4216,33 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sour
     return results
 
 
-def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node):
+def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node, scope="MCA"):
+    has_pre = scope not in NO_PRE_SCOPES
     ldn = f"NRCellDU={cell_id}"
     on_cell = onsite_tables["nr_cell"].get(ldn, {})
-    pre_cell = pre_tables["nr_cell"].get(ldn, {})
+    pre_cell = pre_tables["nr_cell"].get(ldn, {}) if has_pre else {}
 
-    # KNOWN LIMITATION: unlike eUtran Parameters' "Carrier Cell Intention" column, 5G Info has
-    # no equivalent new-vs-existing classification column at all — confirmed by checking its
-    # full header list. A cell explicitly listed in Sector Del_Movement is reliably "existing/
-    # moved", so that case is handled correctly below. For everything else, is_new can't be
-    # determined from 5G Info alone; defaulting to False (treat as existing, use Pre as
-    # expected) is the safer assumption for Category A params, since PCI/nRPCI errors are more
-    # consequential than a newly-added cell being compared against a nonexistent Pre baseline —
-    # but this needs a real classification source to be reliable. Flagging rather than guessing.
-    move_info = move_map.get(cell_id)
-    is_new = False
+    # KNOWN LIMITATION (MCA only — moot for N2E/NSB, which never use Pre at all): unlike
+    # eUtran Parameters' "Carrier Cell Intention" column, 5G Info has no equivalent new-vs-
+    # existing classification column at all — confirmed by checking its full header list. A
+    # cell explicitly listed in Sector Del_Movement is reliably "existing/moved", so that case
+    # is handled correctly below. For everything else, is_new can't be determined from 5G Info
+    # alone; defaulting to False (treat as existing, use Pre as expected) is the safer
+    # assumption, since PCI/nRPCI errors are more consequential than a newly-added cell being
+    # compared against a nonexistent Pre baseline — but this needs a real classification source
+    # to be fully reliable. Flagging rather than guessing.
+    is_new = True if not has_pre else False
     pre_sector_source_tables = pre_tables
     pre_sector_id = cell_id
-    if move_info and move_info.get("source_sector"):
-        src_node = move_info.get("source_node")
-        src_tables = source_pre_tables_by_node.get(src_node)
-        if src_tables:
-            pre_cell = src_tables["nr_cell"].get(f"NRCellDU={move_info['source_sector']}", pre_cell)
-            pre_sector_source_tables = src_tables
-            pre_sector_id = move_info["source_sector"]
+    if has_pre:
+        move_info = move_map.get(cell_id)
+        if move_info and move_info.get("source_sector"):
+            src_node = move_info.get("source_node")
+            src_tables = source_pre_tables_by_node.get(src_node)
+            if src_tables:
+                pre_cell = src_tables["nr_cell"].get(f"NRCellDU={move_info['source_sector']}", pre_cell)
+                pre_sector_source_tables = src_tables
+                pre_sector_id = move_info["source_sector"]
 
     def sector_lookup(tables, cell_id_key):
         # Confirmed real key format: this block's instances are "NRSectorCarrier=<cell_id>",
@@ -4214,32 +4250,31 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
         return tables["nr_sector"].get(f"NRSectorCarrier={cell_id_key}", {})
 
     on_sec = sector_lookup(onsite_tables, cell_id)
-    pre_sec = sector_lookup(pre_sector_source_tables, pre_sector_id)
+    pre_sec = sector_lookup(pre_sector_source_tables, pre_sector_id) if has_pre else {}
 
-    CATEGORY_A_NR_CIQ_KEYS = {"nRPCI": "nRPCI", "Cellrange": "CellRange"}  # confirmed: 5G Info uses "CellRange", not "cellRange"
     results = []
     for param, cell_key in CATEGORY_A_NR.items():
-        pre_v = pre_cell.get(cell_key)
+        pre_v = pre_cell.get(cell_key) if has_pre else None
         ciq_v = ciq_row.get(CATEGORY_A_NR_CIQ_KEYS[param]) if ciq_row else None
-        expected = ciq_v if is_new else pre_v
+        expected = ciq_v if (is_new or not has_pre) else pre_v
         color, note = verdict(on_cell.get(cell_key), expected, "A")
         results.append({"parameter": param, "category": "A", "pre": pre_v, "ciq": ciq_v,
                          "post": on_cell.get(cell_key), "color": color, "note": note})
 
     # Confirmed real bug: arfcnDL/arfcnUL/bSChannelBwDL/bSChannelBwUL only exist in the
     # NRSectorCarrier ("Sector") table, not NRCellDU — reading them from the cell table
-    # silently returned None always. cellLocalId/nRTAC/nCI live on the cell itself.
+    # silently returned None always. cellLocalId/ssbFrequency live on the cell itself.
     SECTOR_LEVEL_B_PARAMS = {"arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL"}
     for param, (cell_key, ciq_key) in CATEGORY_B_NR.items():
         ciq_v = ciq_row.get(ciq_key) if (ciq_row and ciq_key) else None
         if param in SECTOR_LEVEL_B_PARAMS:
-            pre_v = pre_sec.get(cell_key)
+            pre_v = pre_sec.get(cell_key) if has_pre else None
             post_v = on_sec.get(cell_key)
         else:
-            pre_v = pre_cell.get(cell_key)
+            pre_v = pre_cell.get(cell_key) if has_pre else None
             post_v = on_cell.get(cell_key)
         color, note = verdict(post_v, ciq_v, "B")
-        if color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
+        if has_pre and color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
             color, note = "amber", "matches Pre, not yet retuned to CIQ"
         results.append({"parameter": param, "category": "B", "pre": pre_v, "ciq": ciq_v,
                          "post": post_v, "color": color, "note": note})
@@ -4281,23 +4316,27 @@ def match_file_to_node(filename, node_names):
     return None
 
 
-def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files):
-    """pre_files / onsite_files: list of (filename, text_content) tuples.
+def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="MCA"):
+    """pre_files / onsite_files: list of (filename, text_content) tuples. pre_files may be
+    empty for N2E/NSB, which never require a Pre log at all (confirmed against the blueprint —
+    no "pre" column exists anywhere in the N2E_NSB sheet).
     Returns {
         'node_results': {node: {'lte': [(cell_id, [param_result,...]), ...], 'nr': [...]}},
         'unmatched_pre': [filename,...], 'unmatched_onsite': [filename,...],
         'nodes_missing_pre': [node,...], 'nodes_missing_onsite': [node,...],
     }"""
+    has_pre = scope not in NO_PRE_SCOPES
     node_names = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
 
     pre_by_node, onsite_by_node = {}, {}
     unmatched_pre, unmatched_onsite = [], []
-    for fname, text in pre_files:
-        node = match_file_to_node(fname, node_names)
-        if node:
-            pre_by_node[node] = pv_load_node_tables(text)
-        else:
-            unmatched_pre.append(fname)
+    if has_pre:
+        for fname, text in pre_files:
+            node = match_file_to_node(fname, node_names)
+            if node:
+                pre_by_node[node] = pv_load_node_tables(text)
+            else:
+                unmatched_pre.append(fname)
     for fname, text in onsite_files:
         node = match_file_to_node(fname, node_names)
         if node:
@@ -4305,11 +4344,11 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files):
         else:
             unmatched_onsite.append(fname)
 
-    nodes_missing_pre = [n for n in node_names if n not in pre_by_node]
+    nodes_missing_pre = [n for n in node_names if n not in pre_by_node] if has_pre else []
     nodes_missing_onsite = [n for n in node_names if n not in onsite_by_node]
 
     empty_tables = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}}
-    source_pre_by_node = pre_by_node  # for Sector Del_Movement lookups across nodes
+    source_pre_by_node = pre_by_node  # for Sector Del_Movement lookups across nodes (MCA only)
 
     lte_ciq, nr_ciq = {}, {}
     if "eUtran Parameters" in ciq_wb.sheetnames:
@@ -4327,7 +4366,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files):
             if d.get("NRCellDU"):
                 nr_ciq[d["NRCellDU"]] = d
 
-    move_map = build_sector_move_map(ciq_wb)
+    move_map = build_sector_move_map(ciq_wb) if has_pre else {}
 
     node_results = {n: {"lte": [], "nr": []} for n in node_names}
     for cell_id, ciq_row in lte_ciq.items():
@@ -4336,7 +4375,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files):
             continue
         pre_t = pre_by_node.get(node, empty_tables)
         on_t = onsite_by_node.get(node, empty_tables)
-        results = compare_lte_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node)
+        results = compare_lte_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node, scope=scope)
         node_results[node]["lte"].append((cell_id, results))
 
     for cell_id, ciq_row in nr_ciq.items():
@@ -4345,7 +4384,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files):
             continue
         pre_t = pre_by_node.get(node, empty_tables)
         on_t = onsite_by_node.get(node, empty_tables)
-        results = compare_nr_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node)
+        results = compare_nr_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node, scope=scope)
         node_results[node]["nr"].append((cell_id, results))
 
     return {
@@ -4357,13 +4396,14 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files):
     }
 
 
-def build_parameter_verification_pdf(scope, node_results):
+def build_parameter_verification_pdf(scope, node_results, has_pre=True):
     """node_results: {node: {'lte': [(cell_id, [param_result,...]),...], 'nr': [...]}}
+    has_pre=False (N2E/NSB — confirmed against the blueprint, no "pre" column exists anywhere
+    in the N2E_NSB sheet) drops the Pre column entirely, shifting Status to the next index.
     Returns PDF bytes."""
-    # Confirmed real bug (fixed once already, reintroduced by reusing an un-patched template
-    # file): COLOR_MAP/TEXT_COLOR_MAP must live INSIDE this function, since they depend on
-    # pv_colors, which is only imported here — defining them at module level raises a
-    # NameError at import time, unconditionally, before the function is ever called.
+    # Confirmed real bug (fixed once, must not regress): COLOR_MAP/TEXT_COLOR_MAP must live
+    # INSIDE this function since they depend on pv_colors, which is only imported here —
+    # defining them at module level raises a NameError at import time, unconditionally.
     from reportlab.lib import colors as pv_colors
     from reportlab.lib.pagesizes import landscape, letter
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
@@ -4382,14 +4422,20 @@ def build_parameter_verification_pdf(scope, node_results):
         "amber": pv_colors.HexColor("#9C6500"),
         "gray": pv_colors.HexColor("#555555"),
     }
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(letter), topMargin=0.4 * inch, bottomMargin=0.4 * inch,
                              leftMargin=0.4 * inch, rightMargin=0.4 * inch)
-
     styles = getSampleStyleSheet()
     story = [Paragraph(f"{scope} Parameter Verification Report", styles["Title"]), Spacer(1, 12)]
 
-    header = ["Sector", "Parameter", "Pre", "CIQ", "Post", "Status"]
+    if has_pre:
+        header = ["Sector", "Parameter", "Pre", "CIQ", "Post", "Status"]
+        col_widths = [1.5 * inch, 1.4 * inch, 0.9 * inch, 0.9 * inch, 0.9 * inch, 3.4 * inch]
+    else:
+        header = ["Sector", "Parameter", "CIQ", "Post", "Status"]
+        col_widths = [1.5 * inch, 1.4 * inch, 0.9 * inch, 0.9 * inch, 4.3 * inch]
+    status_col = len(header) - 1
 
     for node, res in node_results.items():
         story.append(Paragraph(f"Node: {node}", styles["Heading2"]))
@@ -4401,11 +4447,17 @@ def build_parameter_verification_pdf(scope, node_results):
             row_colors = []
             for cell_id, results in cells:
                 for r in results:
-                    data.append([cell_id, r["parameter"], str(r["pre"]) if r["pre"] is not None else "",
-                                 str(r["ciq"]) if r["ciq"] is not None else "",
-                                 str(r["post"]) if r["post"] is not None else "", r["note"]])
+                    if has_pre:
+                        row = [cell_id, r["parameter"], str(r["pre"]) if r["pre"] is not None else "",
+                               str(r["ciq"]) if r["ciq"] is not None else "",
+                               str(r["post"]) if r["post"] is not None else "", r["note"]]
+                    else:
+                        row = [cell_id, r["parameter"],
+                               str(r["ciq"]) if r["ciq"] is not None else "",
+                               str(r["post"]) if r["post"] is not None else "", r["note"]]
+                    data.append(row)
                     row_colors.append(r["color"])
-            tbl = Table(data, repeatRows=1, colWidths=[1.5 * inch, 1.4 * inch, 0.9 * inch, 0.9 * inch, 0.9 * inch, 3.4 * inch])
+            tbl = Table(data, repeatRows=1, colWidths=col_widths)
             style_cmds = [
                 ("BACKGROUND", (0, 0), (-1, 0), pv_colors.HexColor("#4472C4")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), pv_colors.white),
@@ -4417,14 +4469,15 @@ def build_parameter_verification_pdf(scope, node_results):
             for i, color_key in enumerate(row_colors, start=1):
                 bg = COLOR_MAP.get(color_key, pv_colors.white)
                 fg = TEXT_COLOR_MAP.get(color_key, pv_colors.black)
-                style_cmds.append(("BACKGROUND", (5, i), (5, i), bg))
-                style_cmds.append(("TEXTCOLOR", (5, i), (5, i), fg))
+                style_cmds.append(("BACKGROUND", (status_col, i), (status_col, i), bg))
+                style_cmds.append(("TEXTCOLOR", (status_col, i), (status_col, i), fg))
             tbl.setStyle(TableStyle(style_cmds))
             story.append(tbl)
             story.append(Spacer(1, 10))
 
     doc.build(story)
     return buf.getvalue()
+
 
 
 # ============================================================
@@ -4884,23 +4937,39 @@ elif st.session_state.qkx_page == "input":
 
 
 # ---- PARAMETER VERIFICATION (MCA / N2E / NSB) ----
+
+
+# ---- PARAMETER VERIFICATION (MCA / N2E / NSB) ----
 elif st.session_state.qkx_page == "paramcheck":
     pv_scope = st.session_state.qkx_scope
+    pv_has_pre = pv_scope not in ("N2E", "NSB")
     if st.button("← Back", key="pv_back"):
         _qkx_go("home")
     st.subheader(f"Parameter Verification — {pv_scope}")
-    st.caption("Compares CIQ vs Pre logs vs Onsite logs, flags mismatches. "
-               "Upload the CIQ, then all Pre logs and Onsite logs for every node at the site — "
-               "each file is matched to its node automatically by filename.")
+    if pv_has_pre:
+        st.caption("Compares CIQ vs Pre logs vs Onsite logs, flags mismatches. "
+                   "Upload the CIQ, then all Pre logs and Onsite logs for every node at the site — "
+                   "each file is matched to its node automatically by filename.")
+    else:
+        # Confirmed against the blueprint (temp_blueprint.xlsx, N2E_NSB sheet): every parameter
+        # has only CIQ/On site columns, no "pre" column anywhere — N2E has no prior Ericsson
+        # state to compare against, and NSB is a brand-new site. No Pre log needed at all here.
+        st.caption("Compares CIQ vs Onsite logs, flags mismatches. "
+                   f"{pv_scope} has no pre-existing state to compare against, so no Pre log is needed. "
+                   "Upload the CIQ, then all Onsite logs for every node at the site — "
+                   "each file is matched to its node automatically by filename.")
 
     with st.container(border=True):
         pv_ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"], key="pv_ciq")
-        pv_pre_files = st.file_uploader("Pre logs (.log / .txt) — one or more, one per node",
-                                         type=["log", "txt"], accept_multiple_files=True, key="pv_pre")
+        if pv_has_pre:
+            pv_pre_files = st.file_uploader("Pre logs (.log / .txt) — one or more, one per node",
+                                             type=["log", "txt"], accept_multiple_files=True, key="pv_pre")
+        else:
+            pv_pre_files = []
         pv_onsite_files = st.file_uploader("Onsite logs (.log / .txt) — one or more, one per node",
                                             type=["log", "txt"], accept_multiple_files=True, key="pv_onsite")
-        pv_run = st.button("Verify parameters", type="primary", key="pv_run",
-                            disabled=not (pv_ciq_file and pv_pre_files and pv_onsite_files))
+        pv_ready = pv_ciq_file and pv_onsite_files and (pv_pre_files if pv_has_pre else True)
+        pv_run = st.button("Verify parameters", type="primary", key="pv_run", disabled=not pv_ready)
 
     if pv_run:
         with st.spinner("Parsing logs and comparing against CIQ..."):
@@ -4914,7 +4983,7 @@ elif st.session_state.qkx_page == "paramcheck":
             pv_pre_inputs = [(f.name, f.getvalue().decode("utf-8", errors="replace")) for f in pv_pre_files]
             pv_onsite_inputs = [(f.name, f.getvalue().decode("utf-8", errors="replace")) for f in pv_onsite_files]
 
-            pv_result = run_parameter_verification(pv_wb, pv_mm_objs, pv_pre_inputs, pv_onsite_inputs)
+            pv_result = run_parameter_verification(pv_wb, pv_mm_objs, pv_pre_inputs, pv_onsite_inputs, scope=pv_scope)
             st.session_state.pv_results = pv_result
             st.session_state.pv_scope_ran = pv_scope
 
@@ -4962,9 +5031,14 @@ elif st.session_state.qkx_page == "paramcheck":
                     rows = []
                     for cell_id, results in cells:
                         for r in results:
-                            rows.append({"Sector": cell_id, "Parameter": r["parameter"],
-                                         "Pre": r["pre"], "CIQ": r["ciq"], "Post": r["post"],
-                                         "Status": r["note"], "_color": r["color"]})
+                            row = {"Sector": cell_id, "Parameter": r["parameter"]}
+                            if pv_has_pre:
+                                row["Pre"] = r["pre"]
+                            row["CIQ"] = r["ciq"]
+                            row["Post"] = r["post"]
+                            row["Status"] = r["note"]
+                            row["_color"] = r["color"]
+                            rows.append(row)
                     df = pd.DataFrame(rows)
                     color_map = {"green": "#C6EFCE", "red": "#FFC7CE", "amber": "#FFEB9C", "gray": "#E0E0E0"}
 
@@ -4976,7 +5050,7 @@ elif st.session_state.qkx_page == "paramcheck":
                         lambda row: _pv_style_row(df.loc[row.name]), axis=1)
                     st.dataframe(styled, use_container_width=True, hide_index=True)
 
-        pv_pdf_bytes = build_parameter_verification_pdf(pv_scope, pv_result["node_results"])
+        pv_pdf_bytes = build_parameter_verification_pdf(pv_scope, pv_result["node_results"], has_pre=pv_has_pre)
         st.download_button("Download PDF report", pv_pdf_bytes,
                             file_name=f"{pv_scope}_Parameter_Verification.pdf",
                             mime="application/pdf", key="pv_dl_pdf")
