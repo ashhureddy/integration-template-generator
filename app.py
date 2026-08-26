@@ -4315,40 +4315,34 @@ def match_file_to_node(filename, node_names):
             return node
     return None
 
-
 def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="MCA"):
-    """pre_files / onsite_files: list of (filename, text_content) tuples. pre_files may be
-    empty for N2E/NSB, which never require a Pre log at all (confirmed against the blueprint —
-    no "pre" column exists anywhere in the N2E_NSB sheet).
-    Returns {
-        'node_results': {node: {'lte': [(cell_id, [param_result,...]), ...], 'nr': [...]}},
-        'unmatched_pre': [filename,...], 'unmatched_onsite': [filename,...],
-        'nodes_missing_pre': [node,...], 'nodes_missing_onsite': [node,...],
-    }"""
     has_pre = scope not in NO_PRE_SCOPES
     node_names = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
 
-    pre_by_node, onsite_by_node = {}, {}
+    # Pool ALL files into a single global table so cross-node data isn't missed
+    global_pre = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}}
+    global_onsite = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}}
+    
     unmatched_pre, unmatched_onsite = [], []
+    nodes_with_pre, nodes_with_onsite = set(), set()
+    
     if has_pre:
         for fname, text in pre_files:
             node = match_file_to_node(fname, node_names)
-            if node:
-                pre_by_node[node] = pv_load_node_tables(text)
-            else:
-                unmatched_pre.append(fname)
+            if node: nodes_with_pre.add(node)
+            else: unmatched_pre.append(fname)
+            t = pv_load_node_tables(text)
+            for k in global_pre: global_pre[k].update(t[k])
+            
     for fname, text in onsite_files:
         node = match_file_to_node(fname, node_names)
-        if node:
-            onsite_by_node[node] = pv_load_node_tables(text)
-        else:
-            unmatched_onsite.append(fname)
+        if node: nodes_with_onsite.add(node)
+        else: unmatched_onsite.append(fname)
+        t = pv_load_node_tables(text)
+        for k in global_onsite: global_onsite[k].update(t[k])
 
-    nodes_missing_pre = [n for n in node_names if n not in pre_by_node] if has_pre else []
-    nodes_missing_onsite = [n for n in node_names if n not in onsite_by_node]
-
-    empty_tables = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}}
-    source_pre_by_node = pre_by_node  # for Sector Del_Movement lookups across nodes (MCA only)
+    nodes_missing_pre = [n for n in node_names if n not in nodes_with_pre] if has_pre else []
+    nodes_missing_onsite = [n for n in node_names if n not in nodes_with_onsite]
 
     lte_ciq, nr_ciq = {}, {}
     if "eUtran Parameters" in ciq_wb.sheetnames:
@@ -4371,20 +4365,16 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
     node_results = {n: {"lte": [], "nr": []} for n in node_names}
     for cell_id, ciq_row in lte_ciq.items():
         node = next((n for n in node_names if cell_id.startswith(n)), None)
-        if not node:
-            continue
-        pre_t = pre_by_node.get(node, empty_tables)
-        on_t = onsite_by_node.get(node, empty_tables)
-        results = compare_lte_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node, scope=scope)
+        if not node: continue
+        # Pass the global tables instead of node-specific tables
+        results = compare_lte_cell(cell_id, ciq_row, global_pre, global_onsite, move_map, None, scope=scope)
         node_results[node]["lte"].append((cell_id, results))
 
     for cell_id, ciq_row in nr_ciq.items():
         node = next((n for n in node_names if cell_id.startswith(n)), None)
-        if not node:
-            continue
-        pre_t = pre_by_node.get(node, empty_tables)
-        on_t = onsite_by_node.get(node, empty_tables)
-        results = compare_nr_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node, scope=scope)
+        if not node: continue
+        # Pass the global tables instead of node-specific tables
+        results = compare_nr_cell(cell_id, ciq_row, global_pre, global_onsite, move_map, None, scope=scope)
         node_results[node]["nr"].append((cell_id, results))
 
     return {
