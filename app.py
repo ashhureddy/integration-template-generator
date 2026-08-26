@@ -1,4 +1,5 @@
 import streamlit as st
+import sys
 import pandas as pd
 import re
 import io
@@ -54,10 +55,10 @@ TPL_DSS_4SECTOR = resolve_dss_template("standard")
 TPL_DSS_3SECTOR = resolve_dss_template("stand")
 
 TDIR_N2E = Path(__file__).parent / "templates" / "N2E"
-TPL_N2E_LTE = TDIR_N2E / "N2E_LTE_Integration_Procedure_with_LTE_Node_as_Primary_V5.txt"
-TPL_N2E_5G = TDIR_N2E / "N2E_5G_Integration_Procedure_with_5G_Node_as_Primary_V6.txt"
-TPL_N2E_MMBB = TDIR_N2E / "MMBB_N2E_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V8.txt"
-TPL_N2E_TRIMODE = TDIR_N2E / "N2E_TRIMODE_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V8.txt"
+TPL_N2E_LTE = TDIR_N2E / "N2E_LTE_Integration_Procedure_with_LTE_Node_as_Primary_V4.txt"
+TPL_N2E_5G = TDIR_N2E / "N2E_5G_Integration_Procedure_with_5G_Node_as_Primary_V4.txt"
+TPL_N2E_MMBB = TDIR_N2E / "MMBB_N2E_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
+TPL_N2E_TRIMODE = TDIR_N2E / "N2E_TRIMODE_Integration_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
 
 TDIR_NSB = Path(__file__).parent / "templates" / "NSB"
 TDIR_STATIC = Path(__file__).parent / "templates" / "Static"
@@ -246,6 +247,28 @@ def pre_hw_string(text, node_name):
 
 
 def extract_pdf_text(pdf_bytes):
+    """Some 'PDF' uploads are actually zip archives (confirmed this session, e.g. real
+    ECL02586 Pre/Post-checks files) — a zip containing per-page N.jpeg + N.txt + a
+    manifest.json, not a real PDF at all. pdfplumber correctly rejects these
+    ("No /Root object! - Is this really a PDF?"). Try the zip-bundle path first (cheap,
+    exact check via the zip magic number), fall back to pdfplumber for genuine PDFs —
+    same two-format resilience pattern already used for load_workbook_any's xlsx/xls
+    fallback."""
+    import zipfile
+    import json as _json
+
+    if pdf_bytes[:2] == b"PK":  # zip magic number
+        try:
+            with zipfile.ZipFile(io.BytesIO(pdf_bytes)) as zf:
+                manifest = _json.loads(zf.read("manifest.json"))
+                pages = sorted(manifest["pages"], key=lambda p: p["page_number"])
+                text = ""
+                for p in pages:
+                    text += zf.read(p["text"]["path"]).decode("utf-8", errors="replace") + "\n\n"
+                return text
+        except Exception:
+            pass  # fall through to pdfplumber, which will raise its own clear error
+
     import pdfplumber
     text = ""
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -350,6 +373,15 @@ def band_label(cell_name):
 def is_5g_cell(cell_name):
     return bool(re.search(r'_N\d{3}[A-F]_\d+$', str(cell_name or '')))
 
+def is_wll_node_name(name):
+    """Confirmed rule: any node name ending in 'L' (Pre-checks, Post-checks, or CIQ alike)
+    is a WLL node — a co-located logical entity, not a real radio node. Reused everywhere
+    a node needs to be recognized as WLL: excluded from Pre/Post Configuration's node
+    lists, folded into "WLL node :" in the report header, and treated as deleted from ENM
+    rather than a genuine site node."""
+    return bool(name) and str(name).strip().upper().endswith("L")
+
+
 def dedupe_labels(cell_names, lte_first=True):
     """Classify a list of cell names into unique band labels, LTE group first then 5G group,
     preserving first-seen order within each group."""
@@ -420,6 +452,13 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
     if pre_nodes:
         result["deleted_nodes"] = sorted(pre_nodes - ciq_nodes)
 
+    # Confirmed WLL rule: any node ending in "L" is a WLL node, not a real radio node — it
+    # must NEVER appear in "Deleted Node from ENM" (only in the "WLL node :" field,
+    # elsewhere). Without this, a WLL node found only in Pre-checks would naturally fall
+    # into the pre_nodes-ciq_nodes diff above and get flagged as deleted, so it's actively
+    # filtered back out here rather than just not being added.
+    result["deleted_nodes"] = [n for n in result["deleted_nodes"] if not is_wll_node_name(n)]
+
     delmove_objs = sheet_objs(ciq_wb["Sector Del_Movement"]) if "Sector Del_Movement" in ciq_wb.sheetnames else []
     handled_cells = set()
 
@@ -452,19 +491,43 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
     # ADD: any CIQ cell (LTE or 5G) not present in Pre-checks and not already accounted for as moved/deleted
     eutran_objs = sheet_objs(ciq_wb["eUtran Parameters"]) if "eUtran Parameters" in ciq_wb.sheetnames else []
     fiveg_objs = sheet_objs(ciq_wb["5G Info"]) if "5G Info" in ciq_wb.sheetnames else []
+    # Confirmed real rule: Integration should reflect actual sectors, not just the band —
+    # if a band's full CIQ target sector set (Alpha/Beta/Gamma/... whichever this node
+    # actually has for that band) is ALL newly added, show just the band label; if only
+    # some of that band's target sectors are new (the rest already pre-existing/untouched),
+    # show the band label plus the specific newly-added sector name(s). target_band_sectors
+    # is the FULL target inventory per (node, band label) — every sector this node has for
+    # that band in the CIQ, added or not — the same "whole vs partial" pattern
+    # node_band_sectors already uses for Moved Sectors, just sourced from the CIQ target
+    # instead of Pre-checks.
+    target_band_sectors = {}
     for r in mm_objs:
         node = r.get("Node to be built as")
+        if is_wll_node_name(node):
+            continue  # WLL node — not a real radio node, never gets Integration/added-cell entries
         e_name, g_name = r.get("eNodeB Name"), r.get("gNodeB Name")
         added_here = []
         for row in eutran_objs:
             cell = row.get("EutranCellFDDId")
-            if not cell or cell in handled_cells or cell in pre_cells:
+            if not cell:
+                continue
+            if e_name and str(cell).startswith(str(e_name)):
+                label, sector = band_label(cell)
+                if label and sector:
+                    target_band_sectors.setdefault((node, label), set()).add(sector)
+            if cell in handled_cells or cell in pre_cells:
                 continue
             if e_name and str(cell).startswith(str(e_name)):
                 added_here.append(cell)
         for row in fiveg_objs:
             cell = row.get("NRCellDU")
-            if not cell or cell in handled_cells or cell in pre_cells:
+            if not cell:
+                continue
+            if g_name and str(cell).startswith(str(g_name)):
+                label, sector = band_label(cell)
+                if label and sector:
+                    target_band_sectors.setdefault((node, label), set()).add(sector)
+            if cell in handled_cells or cell in pre_cells:
                 continue
             if g_name and str(cell).startswith(str(g_name)):
                 added_here.append(cell)
@@ -472,6 +535,7 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
             result["added"][node] = added_here
 
     result["node_band_sectors"] = node_band_sectors
+    result["target_band_sectors"] = target_band_sectors
     return result
 
 
@@ -480,13 +544,36 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
     controller_edp_found: dict of {controller_id: bool} — False means the 6610 shows in the CIQ
     but isn't published in EDP yet."""
     lines = []
+    target_band_sectors = classification.get("target_band_sectors", {})
     for node, cells in classification.get("added", {}).items():
         labels = dedupe_labels(cells)
-        lines.append(f"Integration:\t{'/'.join(labels)}\t{node}")
+        added_by_label = {}
+        for c in cells:
+            label, sector = band_label(c)
+            if label and sector:
+                added_by_label.setdefault(label, set()).add(sector)
+        parts = []
+        for label in labels:
+            added_sectors = added_by_label.get(label, set())
+            target_sectors = target_band_sectors.get((node, label))
+            if not target_sectors or added_sectors >= target_sectors:
+                parts.append(label)  # whole band added — target unknown or fully covered
+            else:
+                sector_names = sorted(added_sectors, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
+                parts.append(f"{label} {', '.join(sector_names)}")
+        lines.append(f"Integration:\t{'/'.join(parts)}\t{node}")
 
     ctrl_rows = [r for r in controller_objs if str(r.get("Controller", "")).strip() == "6610"]
     for r in ctrl_rows:
         ctrl_id = r.get('Controller ID')
+        # Confirmed real bug: this loop iterates EVERY row matching Controller=="6610" — if
+        # controller_objs has more than one such row (e.g. a duplicate/blank leftover row
+        # alongside the real one), a "6610 Controller Integration:" line with no ID at all
+        # got generated for each blank row too, producing "6610 Controller Integration: ."
+        # in the report. _get_controller_id() (used for the report header) sidesteps this
+        # by only ever reading the first matching row — skip blank rows here too instead.
+        if not ctrl_id or not str(ctrl_id).strip():
+            continue
         if controller_edp_found is not None and controller_edp_found.get(ctrl_id) is False:
             lines.append(f"EDP is not published for the controller — {ctrl_id}")
         else:
@@ -517,8 +604,9 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
         sectors_str = "" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
         lines.append(f"Moved Sectors:\t{label_str}{sectors_str}\tFrom:\t{from_node}\tTo:\t{to_node}")
 
-    for node in classification.get("deleted_nodes", []):
-        lines.append(f"Deleted Node from ENM:\t{node}")
+    deleted_nodes = classification.get("deleted_nodes", [])
+    if deleted_nodes:
+        lines.append(f"Deleted Node from ENM:\t{'|'.join(deleted_nodes)}")
 
     for node, cells in classification.get("deleted_sectors", {}).items():
         labels = dedupe_labels(cells)
@@ -532,27 +620,15 @@ def format_scope_of_work(classification, controller_objs, dss_outputs_meta=None,
         retune_seen.add(sig)
         lines.append(f"Retune on:\t{r['label']}\tFrom:\t{r['from']}\tTo:\t{r['to']}")
 
-    # Group by the actual swap SIGNATURE (From -> To), not by physical co-location. Co-located
-    # bands (e.g. PCS_1 and AWS_1 sharing one antenna group) can have genuinely different radio
-    # compositions (e.g. PCS_1 alone has a daisy-chained secondary radio) — blending them by
-    # co-location silently combined unrelated radio tokens. Only bands that share the identical
-    # From/To signature get combined into one bracketed line; sectors merge the same way.
-    merged = {}
-    for r in (radio_swaps or []):
-        sig = (r["from"], r["to"])
-        merged.setdefault(sig, {"labels": set(), "sectors": set()})
-        merged[sig]["labels"].add(r["label"])
-        merged[sig]["sectors"].add(r["sector"])
-
-    for (from_radio, to_radio), grp in merged.items():
-        labels = tuple(sorted(grp["labels"]))
-        sector_set = grp["sectors"]
-
-        label_str = labels[0] if len(labels) == 1 else f"[{'|'.join(labels)}]"
-        sector_names = sorted(sector_set, key=lambda s: SECTOR_ORDER.index(s) if s in SECTOR_ORDER else 99)
-        is_whole = WHOLE_BAND_SET <= sector_set
-        sectors_str = " sectors" if is_whole else (f" {', '.join(sector_names)}" if sector_names else "")
-        lines.append(f"Radio Swap on:\t{label_str}{sectors_str}\tFrom:\t{from_radio}\tTo:\t{to_radio}")
+    # Confirmed real bug found this session: "Radio Swap on:" generation used to live here
+    # too — a flat, undifferentiated list with no Completed/Pending distinction and no
+    # stakeholder concept at all. It's fully superseded by classify_radio_swap_placement()
+    # + format_radio_swaps() in mca_completed_logic.py (real Post-checks-driven placement,
+    # correct stakeholder tagging on Pending only) — mca_report_ui.py already stripped this
+    # old version's lines back out of scope_lines before ever reaching the checklist, but
+    # that stripping happened too late to stop it from leaking into any earlier-stage
+    # output built directly from this function's own return value. Removed at the source
+    # instead of relying on a later filter to catch it.
 
     if dss_outputs_meta:
         lines.append(f"DSS Activation:\t{' & '.join(dss_outputs_meta)}")
@@ -1119,6 +1195,159 @@ TDIR_N2E_IDL = Path(__file__).parent / "templates" / "N2E" / "IDL"
 
 DU_TYPE_TO_GEN = {"6630": "G2", "5216": "G2", "6648": "G3", "6651": "G3", "6672": "G4"}
 
+# Confirmed real reference table (uploaded IDL_Connections.xlsx, "IDL Connections_MCA" tab) —
+# Build Type letter -> combination pattern + IDLe/IDLy cable part number(s) with their own
+# combination pattern. Patterns use bare "G2"/"G3"/"G4" for a single node of that generation,
+# or "G2(1)"/"G2(2)" etc. when more than one node shares the same generation (e.g. Build Type D
+# has three separate G2 nodes) — each substituted with that specific node's own real label.
+IDL_CABLE_REFERENCE = {
+    "A": {"idle": [("RPM 777 417", "G2(1)+G2(2)")], "idly": []},
+    "B": {"idle": [], "idly": [("RPM 777 098", "G2+G3")]},
+    "BB": {"idle": [], "idly": [("RPM 777 544", "G2+G3")]},
+    "C": {"idle": [("RPM 777 052", "G3(1)+G3(2)")], "idly": []},
+    "CC": {"idle": [("RPM 777 053", "G3(1)+G3(2)")], "idly": []},
+    "R": {"idle": [("RPM 777 052", "G4(1)+G4(2)")], "idly": []},
+    "S": {"idle": [("RPM 777 543", "G4+G2")], "idly": []},
+    "T": {"idle": [("RPM 777 052", "G4+G3")], "idly": []},
+    "D": {"idle": [("RPM 777 417", "G2(1)+G2(2)"), ("RPM 777 417", "G2(2)+G2(3)"), ("RPM 777 417", "G2(3)+G2(1)")], "idly": []},
+    "E": {"idle": [("RPM 777 417", "G2(1)+G2(2)")], "idly": [("RPM 777 098", "G2(1)+G2(2)+G3")]},
+    "EE": {"idle": [("RPM 777 417", "G2(1)+G2(2)")], "idly": [("RPM 777 098", "G2(2)+G3")]},
+    "F": {"idle": [("RPM 777 053", "G3(1)+G3(2)")], "idly": [("RPM 777 544", "G2+G3(1)"), ("RPM 777 544", "G2+G3(2)")]},
+    "FF": {"idle": [("RPM 777 053", "G3(1)+G3(2)")], "idly": [("RPM 777 544", "G2+G3(1)")]},
+    "G": {"idle": [("RPM 777 053", "G3(1)+G3(2)")], "idly": [("RPM 777 054", "G3(1)+G3(2)+G3(3)")]},
+    "GG": {"idle": [("RPM 777 052", "G3(1)+G3(2)"), ("RPM 777 052", "G3(2)+G3(3)"), ("RPM 777 052", "G3(3)+G3(1)")], "idly": []},
+    "RR": {"idle": [("RPM 777 052", "G4(1)+G4(2)"), ("RPM 777 052", "G4(2)+G4(3)"), ("RPM 777 052", "G4(3)+G4(1)")], "idly": []},
+    "TT": {"idle": [("RPM 777 052", "G3+G4(1)"), ("RPM 777 052", "G4(1)+G4(2)"), ("RPM 777 052", "G3+G4(2)")], "idly": []},
+    "U": {"idle": [("RPM 777 053", "G4(1)+G4(2)"), ("RPM 777 543", "G2+G4(1)"), ("RPM 777 543", "G2+G4(2)")], "idly": []},
+    "UU": {"idle": [("RPM 777 052", "G3+G4"), ("RPM 777 543", "G2+G3"), ("RPM 777 543", "G2+G4")], "idly": []},
+}
+
+
+def _idl_cable_node_label(ciq_wb, row):
+    """Confirmed format for IDL cable substitution — same (P)/(S) dual-identity tagging and
+    hardware as Post Configuration, but WITHOUT the BBU mode tag (TMBB/SMBB/etc.): just
+    "{primary}(P)/{secondary}(S)({hw})" or "{primary}({hw})" for a single-identity node."""
+    primary = row.get("Node to be built as")
+    e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+    is_lte_primary = str(primary).strip().upper() == str(e_name or "").strip().upper()
+    r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) if is_lte_primary else \
+        find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+    if not r:
+        r = find_row_by_name(ciq_wb, "eNB Info", "eNodeB Name", e_name) or \
+            find_row_by_name(ciq_wb, "gNB Info", "gNodeB Name", g_name)
+    hw = hw_string(r) or "NOT FOUND"
+    # Confirmed: XMU presence isn't relevant for IDL cable reporting — hw_string() appends
+    # " + XMU"/" + N XMU" when XMU boards are present, strip that here specifically.
+    hw = re.sub(r"\s*\+\s*\d*\s*XMU\s*$", "", hw).strip()
+    if is_populated(e_name) and is_populated(g_name):
+        secondary = g_name if is_lte_primary else e_name
+        return f"{primary}(P)/{secondary}(S)({hw})"
+    return f"{primary}({hw})"
+
+
+def _idl_cable_columns(ciq_wb, nodes_by_gen, entries, third_col=False):
+    """Confirmed real .xlsm gap: the template has FIXED columns per row (C=Cable P/N,
+    D=1st Node ID, E=2nd Node ID, [F=3rd Node ID for IDLy only]) -- not a place to dump the
+    whole combined text line, and only one row exists (no overflow rows like
+    Integration/Transport SFP have). Multiple cable connections for the same build type get
+    pipe-joined per column (C: part1|part2, D: node1a|node2a, E: node1b|node2b); within a
+    single connection with more nodes than there are columns, the excess pipe-joins into the
+    LAST available column. third_col=True (IDLy only -- confirmed real template difference:
+    row 21 has a genuine 4th value column F for a 3rd node, row 20/IDLe does not) uses D/E/F
+    directly for a single 3-node connection (e.g. Build Type G's "G3(1)+G3(2)+G3(3)") instead
+    of pipe-joining nodes 2+3 into E. Returns (C, D, E) normally, or (C, D, E, F) when
+    third_col=True."""
+    def substitute_nodes(pattern):
+        nodes, used = [], {}
+        for gen, idx in re.findall(r"(G\d)(?:\((\d+)\))?", pattern):
+            candidates = nodes_by_gen.get(gen, [])
+            pos = (int(idx) - 1) if idx else used.get(gen, 0)
+            used[gen] = used.get(gen, 0) + 1
+            nodes.append(_idl_cable_node_label(ciq_wb, candidates[pos]) if 0 <= pos < len(candidates) else f"{gen} (node not found)")
+        return nodes
+
+    if third_col and len(entries) == 1:
+        part, combo = entries[0]
+        nodes = substitute_nodes(combo)
+        if len(nodes) == 3:
+            return part, nodes[0], nodes[1], nodes[2]
+        if len(nodes) > 3:
+            return part, nodes[0], nodes[1], "|".join(nodes[2:])
+
+    parts, firsts, rests = [], [], []
+    for part, combo in entries:
+        nodes = substitute_nodes(combo)
+        parts.append(part)
+        firsts.append(nodes[0] if nodes else "")
+        if len(nodes) > 1:
+            rests.append("|".join(nodes[1:]))
+    c, d, e = "|".join(parts), "|".join(firsts), "|".join(rests)
+    return (c, d, e, "") if third_col else (c, d, e)
+
+
+def build_type_idl_slots(build_type_letter):
+    """Confirmed real UI gap: a build type can structurally have NO IDLe entry at all (e.g.
+    Type BB only ever uses IDLy) — that's different from "auto-derivation found nothing but
+    this build type could plausibly need one," and showing a manual IDLe fallback field in
+    the former case is just wrong, not merely unhelpful. Returns (has_idle, has_idly) —
+    whether IDL_CABLE_REFERENCE has ANY entries for that slot, regardless of whether
+    substitution later succeeds."""
+    entry = IDL_CABLE_REFERENCE.get(str(build_type_letter or "").strip().upper())
+    if not entry:
+        return True, True  # unknown build type — can't rule either slot out, so allow both
+    return bool(entry.get("idle")), bool(entry.get("idly"))
+
+
+def idl_cable_columns_for_build_type(ciq_wb, mm_objs, build_type_letter):
+    """(C, D, E) column version of idl_cable_lines_for_build_type(), for the .xlsm write —
+    see _idl_cable_columns() for the combination rule. Returns (idle_cols, idly_cols),
+    each an (C, D, E) tuple."""
+    entry = IDL_CABLE_REFERENCE.get(str(build_type_letter or "").strip().upper())
+    if not entry:
+        return ("", "", ""), ("", "", "")
+    nodes_by_gen = {}
+    for row in mm_objs:
+        gen = get_node_generation(ciq_wb, row)
+        if gen:
+            nodes_by_gen.setdefault(gen, []).append(row)
+    return _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idle"]), _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idly"], third_col=True)
+
+
+def idl_cable_lines_for_build_type(ciq_wb, mm_objs, build_type_letter):
+    """Confirmed rule: match nodes to each combination pattern's generation slots using
+    get_node_generation() — same mapping already used for Build Type detection — then
+    substitute each slot with that specific real node's own label (_idl_cable_node_label).
+    Bare "G2" means the single node of that generation; "G2(1)"/"G2(2)" means the 1st/2nd
+    node of that generation, in CIQ row order. Returns (idle_lines, idly_lines), each a list
+    of "{part number} : {substituted combination}" strings."""
+    entry = IDL_CABLE_REFERENCE.get(str(build_type_letter or "").strip().upper())
+    if not entry:
+        return [], []
+
+    nodes_by_gen = {}
+    for row in mm_objs:
+        gen = get_node_generation(ciq_wb, row)
+        if gen:
+            nodes_by_gen.setdefault(gen, []).append(row)
+
+    def substitute(pattern):
+        parts = []
+        used_counts = {}
+        for gen, idx in re.findall(r"(G\d)(?:\((\d+)\))?", pattern):
+            candidates = nodes_by_gen.get(gen, [])
+            pos = (int(idx) - 1) if idx else used_counts.get(gen, 0)
+            used_counts[gen] = used_counts.get(gen, 0) + 1
+            if 0 <= pos < len(candidates):
+                parts.append(_idl_cable_node_label(ciq_wb, candidates[pos]))
+            else:
+                parts.append(f"{gen} (node not found)")
+        return " + ".join(parts)
+
+    idle_lines = [f"IDLe : {part} : {substitute(combo)}" for part, combo in entry["idle"]]
+    idly_lines = [f"IDLy : {part} : {substitute(combo)}" for part, combo in entry["idly"]]
+    return idle_lines, idly_lines
+
+
 # combo (sorted tuple of generations) -> list of (filename, variant label)
 IDL_TEMPLATE_REGISTRY = {
     ("G2", "G2"): [("G2+G2_Buildtype_A.txt", "")],
@@ -1138,11 +1367,16 @@ IDL_TEMPLATE_REGISTRY = {
     # falls through to the "IDL Template not found" branch below.
 }
 
-# N2E confirmed to support only these 2 combinations (not the full 15) — reuses the same
-# file content/naming as the shared set, just from its own templates/N2E/IDL/ folder.
+# N2E confirmed to support these combinations — reuses the same file content/naming as the
+# shared set, just from its own templates/N2E/IDL/ folder. Originally just C/CC/R; T, G, GG,
+# RR, TT added this session (files copied into templates/N2E/IDL/ to match).
 N2E_IDL_TEMPLATE_REGISTRY = {
     ("G3", "G3"): [("G3+G3_Buildtype_C.txt", "Preferred"), ("G3+G3_Buildtype_CC.txt", "Alternate")],
     ("G4", "G4"): [("G4+G4_Buildtype_R.txt", "Preferred")],
+    ("G3", "G4"): [("G4+G3_Buildtype_T.txt", "IDLe")],
+    ("G3", "G3", "G3"): [("G3+ G3+ G3_Buildtype_GG.txt", "Preferred"), ("G3+ G3+ G3_Buildtype_G.txt", "Alternate")],
+    ("G4", "G4", "G4"): [("G4+G4+G4_Buildtype_RR.txt", "")],
+    ("G3", "G4", "G4"): [("G3 + G4 + G4_Buildtype_TT.txt", "")],
     # every other combination -> "IDL Template not found" for N2E specifically, even though
     # MCA/CENM/NSB support it via the full registry above.
 }
@@ -1151,6 +1385,226 @@ N2E_IDL_TEMPLATE_REGISTRY = {
 # CRAN rehome) use this SEPARATE registry entirely, replacing the standard IDL_TEMPLATE_REGISTRY
 # for that site — confirmed. Every combo here includes exactly one G3 node (the "F" node).
 # Filenames confirmed against actual GitHub uploads.
+# Confirmed real rule (uploaded IDL_Connections.xlsx, "CRAN TRACKING" tab) — CRAN Build
+# Type is fully derivable from the CIQ, no ambiguity/dropdown needed. Each non-hub node
+# contributes (generation, mode) where mode is "M" (MMBB/TMBB — dual LTE+5G identity) or
+# "L" (SMBB — single identity), sourced from the CIQ's own "BBU Mode" column. The hub is
+# the node ending in "F" (always G3-class hardware), excluded from the signature — its own
+# connection type (RPM coax vs SM fiber jumper) is a separate, independent choice (the "-1"
+# suffix), not derivable from the CIQ. Keyed by the SORTED tuple of (gen, mode) pairs, since
+# the reference sheet's own column order isn't a reliable real-node ordering to match against.
+CRAN_BUILD_TYPE_REGISTRY = {
+    (("G2", "M"),): "L-1",
+    (("G2", "M"), ("G2", "M")): "L-2",
+    (("G2", "L"), ("G2", "M")): "L-2B",
+    (("G2", "M"), ("G2", "M"), ("G2", "M")): "L-3B",
+    (("G3", "M"),): "L-4",
+    (("G2", "M"), ("G3", "M")): "L-5",
+    (("G2", "L"), ("G3", "M")): "L-5B",
+    (("G3", "M"), ("G3", "M")): "L-6",
+    (("G2", "M"), ("G2", "M"), ("G2", "M"), ("G2", "M")): "L-8",
+    (("G4", "M"),): "L-9",
+    (("G2", "L"), ("G4", "M")): "L-10",
+    (("G4", "M"), ("G4", "M")): "L-11",
+    (("G2", "L"), ("G4", "M"), ("G4", "M")): "L-12",
+}
+
+
+def cran_build_type(ciq_wb, mm_objs):
+    """Returns (base_build_type_letter_or_None, hub_row_or_None). The hub node is identified
+    by its name ending in "F" (same convention already used elsewhere to detect a CRAN-styled
+    node present in an MCA site) — confirmed to be excluded from the tech signature, since its
+    own hub-cable type is chosen separately (the "-1" variant), not part of what determines
+    which Build Type letter applies."""
+    hub_row = None
+    regular_pairs = []
+    for row in mm_objs:
+        name = row.get("Node to be built as")
+        if str(name or "").strip().upper().endswith("F"):
+            hub_row = row
+            continue
+        gen = get_node_generation(ciq_wb, row)
+        if not gen:
+            continue
+        bbu_mode = str(row.get("BBU Mode") or "").strip().upper()
+        mode = "L" if bbu_mode == "SMBB" else "M"
+        regular_pairs.append((gen, mode))
+    signature = tuple(sorted(regular_pairs))
+    return CRAN_BUILD_TYPE_REGISTRY.get(signature), hub_row
+
+
+# Confirmed real reference tables (uploaded IDL_Connections.xlsx, "CRAN" tab) — one entry per
+# BASE build type (the "-1" suffix only ever changes the hub cable, handled separately below).
+# CRAN_SLOT_CABLE_REFERENCE: (generation, position-index-among-same-generation) -> cable
+# description for that node's DIRECT hub connection. A generation/index NOT present here means
+# that node connects via IDL instead (see CRAN_IDL_CABLE_REFERENCE) — confirmed real pattern,
+# e.g. L-10's SMBB G2 node has no direct hub slot (all "NA" in the sheet), reaching the hub only
+# via the G2+G4 IDL connection.
+CRAN_SLOT_CABLE_REFERENCE = {
+    "L-1": {("G2", 1): "RPM 777 811 + 8300 DaFi"},
+    "L-2": {("G2", 1): "RPM 777 811 + 8300 DaFi", ("G2", 2): "RPM 777 811 + 8300 DaFi"},
+    "L-2B": {("G2", 1): "RPM 777 811 + 8300 DaFi"},
+    "L-3B": {("G2", 1): "RPM 777 811 + 8300 DaFi", ("G2", 2): "RPM 777 811 + 8300 DaFi", ("G2", 3): "RPM 777 811 + 8300 DaFi"},
+    "L-4": {("G3", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-5": {("G2", 1): "RPM 777 811 + 8300 DaFi", ("G3", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-5B": {("G3", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-6": {("G3", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi", ("G3", 2): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-8": {("G2", 1): "RPM 777 811 + 8300 DaFi", ("G2", 2): "RPM 777 811 + 8300 DaFi", ("G2", 3): "RPM 777 811 + 8300 DaFi", ("G2", 4): "RPM 777 811 + 8300 DaFi"},
+    "L-9": {("G4", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-10": {("G4", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-11": {("G4", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi", ("G4", 2): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+    "L-12": {("G4", 1): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi", ("G4", 2): "Approved MM\nfiber jumper + RDH 102 65/1 + 8300 DaFi"},
+}
+
+# Hub's own cable, keyed by (base_build_type, is_dash1_variant) — the ONLY thing the "-1"
+# suffix actually changes.
+CRAN_HUB_CABLE_REFERENCE = {
+    ("L-1", False): "RPM 777 052", ("L-1", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-2", False): "RPM 777 052", ("L-2", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-2B", False): "RPM 777 052", ("L-2B", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-3B", False): "RPM 777 052", ("L-3B", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-4", False): "RPM 777 052", ("L-4", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-5", False): "RPM 777 052", ("L-5", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-5B", False): "RPM 777 052", ("L-5B", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-6", False): "RPM 777 052", ("L-6", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-8", False): "RPM 777 052", ("L-8", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-9", False): "RPM 777 052", ("L-9", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-10", False): "RPM 777 052", ("L-10", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-11", False): "RPM 777 052", ("L-11", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+    ("L-12", False): "RPM 777 052", ("L-12", True): "RDH 102 75/3 + Approved SM \nfiber jumper ",
+}
+
+# IDLe/IDLy cross-node connections, same shape as MCA's IDL_CABLE_REFERENCE — only build
+# types that actually need one appear here (most CRAN combos don't).
+CRAN_IDL_CABLE_REFERENCE = {
+    "L-2": {"idle": [("RPM 777 417", "G2(1)+G2(2)")], "idly": []},
+    "L-2B": {"idle": [("RPM 777 417", "G2(1)+G2(2)")], "idly": []},
+    "L-5": {"idle": [], "idly": [("RPM 777 098", "G2+G3")]},
+    "L-5B": {"idle": [], "idly": [("RPM 777 098", "G2+G3")]},
+    "L-6": {"idle": [("RPM 777 053", "G3(1)+G3(2)")], "idly": []},
+    "L-10": {"idle": [("RPM 777 543", "G2+G4")], "idly": []},
+    "L-11": {"idle": [("RPM 777 052", "G4(1)+G4(1)")], "idly": []},
+    "L-12": {"idle": [("RPM 777 543", "G2+G4(1)"), ("RPM 777 543", "G2+G4(2)")], "idly": []},
+}
+
+
+def cran_idl_cable_lines(ciq_wb, mm_objs, base_build_type):
+    """Same substitution mechanism as idl_cable_lines_for_build_type() (MCA), reused here
+    with CRAN's own reference table."""
+    entry = CRAN_IDL_CABLE_REFERENCE.get(base_build_type)
+    if not entry:
+        return [], []
+    nodes_by_gen = {}
+    for row in mm_objs:
+        name = row.get("Node to be built as")
+        if str(name or "").strip().upper().endswith("F"):
+            continue  # hub excluded — it's never part of an inter-node IDL connection
+        gen = get_node_generation(ciq_wb, row)
+        if gen:
+            nodes_by_gen.setdefault(gen, []).append(row)
+
+    def substitute(pattern):
+        parts, used = [], {}
+        for gen, idx in re.findall(r"(G\d)(?:\((\d+)\))?", pattern):
+            cands = nodes_by_gen.get(gen, [])
+            pos = (int(idx) - 1) if idx else used.get(gen, 0)
+            used[gen] = used.get(gen, 0) + 1
+            parts.append(_idl_cable_node_label(ciq_wb, cands[pos]) if 0 <= pos < len(cands) else f"{gen} (node not found)")
+        return " + ".join(parts)
+
+    idle_lines = [f"IDLe : {part} : {substitute(combo)}" for part, combo in entry["idle"]]
+    idly_lines = [f"IDLy : {part} : {substitute(combo)}" for part, combo in entry["idly"]]
+    return idle_lines, idly_lines
+
+
+def cran_idl_cable_columns(ciq_wb, mm_objs, base_build_type):
+    """(C, D, E) column version of cran_idl_cable_lines(), for the .xlsm write — see
+    _idl_cable_columns() for the combination rule. Returns (idle_cols, idly_cols)."""
+    entry = CRAN_IDL_CABLE_REFERENCE.get(base_build_type)
+    if not entry:
+        return ("", "", ""), ("", "", "")
+    nodes_by_gen = {}
+    for row in mm_objs:
+        name = row.get("Node to be built as")
+        if str(name or "").strip().upper().endswith("F"):
+            continue
+        gen = get_node_generation(ciq_wb, row)
+        if gen:
+            nodes_by_gen.setdefault(gen, []).append(row)
+    return _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idle"]), _idl_cable_columns(ciq_wb, nodes_by_gen, entry["idly"], third_col=True)
+
+
+def _cran_slot_port_data(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows):
+    """Shared matching logic for cran_slot_port_lines() (display text) and
+    cran_slot_port_rows() (structured, for .xlsm columns) — returns
+    (switch_ids, [{"slot_port", "cable", "node_display"}, ...])."""
+    sidehaul_by_node = {str(r["node_id"]).strip().upper(): r for r in sidehaul_rows if r.get("node_id")}
+
+    hub_row = None
+    nodes_by_gen = {}
+    for row in mm_objs:
+        name = row.get("Node to be built as")
+        if str(name or "").strip().upper().endswith("F"):
+            hub_row = row
+            continue
+        gen = get_node_generation(ciq_wb, row)
+        if gen:
+            nodes_by_gen.setdefault(gen, []).append(row)
+
+    switch_ids = sorted({str(r["switch_id"]) for r in sidehaul_rows if r.get("switch_id")})
+
+    def sidehaul_match(row):
+        primary = str(row.get("Node to be built as") or "").strip().upper()
+        e_name = str(row.get("eNodeB Name") or "").strip().upper()
+        g_name = str(row.get("gNodeB Name") or "").strip().upper()
+        for key in (primary, e_name, g_name):
+            if key and key in sidehaul_by_node:
+                return sidehaul_by_node[key]
+        return None
+
+    entries = []
+    for gen, rows in nodes_by_gen.items():
+        for idx, row in enumerate(rows, start=1):
+            cable = CRAN_SLOT_CABLE_REFERENCE.get(base_build_type, {}).get((gen, idx))
+            if not cable:
+                continue  # reaches the hub via IDL instead, not a direct slot connection
+            cable = re.sub(r"\s+", " ", cable).strip()
+            sh = sidehaul_match(row)
+            slot_port = sh["slot_port"] if sh else "Slot/Port not found in Sidehaul Info"
+            node_display = _idl_cable_node_label(ciq_wb, row)
+            # Strip the trailing "(hw)" tag — confirmed format for this line uses (P)/(S)
+            # only, hardware isn't shown (unlike the IDLe/IDLy line, which always includes it).
+            node_display = re.sub(r"\([^()]*\)$", "", node_display).rstrip()
+            entries.append({"slot_port": slot_port, "cable": cable, "node_display": node_display})
+
+    if hub_row:
+        hub_cable = CRAN_HUB_CABLE_REFERENCE.get((base_build_type, bool(is_dash1)))
+        hub_cable = re.sub(r"\s+", " ", hub_cable).strip() if hub_cable else hub_cable
+        sh = sidehaul_match(hub_row)
+        slot_port = sh["slot_port"] if sh else "Slot/Port not found in Sidehaul Info"
+        entries.append({"slot_port": slot_port, "cable": hub_cable, "node_display": hub_row.get("Node to be built as")})
+
+    return switch_ids, entries
+
+
+def cran_slot_port_lines(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows):
+    """Builds the Switch + Slot/Port report DISPLAY lines for a CRAN site — for the report
+    text / on-screen caption. See _cran_slot_port_data() for the matching rule. Returns
+    (switch_lines, slot_port_lines)."""
+    switch_ids, entries = _cran_slot_port_data(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows)
+    switch_lines = [f"Switch : {sid}" for sid in switch_ids]
+    slot_port_lines = [f"{e['slot_port']} -> {e['cable']} -> {e['node_display']}" for e in entries]
+    return switch_lines, slot_port_lines
+
+
+def cran_slot_port_rows(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows):
+    """Structured version of cran_slot_port_lines(), for the .xlsm write — the template has
+    real Slot/Port and Cable P/N columns (rows 23/24, then overflow rows 25-39), not a place
+    to dump pre-formatted "->" display strings. Returns (switch_ids, [{"slot_port", "cable",
+    "node_display"}, ...])."""
+    return _cran_slot_port_data(ciq_wb, mm_objs, base_build_type, is_dash1, sidehaul_rows)
+
+
 MCA_CRAN_IDL_REGISTRY = {
     ("G2", "G3"): [("G2 BBU+G3 BBU  Dafi 6673 Connections Build Type (L-1) and (L-1-1).txt", "")],
     ("G2", "G2", "G3"): [
@@ -1377,8 +1831,13 @@ def generate_idl_connections(ciq_wb, mm_objs, user_id, date_str, log, template_d
 
     for fname, variant in matches:
         tpl_path = template_dir / fname
+        if not tpl_path.exists() and template_dir != TDIR_IDL:
+            # Confirmed rule (N2E specifically): only C/CC/R have dedicated files in N2E's
+            # own folder — everything else (T, G, GG, RR, TT, etc.) falls back to the same
+            # shared templates/IDL/ folder MCA/CENM/NSB use, rather than needing its own copy.
+            tpl_path = TDIR_IDL / fname
         if not tpl_path.exists():
-            summary_rows.append({"Item": "IDL Connections", "Source": f"template {fname}", "Value": "NOT FOUND", "Note": f"expected file not in {template_dir}/: {fname}"})
+            summary_rows.append({"Item": "IDL Connections", "Source": f"template {fname}", "Value": "NOT FOUND", "Note": f"expected file not in {template_dir}/ or {TDIR_IDL}/: {fname}"})
             log(f"✗ IDL Connections: template file not found: {fname}")
             scope_lines.append(f"IDL Connections:\ttemplate file missing from repo\t{fname}")
             continue
@@ -1436,20 +1895,6 @@ def _ngs_cell_band(cell_name):
         return label
     label, _sector = nr_band_label(cell_name)
     return label
-
-
-def _ngs_pair_is_pure_lte(a_to_b, b_to_a):
-    """own_cell is always an LTE cell by construction (only eUtran Parameters is scanned for
-    Co-Located Technology Cell references) — so whether a pair is genuinely LTE-LTE (needing
-    bidirectional confirmation) vs. mixed LTE-5G (one-directional suffices) depends on whether
-    any ref_cell matches the 5G naming pattern — NOT on whether the target node separately has
-    its own eNBId. A dual-tech TMBB node (its own LTE side unrelated to this specific shared
-    radio) would otherwise be wrongly classified as a pure-LTE pair, requiring an impossible
-    bidirectional confirmation and causing a false negative on a real shared-radio site."""
-    for _own_cell, ref_cell in a_to_b + b_to_a:
-        if nr_band_label(ref_cell)[0] is not None:
-            return False
-    return True
 
 
 TDIR_NGS = Path(__file__).parent / "templates" / "NGS"
@@ -1624,6 +2069,21 @@ def _fill_ngs_site_block(tpl_text, slot, site_id, rru_list, riport_list, priorit
     return tpl_text
 
 
+def _ngs_pair_is_pure_lte(a_to_b, b_to_a):
+    """Ported from main branch (confirmed real bug fix, was missing from report-feature):
+    own_cell is always an LTE cell by construction (only eUtran Parameters is scanned for
+    Co-Located Technology Cell references) — so whether a pair is genuinely LTE-LTE (needing
+    bidirectional confirmation) vs. mixed LTE-5G (one-directional suffices) depends on whether
+    any ref_cell matches the 5G naming pattern — NOT on whether the target node separately has
+    its own eNBId. A dual-tech TMBB node (its own LTE side unrelated to this specific shared
+    radio) would otherwise be wrongly classified as a pure-LTE pair, requiring an impossible
+    bidirectional confirmation and causing a false negative on a real shared-radio site."""
+    for _own_cell, ref_cell in a_to_b + b_to_a:
+        if nr_band_label(ref_cell)[0] is not None:
+            return False
+    return True
+
+
 def generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log):
     """Returns (outputs, summary_rows). For every confirmed NGS pair, generates the fully filled
     activation template (LTE-LTE or LTE-5G, whichever applies), keeping only the correct
@@ -1679,20 +2139,7 @@ def generate_ngs_template_output(ciq_wb, mm_objs, user_id, date_str, log):
                         out[sector] = c
                 return out
 
-            def _node_role_is_lte(cells):
-                """This node's ROLE in THIS SPECIFIC pair — from the actual cells involved,
-                not node-level eNBId/gNBId presence. A dual-tech TMBB node can be referenced
-                via its 5G side specifically, even though it separately has its own unrelated
-                LTE identity (confirmed bug: SXON082013 has its own eNBId, but the shared radio
-                here is via its 5G cells — using has_lte.get(node) wrongly treated it as LTE,
-                causing lte_band_label() to fail against 5G-style cell names and leaving every
-                RRU placeholder unresolved)."""
-                for c in cells:
-                    if nr_band_label(c)[0] is not None:
-                        return False
-                return True
-
-            a_is_lte, b_is_lte = _node_role_is_lte(own_a), _node_role_is_lte(own_b)
+            a_is_lte, b_is_lte = has_lte.get(node_a), has_lte.get(node_b)
             seeds_a = seed_by_sector(own_a, a_is_lte)
             seeds_b = seed_by_sector(own_b, b_is_lte)
             sectors_present = [s for s in SECTOR_ORDER if s in seeds_a or s in seeds_b]
@@ -1814,11 +2261,12 @@ def generate_ngs_checks(ciq_wb, mm_objs, log):
                 confirmed_nodes.add(node_a)
                 confirmed_nodes.add(node_b)
 
-    # Safety-net: some CIQs carry an explicit "NodeGroupSync" = "Y" column (in eUtran Parameters
-    # and/or 5G Info) marking cells that have NGS. This never drives detection on its own — it
-    # only flags a cell whose node wasn't already covered by a confirmed co-location pair above,
-    # so a genuine miss (e.g. a blank/NA Co-Located Technology Cell that should have been
-    # populated) doesn't silently go unnoticed.
+    # Safety-net (ported from main branch — confirmed missing from report-feature entirely
+    # until now): some CIQs carry an explicit "NodeGroupSync" = "Y" column marking cells
+    # that have NGS. This never drives detection on its own — it only flags a cell whose
+    # node wasn't already covered by a confirmed co-location pair above, so a genuine miss
+    # doesn't silently go unnoticed. Log/summary-row only, per explicit instruction — never
+    # feeds the Warnings tab, since the primary detection logic is trusted as-is.
     for sheet_name, cell_col in (("eUtran Parameters", "EutranCellFDDId"), ("5G Info", "NRCellDU")):
         if sheet_name not in ciq_wb.sheetnames:
             continue
@@ -2000,8 +2448,8 @@ def generate_port_conversion_checks(ciq_wb, mm_objs, edp_index, precheck_text, l
 # ============================================================
 
 DL_UL_LOSS_ROW_RE = re.compile(
-    r'(\S+)\s+(?:Up|Down)\s+\S+\s+(?:(?!\S+\s+(?:Up|Down)\s+\S+).)*?'
-    r'((?:Baseband|XMU|RAN Processor|:\s*RRU)\S*(?:(?!\S+\s+(?:Up|Down)\s+\S+).)*Port\s+D\d)', re.DOTALL
+    r'(\S+)\s+(?:Up|Down)\s+\d+\s+(?:(?!\S+\s+(?:Up|Down)\s+\d+).)*?'
+    r'((?:Baseband|XMU|RAN Processor|:\s*RRU)\S*(?:(?!\S+\s+(?:Up|Down)\s+\d+).)*Port\s+D\d)', re.DOTALL
 )
 
 def extract_dl_ul_loss_rows(precheck_text):
@@ -2025,6 +2473,99 @@ STATIC_OUTPUT_FILES = [
     "Integration_Checklist_v3.xlsx",
     "Global Local Script Execution Order.xlsx",
 ]
+
+
+# ============================================================
+# MCA INTEGRATION REPORT (Report_MCA-style output) — auto-fill what QUICKIX already knows,
+# manual entry for everything else, matching the Legacy_MCA_Macro_Template checklist.
+# ============================================================
+
+def derive_idl_build_type_label(ciq_wb, mm_objs):
+    """Re-derives which IDL template combo/filename would be used (same lookup + the same
+    get_node_generation() the real IDL Connections generator uses), purely to extract the
+    'Buildtype_X' suffix already embedded in the real template filenames (confirmed: e.g.
+    'G3+G3_Buildtype_C.txt' -> 'Type C'). Returns None if no IDL combo applies (e.g. single-BBU
+    site) or the combo isn't in the registry.
+    Confirmed: when a combo has BOTH a Preferred and Alternate variant (e.g. G2+G3 -> Type BB
+    and Type B), show BOTH joined by '/' rather than silently picking just the first — which
+    physical ports are actually free on the board can't be known from the CIQ, so the engineer
+    picks which applies by deleting whichever didn't."""
+    if len(mm_objs) < 2:
+        return None
+    gens = [get_node_generation(ciq_wb, row) for row in mm_objs]
+    if not all(gens):
+        return None
+    combo = tuple(sorted(gens))
+    entries = IDL_TEMPLATE_REGISTRY.get(combo)
+    if not entries:
+        return None
+    labels = []
+    for fname, _variant in entries:
+        m = re.search(r'Buildtype_([A-Z]+)', fname)
+        if m:
+            labels.append(f"Type {m.group(1)}")
+    return "/".join(labels) if labels else None
+
+
+def build_mca_integration_report(pre_line, post_line, controller_objs, mm_objs, manual):
+    """manual: dict of engineer-provided values from the UI —
+    {mic, market, site_name, sow, iwm_details, current_config, wll_node, software_version,
+     gs_version, completed_extra, pending, pre_existing_issues, notes, idl_cable_details,
+     switch_details, slot_port_details}.
+    Status (ATP/STF) is derived: ATP only if 'pending' is empty, STF otherwise — confirmed rule.
+    Returns the final Report_MCA-style plain-text block."""
+    site_ids = "/".join(r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as"))
+    status = "ATP" if not (manual.get("pending") or "").strip() else "STF"
+    mic = manual.get("mic") or "MIC"
+
+    lines = []
+    lines.append("Subject")
+    lines.append(f"{mic} | {manual.get('market','')} | {status} | {manual.get('site_name','')} | "
+                  f"{manual.get('fa_code','')} | {site_ids} | {manual.get('sow','')}")
+    lines.append("")
+    lines.append("IWM Details")
+    lines.append(manual.get("iwm_details", ""))
+    lines.append("")
+    lines.append("Configuration")
+    lines.append(f"Pre Configuration : {pre_line}")
+    if (manual.get("current_config") or "").strip():
+        lines.append(f"Current Configuration : {manual['current_config']}")
+    lines.append(f"Post Configuration : {post_line}")
+    if (manual.get("wll_node") or "").strip():
+        lines.append(f"WLL  node : {manual['wll_node']}")
+    controller_id = controller_objs[0].get("Controller") if controller_objs else ""
+    lines.append(f"6610 Controller : {controller_id}")
+    lines.append(f"Software version: {manual.get('software_version','')}")
+    lines.append(f"GS Version: {manual.get('gs_version','')}")
+    lines.append("")
+    lines.append("IDL Connections")
+    build_type = manual.get("idl_build_type")
+    if build_type:
+        lines.append(f"Build Type : {build_type}")
+    if (manual.get("idl_cable_details") or "").strip():
+        lines.append(manual["idl_cable_details"])
+    if (manual.get("switch_details") or "").strip():
+        lines.append("Switch")
+        lines.append(manual["switch_details"])
+    if (manual.get("slot_port_details") or "").strip():
+        lines.append("Slot/Port")
+        lines.append(manual["slot_port_details"])
+    lines.append("")
+    lines.append("Completed:")
+    for auto_line in manual.get("completed_auto_lines", []):
+        lines.append(auto_line)
+    if (manual.get("completed_extra") or "").strip():
+        lines.append(manual["completed_extra"])
+    lines.append("")
+    lines.append("Pending:")
+    lines.append(manual.get("pending", ""))
+    lines.append("")
+    lines.append("Pre-Existing Issues:")
+    lines.append(manual.get("pre_existing_issues", ""))
+    lines.append("")
+    lines.append("Notes:")
+    lines.append(manual.get("notes", ""))
+    return "\n".join(lines)
 
 
 def _xml_escape(text):
@@ -2128,10 +2669,11 @@ def fill_integration_checklist(fpath, ciq_wb, mm_objs, log):
     each boolean cell's style (s="15") has an <extLst><xfpb:xfComplement i="0"/></extLst>
     pointing at it) — a plain openpyxl round-trip silently drops BOTH the featurePropertyBag
     part AND the style's extLst (confirmed: neither survives), which is why the checkboxes
-    were showing as literal "TRUE"/"FALSE" text. Fix here: raw zip/XML surgery, only patch
-    the two label cells' text, copy every other byte through untouched — this preserves the
-    native checkbox wiring perfectly, confirmed working with a single click-tested real
-    checkbox before scaling to all 102."""
+    were showing as literal "TRUE"/"FALSE" text. Same category of destructive-round-trip bug
+    as the ActiveX macro checkboxes in mca_xlsm_surgical.py, different Excel feature. Fix here
+    is the same philosophy: raw zip/XML surgery, only patch the two label cells' text, copy
+    every other byte through untouched — this preserves the native checkbox wiring perfectly,
+    confirmed working with a single click-tested real checkbox before scaling to all 102."""
     site_ids = "/".join(r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as"))
     fa_code = get_fa_code(ciq_wb)
 
@@ -2454,20 +2996,34 @@ def classify_radio_swaps(precheck_text, ciq_wb):
 # ============================================================
 
 def pre_node_label(precheck_text, node_name):
-    """Determine a node's (P)/(S) identity pairing as it existed in Pre-checks — independent from
-    the CIQ, since a node can genuinely convert LTE-only <-> MMBB/TMBB between Pre and Post (5G
-    sectors moving onto or off of it as part of the same scope)."""
+    """Determine a node's (P)/(S) identity pairing AND its BBU mode tag as they existed in
+    Pre-checks — independent from the CIQ, since a node can genuinely convert LTE-only <->
+    MMBB/TMBB between Pre and Post (5G sectors moving onto or off of it as part of the same
+    scope). Confirmed real rule, derived purely from which cells are actually present in
+    Pre-checks (not from the CIQ's BBU Mode column, which only reflects the Post-side state):
+    LTE cells only -> SMBB. 5G cells only -> SMBB. LTE + 5G (no CBAND/DOD) -> MMBB.
+    LTE + 5G + CBAND/DOD -> TMBB. CBAND/DOD 5G cells share band code 077 (_N077[A-F]_n,
+    covering CBAND/DOD/DOD_BWE alike), same pattern nr_band_label() already uses."""
     pre_pairs, _ = extract_precheck_sectors(precheck_text)
     node_cells = [cell for (node, cell) in pre_pairs if node == node_name]
     if not node_cells:
         return node_name
     fiveg_cells = [c for c in node_cells if is_5g_cell(c)]
     lte_cells = [c for c in node_cells if not is_5g_cell(c)]
+    has_cband_dod = any(re.search(r'_N077[A-F]_\d+$', c) for c in fiveg_cells)
+
+    if lte_cells and fiveg_cells:
+        mode_tag = "(TMBB)" if has_cband_dod else "(MMBB)"
+    elif lte_cells or fiveg_cells:
+        mode_tag = "(SMBB)"
+    else:
+        mode_tag = ""
+
     if fiveg_cells and lte_cells:
         m = re.match(r"^(.+?)_N\d{3}[A-F]_\d+$", fiveg_cells[0])
         secondary = m.group(1) if m else fiveg_cells[0]
-        return f"{node_name}(P)/{secondary}(S)"
-    return node_name
+        return f"{node_name}(P)/{secondary}(S){mode_tag}"
+    return f"{node_name}{mode_tag}"
 
 def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_names):
     """Pre = nodes actually found in Pre-checks. Post = nodes actually found in CIQ Mixed Mode Info.
@@ -2487,6 +3043,8 @@ def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_name
     ciq_order = []
     for row in mm_objs:
         primary = row.get('Node to be built as')
+        if is_wll_node_name(primary):
+            continue  # WLL node — not a real node, excluded from Post Configuration entirely
         ciq_order.append(primary)
         labels[primary] = node_label(row)
         e_name, g_name = row.get('eNodeB Name'), row.get('gNodeB Name')
@@ -2499,7 +3057,7 @@ def generate_generic_pre_post(ciq_wb, mm_objs, precheck_text, precheck_node_name
     # order: CIQ order first (so Pre and Post always list shared nodes in the same sequence),
     # then any Pre-only nodes (e.g. a fully vacated node) appended after
     _, pre_nodes_set = extract_precheck_sectors(precheck_text)
-    ordered_names = list(ciq_order) + [n for n in precheck_node_names if n not in ciq_order]
+    ordered_names = list(ciq_order) + [n for n in precheck_node_names if n not in ciq_order and not is_wll_node_name(n)]
 
     pre_nodes = {}
     for name in ordered_names:
@@ -3182,6 +3740,19 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     outputs += dss_outputs
     summary_rows += dss_summary
 
+    # Confirmed: CRAN sites never had any IDL Connections generation at all — reuses the
+    # SAME registry/templates already built for MCA sites with a CRAN-styled node
+    # (MCA_CRAN_IDL_REGISTRY / templates/MCA/IDL_CRAN), since CRAN's own reference sheet
+    # (uploaded IDL_Connections.xlsx, "CRAN" tab) confirms the exact same combos/templates
+    # apply here — this covers Build Types L-1, L-2, L-2B, L-3B, L-10, L-11, L-12. Six other
+    # documented Build Types (L-4, L-5, L-5B, L-6, L-8, L-9) have no template file in the
+    # repo yet, so those combos still fall through to "IDL Template not found" until the
+    # actual template content is available.
+    idl_outputs, idl_summary, idl_scope_lines = generate_idl_connections(
+        ciq_wb, mm_objs, user_id, date_str, log, template_dir=TDIR_MCA_IDL_CRAN, registry=MCA_CRAN_IDL_REGISTRY)
+    outputs += idl_outputs
+    summary_rows += idl_summary
+
     binary_outputs = [(f"Final_Connections_{target.get('Node to be built as','site')}.xlsx", generate_final_connections(ciq_wb, mm_objs))]
     pre_fibers_bytes = generate_pre_fibers(precheck_text)
     if pre_fibers_bytes:
@@ -3195,6 +3766,7 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     raw_deleted_nodes = classification.get("deleted_nodes")  # captured before the CRAN-specific zeroing below
     classification["deleted_nodes"] = []  # every CRAN rehome vacates a source node — not a noteworthy anomaly here, unlike MCA/CENM
     scope_of_work_lines = format_scope_of_work(classification, controller_objs, dss_labels, controller_edp_found, radio_swaps)
+    scope_of_work_lines += idl_scope_lines
     ngs_summary, ngs_scope_lines = generate_ngs_checks(ciq_wb, mm_objs, log)
     summary_rows += ngs_summary
     scope_of_work_lines += ngs_scope_lines
@@ -3223,7 +3795,7 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
 # ============================================================
 
 SCOPE_CHECKLIST = {
-    "CRAN": ["Carrier ADD", "Carrier delete", "Carrier moving", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
+    "CRAN": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
     "MCA": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
     "CENM": ["Carrier ADD", "Carrier delete", "Carrier moving", "IDL Connections", "DSS checks", "Radio swap", "Retune", "6610 Present", "NGS Checks", "Port Conversion"],
     "N2E": ["Carrier ADD", "IDL Connections", "DSS checks", "6610 Present", "SA Conversion", "NGS Checks"],
@@ -3312,545 +3884,6 @@ def render_checks_panel_static(container, top_scope, scope_lines):
             st.markdown('<div class="qkx-checklist">' + "".join(html_rows) + "</div>", unsafe_allow_html=True)
 
 
-
-
-# ============================================================
-# PARAMETER VERIFICATION (MCA / N2E / NSB) — CIQ vs Pre logs vs Onsite logs
-# Category A (rachRootSequence, PCI/nRPCI, Cellrange): expected = Pre for pre-existing/moved
-#   sectors (via Sector Del_Movement for cross-node moves), CIQ for newly added sectors.
-# Category B (EarfcnDL/UL, arfcnDL/UL, bSChannelBwDL/UL, cellLocalId, ssbFrequency, Cell ID,
-#   Bandwidth, noOfTx/RxAntennas, configuredOutputPower, TAC, NR TAC, nCI): expected = CIQ
-#   always; Pre != CIQ is amber (expected retune change), not a failure.
-# NOTE: reportlab is imported lazily inside build_parameter_verification_pdf() only — a new
-# feature dependency must never crash the whole app on startup if it isn't installed yet.
-# ============================================================
-
-
-
-# ============================================================
-# AMOS/moshell hget & get command output parser
-# (validated against real .log / _onsite.txt captures)
-# ============================================================
-
-RULE_RE = re.compile(r'^=+$')
-CMD_RE = re.compile(r'^\S+>\s*h?get\s+(\S+)\s+(.+)$')
-ANY_PROMPT_RE = re.compile(r'^\S+>\s*\S')
-
-
-def _col_bounds(header_line):
-    return [(m.start(), m.group()) for m in re.finditer(r'\S+', header_line)]
-
-
-def _clean_value(raw):
-    raw = raw.strip()
-    if raw == '':
-        return None
-    m = re.match(r'^-?\d+\s+\(([A-Z_]+)\)$', raw)
-    if m:
-        return m.group(1)
-    m = re.match(r'^\[\d+\]\s*=\s*(.+)$', raw)
-    if m:
-        return m.group(1).strip()
-    if re.match(r'^i\[\d+\]\s*=$', raw):
-        return None
-    if raw.lower() == 'true':
-        return True
-    if raw.lower() == 'false':
-        return False
-    return raw
-
-
-def _rebuild_header(lines, start, n):
-    parts = []
-    j = start
-    while j < n and not RULE_RE.match(lines[j].strip()):
-        if lines[j].strip() == '':
-            break
-        parts.append(lines[j])
-        j += 1
-    if not parts or j >= n or not RULE_RE.match(lines[j].strip()):
-        return None, None, j
-    wrap_width = len(parts[0]) if len(parts) > 1 else None
-    return ''.join(parts), wrap_width, j
-
-
-def parse_hget_blocks(text):
-    lines = text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
-    i = 0
-    n = len(lines)
-    while i < n:
-        m = CMD_RE.match(lines[i].strip())
-        if not m:
-            i += 1
-            continue
-        mo_pattern, attrs_str = m.group(1), m.group(2)
-        block_start = i
-        i += 1
-        header_line = None
-        wrap_width = None
-        j = i
-        limit = min(i + 40, n)
-        while j < limit:
-            stripped = lines[j].strip()
-            if ANY_PROMPT_RE.match(stripped):
-                break
-            if RULE_RE.match(stripped):
-                header_line, wrap_width, j = _rebuild_header(lines, j + 1, n)
-                break
-            j += 1
-        if header_line is None:
-            i = block_start + 1
-            continue
-        j += 1
-
-        col_positions = _col_bounds(header_line)
-        # Confirmed real format: some commands (e.g. onsite's "get . cellrange") render as a
-        # PIVOTED "MO / Attribute / Value" table instead of the normal wide table — one row per
-        # (instance, single-attribute) pair rather than one row per instance with all attributes
-        # as columns. Detect and pivot it into the same {instance: {attr: value}} shape.
-        is_pivot = [c for _, c in col_positions] == ['MO', 'Attribute', 'Value']
-        rows = {}
-        k = j
-        while k < n and not RULE_RE.match(lines[k].strip()):
-            line = lines[k]
-            if line.strip() == '':
-                k += 1
-                continue
-            if ANY_PROMPT_RE.match(line.strip()):
-                break
-            row_text = line
-            k += 1
-            if wrap_width is not None:
-                while len(row_text) >= wrap_width and k < n:
-                    nxt = lines[k]
-                    if nxt.strip() == '' or RULE_RE.match(nxt.strip()) or ANY_PROMPT_RE.match(nxt.strip()):
-                        break
-                    row_text += nxt
-                    k += 1
-            bounds = [p[0] for p in col_positions] + [len(row_text)]
-            values = {}
-            for idx, (pos, colname) in enumerate(col_positions):
-                raw = row_text[bounds[idx]:bounds[idx + 1]]
-                values[colname] = _clean_value(raw)
-            if is_pivot:
-                instance = values.get('MO')
-                attr_name = values.get('Attribute')
-                attr_val = values.get('Value')
-                if instance and attr_name:
-                    rows.setdefault(instance, {})[attr_name] = attr_val
-            else:
-                instance = values.get(col_positions[0][1])
-                if instance:
-                    rows[instance] = values
-
-        yield {
-            "mo_type": mo_pattern,
-            "attrs_requested": attrs_str.split('|'),
-            "columns": [c for _, c in col_positions],
-            "rows": rows,
-        }
-        i = k
-
-
-def parse_hget_text(text):
-    return list(parse_hget_blocks(text))
-
-
-def merge_by_instance(blocks, mo_type_filter):
-    merged = {}
-    for b in blocks:
-        if mo_type_filter not in b["mo_type"]:
-            continue
-        for instance, vals in b["rows"].items():
-            merged.setdefault(instance, {}).update(vals)
-    return merged
-
-
-def merge_by_instance_prefix(blocks, instance_prefix):
-    merged = {}
-    for b in blocks:
-        for instance, vals in b["rows"].items():
-            if instance.startswith(instance_prefix):
-                merged.setdefault(instance, {}).update(vals)
-    return merged
-
-
-def top_level(instance_ldn):
-    return ',' not in instance_ldn
-
-
-def pv_load_node_tables(text):
-    """Parse one node's log text into {'lte_cell', 'nr_cell', 'nr_sector', 'lte_sector'} tables."""
-    blocks = parse_hget_text(text)
-    lte = {k: v for k, v in merge_by_instance_prefix(blocks, 'EUtranCellFDD=').items() if top_level(k)}
-    nr_cell = {k: v for k, v in merge_by_instance_prefix(blocks, 'NRCellDU=').items() if top_level(k)}
-    nr_sector = merge_by_instance(blocks, 'Sector')
-    lte_sector = merge_by_instance(blocks, '^SectorCarrier')
-    return {"lte_cell": lte, "nr_cell": nr_cell, "nr_sector": nr_sector, "lte_sector": lte_sector}
-
-
-
-
-# ============================================================
-# CIQ-linked comparison logic
-# ============================================================
-
-CATEGORY_A_LTE = {"rachRootSequence": "rachRootSequence", "PCI": "physicalLayerCellId", "Cellrange": "cellRange"}
-CATEGORY_A_NR = {"nRPCI": "nRPCI", "Cellrange": "cellRange"}
-CATEGORY_B_LTE = {
-    "EarfcnDL": ("earfcndl", "earfcnDl"), "EarfcnUL": ("earfcnul", "earfcnUl"),
-    "Bandwidth": ("dlChannelBandwidth", "dlChannelBandwidth"), "TAC": ("tac", None),
-    "CellID": ("cellId", "cellId"),
-}
-CATEGORY_B_NR = {
-    "arfcnDL": ("arfcnDL", "arfcnDL"), "arfcnUL": ("arfcnUL", "arfcnUL"),
-    "bSChannelBwDL": ("bSChannelBwDL", "bSChannelBwDL"), "bSChannelBwUL": ("bSChannelBwUL", "bSChannelBwUL"),
-    "cellLocalId": ("cellLocalId", "cellLocalId"), "NRTAC": ("nRTAC", "nRTAC"), "nCI": ("nCI", "nCI"),
-}
-
-
-def norm(v):
-    if v is None:
-        return None
-    return str(v).strip()
-
-
-def verdict(post_val, expected_val, category):
-    """Returns (color, note). category: 'A' or 'B'."""
-    p, e = norm(post_val), norm(expected_val)
-    if p is None and e is None:
-        return "gray", "no data"
-    if p is None:
-        return "red", "missing onsite"
-    if e is None:
-        return "amber", "no baseline to compare"
-    if p == e:
-        return "green", "match"
-    return "red", f"expected {e}, got {p}"
-
-
-def build_sector_move_map(ciq_wb):
-    """{target_sector_name: {'source_sector': str, 'source_node': str}} from Sector Del_Movement."""
-    move_map = {}
-    if "Sector Del_Movement" not in ciq_wb.sheetnames:
-        return move_map
-    ws = ciq_wb["Sector Del_Movement"]
-    rows = list(ws.iter_rows(values_only=True))
-    if not rows:
-        return move_map
-    headers = [str(h).strip() if h is not None else "" for h in rows[0]]
-    for r in rows[1:]:
-        d = dict(zip(headers, r))
-        target_sector = d.get("Target Sector")
-        if target_sector:
-            move_map[str(target_sector).strip()] = {
-                "source_sector": d.get("Source Sector"),
-                "source_node": d.get("Source Node name"),
-            }
-    return move_map
-
-
-def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node):
-    """Returns list of {'parameter','category','pre','ciq','post','color','note'}."""
-    ldn = f"EUtranCellFDD={cell_id}"
-    on_cell = onsite_tables["lte_cell"].get(ldn, {})
-    pre_cell = pre_tables["lte_cell"].get(ldn, {})
-
-    is_new = "existing" not in str(ciq_row.get("Carrier Cell Intention", "")).lower()
-    move_info = move_map.get(cell_id)
-    if move_info and move_info.get("source_sector"):
-        src_node = move_info.get("source_node")
-        src_tables = source_pre_tables_by_node.get(src_node)
-        if src_tables:
-            pre_cell = src_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
-
-    def sector_lookup(tables, cell):
-        ref = cell.get("sectorCarrierRef")
-        return tables["lte_sector"].get(ref, {}) if ref else {}
-
-    on_sec = sector_lookup(onsite_tables, on_cell)
-    pre_sec = sector_lookup(pre_tables, pre_cell)
-
-    results = []
-    for param, cell_key in CATEGORY_A_LTE.items():
-        pre_v = pre_cell.get(cell_key)
-        ciq_v = ciq_row.get({"rachRootSequence": "rachRootSequence", "PCI": "PCI", "Cellrange": "cellRange"}.get(param))
-        expected = ciq_v if is_new else pre_v
-        color, note = verdict(on_cell.get(cell_key), expected, "A")
-        results.append({"parameter": param, "category": "A", "pre": pre_v, "ciq": ciq_v,
-                         "post": on_cell.get(cell_key), "color": color, "note": note})
-
-    for param, (cell_key, ciq_key) in CATEGORY_B_LTE.items():
-        ciq_v = ciq_row.get(ciq_key) if ciq_key else None
-        pre_v = pre_cell.get(cell_key)
-        post_v = on_cell.get(cell_key)
-        color, note = verdict(post_v, ciq_v, "B")
-        if color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
-            color, note = "amber", "matches Pre, not yet retuned to CIQ"
-        results.append({"parameter": param, "category": "B", "pre": pre_v, "ciq": ciq_v,
-                         "post": post_v, "color": color, "note": note})
-
-    for label, cell_key in [("TX", "noOfTxAntennas"), ("RX", "noOfRxAntennas")]:
-        ciq_v = ciq_row.get(cell_key)
-        pre_v = pre_sec.get(cell_key)
-        post_v = on_sec.get(cell_key)
-        color, note = verdict(post_v, ciq_v, "B")
-        results.append({"parameter": label, "category": "B", "pre": pre_v, "ciq": ciq_v,
-                         "post": post_v, "color": color, "note": note})
-
-    ciq_v = ciq_row.get("configuredOutputPower")
-    pre_v = pre_sec.get("configuredMaxTxPower")
-    post_v = on_sec.get("configuredMaxTxPower")
-    color, note = verdict(post_v, ciq_v, "B")
-    results.append({"parameter": "ConfiguredOutputPower", "category": "B", "pre": pre_v, "ciq": ciq_v,
-                     "post": post_v, "color": color, "note": note})
-
-    return results
-
-
-def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node):
-    ldn = f"NRCellDU={cell_id}"
-    on_cell = onsite_tables["nr_cell"].get(ldn, {})
-    pre_cell = pre_tables["nr_cell"].get(ldn, {})
-
-    # KNOWN LIMITATION: unlike eUtran Parameters' "Carrier Cell Intention" column, 5G Info has
-    # no equivalent new-vs-existing classification column at all — confirmed by checking its
-    # full header list. A cell explicitly listed in Sector Del_Movement is reliably "existing/
-    # moved", so that case is handled correctly below. For everything else, is_new can't be
-    # determined from 5G Info alone; defaulting to False (treat as existing, use Pre as
-    # expected) is the safer assumption for Category A params, since PCI/nRPCI errors are more
-    # consequential than a newly-added cell being compared against a nonexistent Pre baseline —
-    # but this needs a real classification source to be reliable. Flagging rather than guessing.
-    move_info = move_map.get(cell_id)
-    is_new = False
-    pre_sector_source_tables = pre_tables
-    pre_sector_id = cell_id
-    if move_info and move_info.get("source_sector"):
-        src_node = move_info.get("source_node")
-        src_tables = source_pre_tables_by_node.get(src_node)
-        if src_tables:
-            pre_cell = src_tables["nr_cell"].get(f"NRCellDU={move_info['source_sector']}", pre_cell)
-            pre_sector_source_tables = src_tables
-            pre_sector_id = move_info["source_sector"]
-
-    def sector_lookup(tables, cell_id_key):
-        # Confirmed real key format: this block's instances are "NRSectorCarrier=<cell_id>",
-        # not the bare cell name.
-        return tables["nr_sector"].get(f"NRSectorCarrier={cell_id_key}", {})
-
-    on_sec = sector_lookup(onsite_tables, cell_id)
-    pre_sec = sector_lookup(pre_sector_source_tables, pre_sector_id)
-
-    CATEGORY_A_NR_CIQ_KEYS = {"nRPCI": "nRPCI", "Cellrange": "CellRange"}  # confirmed: 5G Info uses "CellRange", not "cellRange"
-    results = []
-    for param, cell_key in CATEGORY_A_NR.items():
-        pre_v = pre_cell.get(cell_key)
-        ciq_v = ciq_row.get(CATEGORY_A_NR_CIQ_KEYS[param]) if ciq_row else None
-        expected = ciq_v if is_new else pre_v
-        color, note = verdict(on_cell.get(cell_key), expected, "A")
-        results.append({"parameter": param, "category": "A", "pre": pre_v, "ciq": ciq_v,
-                         "post": on_cell.get(cell_key), "color": color, "note": note})
-
-    # Confirmed real bug: arfcnDL/arfcnUL/bSChannelBwDL/bSChannelBwUL only exist in the
-    # NRSectorCarrier ("Sector") table, not NRCellDU — reading them from the cell table
-    # silently returned None always. cellLocalId/nRTAC/nCI live on the cell itself.
-    SECTOR_LEVEL_B_PARAMS = {"arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL"}
-    for param, (cell_key, ciq_key) in CATEGORY_B_NR.items():
-        ciq_v = ciq_row.get(ciq_key) if (ciq_row and ciq_key) else None
-        if param in SECTOR_LEVEL_B_PARAMS:
-            pre_v = pre_sec.get(cell_key)
-            post_v = on_sec.get(cell_key)
-        else:
-            pre_v = pre_cell.get(cell_key)
-            post_v = on_cell.get(cell_key)
-        color, note = verdict(post_v, ciq_v, "B")
-        if color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
-            color, note = "amber", "matches Pre, not yet retuned to CIQ"
-        results.append({"parameter": param, "category": "B", "pre": pre_v, "ciq": ciq_v,
-                         "post": post_v, "color": color, "note": note})
-
-    for label, cell_key in [("TX", "noOfTxAntennas"), ("RX", "noOfRxAntennas")]:
-        pre_v = pre_sec.get(cell_key)
-        post_v = on_sec.get(cell_key)
-        color, note = verdict(post_v, pre_v, "B")  # no CIQ column confirmed for NR TX/RX yet
-        results.append({"parameter": label, "category": "B", "pre": pre_v, "ciq": None,
-                         "post": post_v, "color": color, "note": note})
-
-    ciq_v = ciq_row.get("configuredMaxTxPower") if ciq_row else None
-    pre_v = pre_sec.get("configuredMaxTxPower")
-    post_v = on_sec.get("configuredMaxTxPower")
-    color, note = verdict(post_v, ciq_v, "B")
-    results.append({"parameter": "ConfiguredOutputPower", "category": "B", "pre": pre_v, "ciq": ciq_v,
-                     "post": post_v, "color": color, "note": note})
-
-    return results
-
-
-# ============================================================
-# File-to-node matching + orchestration
-# ============================================================
-
-def match_file_to_node(filename, node_names):
-    """Match an uploaded log filename to a CIQ node name. Confirmed real naming:
-    pre logs are '<NODE>.log', onsite logs are '<NODE>_onsite.txt' — but matches any
-    '<NODE>' prefix followed by '.', '_', or end-of-basename, to tolerate minor variations.
-    Longest node name wins first, to avoid a shorter node name being a false-positive
-    prefix of a longer one (e.g. 'DXL0233' vs 'DXL02330')."""
-    base = re.sub(r'\.(log|txt)$', '', filename, flags=re.IGNORECASE)
-    for node in sorted(node_names, key=len, reverse=True):
-        node_u = str(node).strip()
-        if not node_u:
-            continue
-        if base == node_u or base.startswith(node_u + '_') or base.startswith(node_u + '.'):
-            return node
-    return None
-
-
-def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files):
-    """pre_files / onsite_files: list of (filename, text_content) tuples.
-    Returns {
-        'node_results': {node: {'lte': [(cell_id, [param_result,...]), ...], 'nr': [...]}},
-        'unmatched_pre': [filename,...], 'unmatched_onsite': [filename,...],
-        'nodes_missing_pre': [node,...], 'nodes_missing_onsite': [node,...],
-    }"""
-    node_names = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
-
-    pre_by_node, onsite_by_node = {}, {}
-    unmatched_pre, unmatched_onsite = [], []
-    for fname, text in pre_files:
-        node = match_file_to_node(fname, node_names)
-        if node:
-            pre_by_node[node] = pv_load_node_tables(text)
-        else:
-            unmatched_pre.append(fname)
-    for fname, text in onsite_files:
-        node = match_file_to_node(fname, node_names)
-        if node:
-            onsite_by_node[node] = pv_load_node_tables(text)
-        else:
-            unmatched_onsite.append(fname)
-
-    nodes_missing_pre = [n for n in node_names if n not in pre_by_node]
-    nodes_missing_onsite = [n for n in node_names if n not in onsite_by_node]
-
-    empty_tables = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}}
-    source_pre_by_node = pre_by_node  # for Sector Del_Movement lookups across nodes
-
-    lte_ciq, nr_ciq = {}, {}
-    if "eUtran Parameters" in ciq_wb.sheetnames:
-        ws = ciq_wb["eUtran Parameters"]
-        hdr = [c.value for c in ws[1]]
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            d = dict(zip(hdr, row))
-            if d.get("EutranCellFDDId"):
-                lte_ciq[d["EutranCellFDDId"]] = d
-    if "5G Info" in ciq_wb.sheetnames:
-        ws = ciq_wb["5G Info"]
-        hdr = [c.value for c in ws[1]]
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            d = dict(zip(hdr, row))
-            if d.get("NRCellDU"):
-                nr_ciq[d["NRCellDU"]] = d
-
-    move_map = build_sector_move_map(ciq_wb)
-
-    node_results = {n: {"lte": [], "nr": []} for n in node_names}
-    for cell_id, ciq_row in lte_ciq.items():
-        node = next((n for n in node_names if cell_id.startswith(n)), None)
-        if not node:
-            continue
-        pre_t = pre_by_node.get(node, empty_tables)
-        on_t = onsite_by_node.get(node, empty_tables)
-        results = compare_lte_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node)
-        node_results[node]["lte"].append((cell_id, results))
-
-    for cell_id, ciq_row in nr_ciq.items():
-        node = next((n for n in node_names if cell_id.startswith(n)), None)
-        if not node:
-            continue
-        pre_t = pre_by_node.get(node, empty_tables)
-        on_t = onsite_by_node.get(node, empty_tables)
-        results = compare_nr_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node)
-        node_results[node]["nr"].append((cell_id, results))
-
-    return {
-        "node_results": node_results,
-        "unmatched_pre": unmatched_pre,
-        "unmatched_onsite": unmatched_onsite,
-        "nodes_missing_pre": nodes_missing_pre,
-        "nodes_missing_onsite": nodes_missing_onsite,
-    }
-
-
-def build_parameter_verification_pdf(scope, node_results):
-    """node_results: {node: {'lte': [(cell_id, [param_result,...]),...], 'nr': [...]}}
-    Returns PDF bytes."""
-    # Confirmed real bug: COLOR_MAP/TEXT_COLOR_MAP were defined at MODULE level but referenced
-    # pv_colors, which is only imported inside this function — that raised a NameError at
-    # import time, unconditionally, regardless of whether reportlab was even installed. Moving
-    # both dicts in here, after the lazy imports, is what actually makes the import lazy.
-    from reportlab.lib import colors as pv_colors
-    from reportlab.lib.pagesizes import landscape, letter
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib.units import inch
-
-    COLOR_MAP = {
-        "green": pv_colors.HexColor("#C6EFCE"),
-        "red": pv_colors.HexColor("#FFC7CE"),
-        "amber": pv_colors.HexColor("#FFEB9C"),
-        "gray": pv_colors.HexColor("#E0E0E0"),
-    }
-    TEXT_COLOR_MAP = {
-        "green": pv_colors.HexColor("#006100"),
-        "red": pv_colors.HexColor("#9C0006"),
-        "amber": pv_colors.HexColor("#9C6500"),
-        "gray": pv_colors.HexColor("#555555"),
-    }
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(letter), topMargin=0.4 * inch, bottomMargin=0.4 * inch,
-                             leftMargin=0.4 * inch, rightMargin=0.4 * inch)
-    styles = getSampleStyleSheet()
-    story = [Paragraph(f"{scope} Parameter Verification Report", styles["Title"]), Spacer(1, 12)]
-
-    header = ["Sector", "Parameter", "Pre", "CIQ", "Post", "Status"]
-
-    for node, res in node_results.items():
-        story.append(Paragraph(f"Node: {node}", styles["Heading2"]))
-        for label, cells in (("4G Sectors", res.get("lte", [])), ("5G Sectors", res.get("nr", []))):
-            if not cells:
-                continue
-            story.append(Paragraph(label, styles["Heading3"]))
-            data = [header]
-            row_colors = []
-            for cell_id, results in cells:
-                for r in results:
-                    data.append([cell_id, r["parameter"], str(r["pre"]) if r["pre"] is not None else "",
-                                 str(r["ciq"]) if r["ciq"] is not None else "",
-                                 str(r["post"]) if r["post"] is not None else "", r["note"]])
-                    row_colors.append(r["color"])
-            tbl = Table(data, repeatRows=1, colWidths=[1.5 * inch, 1.4 * inch, 0.9 * inch, 0.9 * inch, 0.9 * inch, 3.4 * inch])
-            style_cmds = [
-                ("BACKGROUND", (0, 0), (-1, 0), pv_colors.HexColor("#4472C4")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), pv_colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 7),
-                ("GRID", (0, 0), (-1, -1), 0.5, pv_colors.grey),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ]
-            for i, color_key in enumerate(row_colors, start=1):
-                bg = COLOR_MAP.get(color_key, pv_colors.white)
-                fg = TEXT_COLOR_MAP.get(color_key, pv_colors.black)
-                style_cmds.append(("BACKGROUND", (5, i), (5, i), bg))
-                style_cmds.append(("TEXTCOLOR", (5, i), (5, i), fg))
-            tbl.setStyle(TableStyle(style_cmds))
-            story.append(tbl)
-            story.append(Spacer(1, 10))
-
-    doc.build(story)
-    return buf.getvalue()
-
-
 # ============================================================
 # UI
 # ============================================================
@@ -3860,9 +3893,10 @@ if "qkx_page" not in st.session_state:
 if "qkx_scope" not in st.session_state:
     st.session_state.qkx_scope = None
 
-def _qkx_go(page, scope=None):
+def _qkx_go(page, scope=None, report_only=False):
     st.session_state.pop("qkx_results", None)
     st.session_state.qkx_page = page
+    st.session_state.qkx_report_only = report_only
     if scope is not None:
         st.session_state.qkx_scope = scope
     st.rerun()
@@ -3966,20 +4000,20 @@ if st.session_state.qkx_page == "home":
         st.caption("Pre-existing sites — MCA, CENM, or CRAN rehome")
         if st.button("MCA", use_container_width=True, key="qkx_card_mca"):
             _qkx_go("family")
-        if st.button("\U0001F50D  MCA - Parameter Verification", use_container_width=True, key="qkx_card_mca_pv"):
-            _qkx_go("paramcheck", "MCA")
+        if st.button("\U0001F4CB  MCA - Generate Report", use_container_width=True, key="qkx_card_mca_report"):
+            _qkx_go("input", "MCA", report_only=True)
     with c2:
         st.caption("Nokia to Ericsson site integration")
         if st.button("N2E", use_container_width=True, key="qkx_card_n2e"):
             _qkx_go("input", "N2E")
-        if st.button("\U0001F50D  N2E - Parameter Verification", use_container_width=True, key="qkx_card_n2e_pv"):
-            _qkx_go("paramcheck", "N2E")
+        if st.button("\U0001F4CB  N2E - Generate Report", use_container_width=True, key="qkx_card_n2e_report"):
+            _qkx_go("input", "N2E", report_only=True)
     with c3:
         st.caption("New site build")
         if st.button("NSB", use_container_width=True, key="qkx_card_nsb"):
             _qkx_go("input", "NSB")
-        if st.button("\U0001F50D  NSB - Parameter Verification", use_container_width=True, key="qkx_card_nsb_pv"):
-            _qkx_go("paramcheck", "NSB")
+        if st.button("\U0001F4CB  NSB - Generate Report", use_container_width=True, key="qkx_card_nsb_report"):
+            _qkx_go("input", "NSB", report_only=True)
 
     st.divider()
     st.subheader("Instructions")
@@ -4024,38 +4058,61 @@ elif st.session_state.qkx_page == "input":
         if st.button("← Back"):
             _qkx_go(back_target)
 
-        st.subheader(f"Inputs — {top_scope}")
-        with st.container(border=True):
-            cran_sub = None
-            if top_scope == "CRAN":
-                cran_sub = st.selectbox("CRAN scope", ["CRAN SA Rehome Trip 1", "CRAN SA Rehome Trip 2", "CRAN NSA Rehome"])
+        hide_inputs = st.session_state.get("qkx_report_only") and "qkx_results" in st.session_state
+        if not hide_inputs:
+            st.subheader(f"Inputs — {top_scope}")
+            with st.container(border=True):
+                cran_sub = None
+                if top_scope == "CRAN":
+                    cran_sub = st.selectbox("CRAN scope", ["CRAN SA Rehome Trip 1", "CRAN SA Rehome Trip 2", "CRAN NSA Rehome"])
 
-            ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"])
-            edp_file = st.file_uploader("EDP (.xlsx / .xls)", type=["xlsx", "xls"])
-            pre_file = None
-            if top_scope not in ("N2E", "NSB"):
-                pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
-            c1, c2 = st.columns(2)
-            with c1:
-                user_id = st.text_input("User ID", placeholder="e.g. pr970b")
-            with c2:
-                date_str = st.text_input("Execution date (mmddyyyy)", value=date.today().strftime("%m%d%Y"))
-            run = st.button("Generate templates →", type="primary", disabled=not (ciq_file and edp_file))
+                ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"])
+                edp_file = st.file_uploader("EDP (.xlsx / .xls)", type=["xlsx", "xls"])
+                pre_file = None
+                if top_scope not in ("N2E", "NSB"):
+                    pre_file = st.file_uploader("Pre-checks (.pdf) — optional", type=["pdf"])
+                post_file, controller_file = None, None
+                if st.session_state.get("qkx_report_only"):
+                    # Post-checks and controller-checks: N2E's GPS/SUP/XMU/controller-checks
+                    # logic needs these too, confirmed this session — gated on report_only
+                    # so plain template generation (no report) doesn't ask for them
+                    # unnecessarily.
+                    post_file = st.file_uploader("Post-checks (.pdf) — required for report checks", type=["pdf"])
+                    controller_file = st.file_uploader(
+                        "6610 Controller checks (.pdf) — required only if a 6610 is present",
+                        type=["pdf"])
+                c1, c2 = st.columns(2)
+                with c1:
+                    user_id = st.text_input("User ID", placeholder="e.g. pr970b")
+                with c2:
+                    date_str = st.text_input("Execution date (mmddyyyy)", value=date.today().strftime("%m%d%Y"))
+                _report_ready = (ciq_file and edp_file and (post_file if st.session_state.get("qkx_report_only") else True))
+                run = st.button("Generate Report \u2192" if st.session_state.get("qkx_report_only") else "Generate templates \u2192",
+                                 type="primary", disabled=not _report_ready)
+        else:
+            run = False
 
     if run or "qkx_results" in st.session_state:
+        report_only = st.session_state.get("qkx_report_only")
         with col_left:
-            log_card = st.container(border=True)
-            with log_card:
+            if report_only:
                 ph_log = st.empty()
+            else:
+                log_card = st.container(border=True)
+                with log_card:
+                    ph_log = st.empty()
             ph_checks_bottom = st.empty()
 
         with col_right:
             ph_checks_top = st.empty()
-            ph_prepost = st.container(border=True)
-            ph_sow = st.container(border=True)
-            ph_siad = st.container(border=True)
-            ph_summary = st.container(border=True)
-            ph_outputs = st.container(border=True)
+            if not report_only:
+                ph_prepost = st.container(border=True)
+                ph_sow = st.container(border=True)
+                ph_siad = st.container(border=True)
+                ph_summary = st.container(border=True)
+                ph_outputs = st.container(border=True)
+            else:
+                ph_prepost = ph_sow = ph_siad = ph_summary = ph_outputs = st.empty()
 
         if run:
             log_lines = []
@@ -4112,6 +4169,16 @@ elif st.session_state.qkx_page == "input":
                 log("Extracting Pre-checks PDF text...")
                 precheck_text = extract_pdf_text(pre_file.read())
 
+            postcheck_text = ""
+            if post_file:
+                log("Extracting Post-checks PDF text...")
+                postcheck_text = extract_pdf_text(post_file.read())
+
+            controller_checks_text = ""
+            if controller_file:
+                log("Extracting 6610 Controller checks PDF text...")
+                controller_checks_text = extract_pdf_text(controller_file.read())
+
             pre_line = post_line = None
             uid = user_id or "xxUserIDxx"
             dstr = date_str or "xxDatexx"
@@ -4146,161 +4213,122 @@ elif st.session_state.qkx_page == "input":
             st.session_state.qkx_results = {
                 "top_scope": top_scope, "scope_lines": scope_lines, "pre_line": pre_line, "post_line": post_line,
                 "siad_rows": siad_rows, "summary_rows": summary_rows, "outputs": outputs, "binary_outputs": binary_outputs,
-                "log_lines": log_lines,
+                "log_lines": log_lines, "mm_objs": mm_objs, "controller_objs": controller_objs, "ciq_wb": ciq_wb,
+                "precheck_text": precheck_text, "postcheck_text": postcheck_text,
+                "controller_checks_text": controller_checks_text, "edp_index": edp_index,
+                "uid": uid, "dstr": dstr,
             }
-            render_checks_panel_animated(ph_checks_top, top_scope, scope_lines)
-            render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
+            if not st.session_state.get("qkx_report_only"):
+                render_checks_panel_animated(ph_checks_top, top_scope, scope_lines)
+                render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
+            else:
+                ph_log.empty()
+                st.rerun()
         else:
             r = st.session_state.qkx_results
             top_scope, scope_lines = r["top_scope"], r["scope_lines"]
             pre_line, post_line = r["pre_line"], r["post_line"]
             siad_rows, summary_rows = r["siad_rows"], r["summary_rows"]
             outputs, binary_outputs = r["outputs"], r["binary_outputs"]
-            ph_log.code("\n".join(r["log_lines"]), language=None)
+            mm_objs, controller_objs, ciq_wb = r["mm_objs"], r["controller_objs"], r["ciq_wb"]
+            precheck_text = r["precheck_text"]
+            postcheck_text = r.get("postcheck_text", "")
+            controller_checks_text = r.get("controller_checks_text", "")
+            edp_index = r.get("edp_index")
+            uid = r.get("uid") or "xxUserIDxx"
+            dstr = r.get("dstr") or "xxDatexx"
+            if not report_only:
+                ph_log.code("\n".join(r["log_lines"]), language=None)
+            else:
+                ph_log.empty()
             ph_checks_top.empty()
-            render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
+            if not st.session_state.get("qkx_report_only"):
+                render_checks_panel_static(ph_checks_bottom, top_scope, scope_lines)
 
-        with ph_prepost:
-            if pre_line and post_line:
-                st.subheader("Pre / Post configuration")
-                st.code(f"Pre Configuration:  {pre_line}\nPost Configuration: {post_line}", language=None)
+        if not st.session_state.get("qkx_report_only"):
+            with ph_prepost:
+                if pre_line and post_line:
+                    st.subheader("Pre / Post configuration")
+                    st.code(f"Pre Configuration:  {pre_line}\nPost Configuration: {post_line}", language=None)
 
-        with ph_sow:
-            if scope_lines:
-                st.subheader("Scope of work summary")
-                st.code("\n".join(scope_lines_to_readable_text(scope_lines)), language=None)
-                with st.expander("Copy tab-separated version for Excel/Notepad"):
-                    st.text_area("Tab-separated (select all, copy, paste into Excel — lands in columns)",
-                                  "\n".join(scope_lines), height=150, key="sow_raw")
+            with ph_sow:
+                if scope_lines:
+                    st.subheader("Scope of work summary")
+                    st.code("\n".join(scope_lines_to_readable_text(scope_lines)), language=None)
+                    with st.expander("Copy tab-separated version for Excel/Notepad"):
+                        st.text_area("Tab-separated (select all, copy, paste into Excel — lands in columns)",
+                                      "\n".join(scope_lines), height=150, key="sow_raw")
 
-        with ph_siad:
-            if siad_rows:
-                st.subheader("SIAD port assignment")
-                st.dataframe(pd.DataFrame(siad_rows), use_container_width=True, hide_index=True)
+            with ph_siad:
+                if siad_rows:
+                    st.subheader("SIAD port assignment")
+                    st.dataframe(pd.DataFrame(siad_rows), use_container_width=True, hide_index=True)
 
-        with ph_summary:
-            st.subheader("Extraction summary")
-            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+            with ph_summary:
+                st.subheader("Extraction summary")
+                st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
 
-        with ph_outputs:
-            if outputs:
-                st.subheader("Generated output")
-                for name, text in outputs:
-                    unresolved = highlight_unresolved(text)
-                    with st.expander(f"{name}  ({str(len(unresolved)) + ' unresolved' if unresolved else 'fully resolved'})"):
-                        st.text_area("Preview", text, height=300, key=name)
-                        st.download_button("Download .txt", text, file_name=name, key=f"dl_{name}")
+            with ph_outputs:
+                if outputs:
+                    st.subheader("Generated output")
+                    for name, text in outputs:
+                        unresolved = highlight_unresolved(text)
+                        with st.expander(f"{name}  ({str(len(unresolved)) + ' unresolved' if unresolved else 'fully resolved'})"):
+                            st.text_area("Preview", text, height=300, key=name)
+                            st.download_button("Download .txt", text, file_name=name, key=f"dl_{name}")
 
-            if binary_outputs:
-                st.subheader("Excel outputs")
-                for name, data in binary_outputs:
-                    st.download_button(f"Download {name}", data, file_name=name, key=f"dl_bin_{name}")
+                if binary_outputs:
+                    st.subheader("Excel outputs")
+                    for name, data in binary_outputs:
+                        st.download_button(f"Download {name}", data, file_name=name, key=f"dl_bin_{name}")
 
-            if outputs or binary_outputs:
-                if len(outputs) + len(binary_outputs) > 1:
-                    zip_buf = io.BytesIO()
-                    with zipfile.ZipFile(zip_buf, "w") as zf:
-                        for name, text in outputs:
-                            zf.writestr(name, text)
-                        for name, data in binary_outputs:
-                            zf.writestr(name, data)
-                    st.download_button("Download all as .zip", zip_buf.getvalue(), file_name="generated_templates.zip")
+                if outputs or binary_outputs:
+                    if len(outputs) + len(binary_outputs) > 1:
+                        zip_buf = io.BytesIO()
+                        with zipfile.ZipFile(zip_buf, "w") as zf:
+                            for name, text in outputs:
+                                zf.writestr(name, text)
+                            for name, data in binary_outputs:
+                                zf.writestr(name, data)
+                        st.download_button("Download all as .zip", zip_buf.getvalue(), file_name="generated_templates.zip")
 
+        if top_scope == "MCA" and st.session_state.get("qkx_report_only"):
+            import importlib
+            # Confirmed bug class (already documented in this project's own handoff notes):
+            # a plain "import X" reuses whatever's cached in sys.modules from an earlier
+            # session even after the file on disk changed — reloading only mca_report_ui
+            # itself doesn't refresh ITS dependencies. Every module mca_report_ui imports
+            # needs its own explicit reload, in dependency order (leaves first).
+            import report_detect, mca_checklist, mca_glue, mca_report_text, mca_completed_logic, mca_xlsm_surgical
+            importlib.reload(report_detect)
+            importlib.reload(mca_checklist)
+            importlib.reload(mca_glue)
+            importlib.reload(mca_report_text)
+            importlib.reload(mca_completed_logic)
+            importlib.reload(mca_xlsm_surgical)
+            import mca_report_ui
+            importlib.reload(mca_report_ui)
+            mca_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_line, scope_lines,
+                                  postcheck_text=postcheck_text, controller_checks_text=controller_checks_text, edp_index=edp_index)
 
-# ---- PARAMETER VERIFICATION (MCA / N2E / NSB) ----
-elif st.session_state.qkx_page == "paramcheck":
-    pv_scope = st.session_state.qkx_scope
-    if st.button("← Back", key="pv_back"):
-        _qkx_go("home")
-    st.subheader(f"Parameter Verification — {pv_scope}")
-    st.caption("Compares CIQ vs Pre logs vs Onsite logs, flags mismatches. "
-               "Upload the CIQ, then all Pre logs and Onsite logs for every node at the site — "
-               "each file is matched to its node automatically by filename.")
+        if top_scope == "N2E" and st.session_state.get("qkx_report_only"):
+            import importlib
+            import mca_completed_logic, n2e_completed_logic, mca_xlsm_surgical
+            importlib.reload(mca_completed_logic)
+            importlib.reload(n2e_completed_logic)
+            importlib.reload(mca_xlsm_surgical)
+            import n2e_report_ui
+            importlib.reload(n2e_report_ui)
+            n2e_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, edp_index, uid, dstr,
+                                  postcheck_text=postcheck_text, controller_checks_text=controller_checks_text)
 
-    with st.container(border=True):
-        pv_ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"], key="pv_ciq")
-        pv_pre_files = st.file_uploader("Pre logs (.log / .txt) — one or more, one per node",
-                                         type=["log", "txt"], accept_multiple_files=True, key="pv_pre")
-        pv_onsite_files = st.file_uploader("Onsite logs (.log / .txt) — one or more, one per node",
-                                            type=["log", "txt"], accept_multiple_files=True, key="pv_onsite")
-        pv_run = st.button("Verify parameters", type="primary", key="pv_run",
-                            disabled=not (pv_ciq_file and pv_pre_files and pv_onsite_files))
-
-    if pv_run:
-        with st.spinner("Parsing logs and comparing against CIQ..."):
-            import openpyxl
-            pv_wb = openpyxl.load_workbook(io.BytesIO(pv_ciq_file.getvalue()), data_only=True)
-            pv_ws = pv_wb["Mixed Mode Info"]
-            pv_rows = list(pv_ws.iter_rows(values_only=True))
-            pv_headers = [str(h).strip() if h is not None else "" for h in pv_rows[0]]
-            pv_mm_objs = [dict(zip(pv_headers, r)) for r in pv_rows[1:] if any(c is not None for c in r)]
-
-            pv_pre_inputs = [(f.name, f.getvalue().decode("utf-8", errors="replace")) for f in pv_pre_files]
-            pv_onsite_inputs = [(f.name, f.getvalue().decode("utf-8", errors="replace")) for f in pv_onsite_files]
-
-            pv_result = run_parameter_verification(pv_wb, pv_mm_objs, pv_pre_inputs, pv_onsite_inputs)
-            st.session_state.pv_results = pv_result
-            st.session_state.pv_scope_ran = pv_scope
-
-    if st.session_state.get("pv_results") and st.session_state.get("pv_scope_ran") == pv_scope:
-        pv_result = st.session_state.pv_results
-
-        if pv_result["unmatched_pre"] or pv_result["unmatched_onsite"]:
-            with st.expander("⚠ Files that didn't match any node in the CIQ", expanded=True):
-                for fn in pv_result["unmatched_pre"]:
-                    st.write(f"Pre log: **{fn}** — no matching node found in Mixed Mode Info")
-                for fn in pv_result["unmatched_onsite"]:
-                    st.write(f"Onsite log: **{fn}** — no matching node found in Mixed Mode Info")
-
-        if pv_result["nodes_missing_pre"] or pv_result["nodes_missing_onsite"]:
-            with st.expander("⚠ CIQ nodes with missing logs", expanded=True):
-                for n in pv_result["nodes_missing_pre"]:
-                    st.write(f"**{n}** — no Pre log uploaded")
-                for n in pv_result["nodes_missing_onsite"]:
-                    st.write(f"**{n}** — no Onsite log uploaded")
-
-        total_green = total_amber = total_red = 0
-        for node, res in pv_result["node_results"].items():
-            for cell_id, results in res["lte"] + res["nr"]:
-                for r in results:
-                    if r["color"] == "green":
-                        total_green += 1
-                    elif r["color"] == "amber":
-                        total_amber += 1
-                    elif r["color"] == "red":
-                        total_red += 1
-
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Matches", total_green)
-        m2.metric("Expected changes", total_amber)
-        m3.metric("Mismatches", total_red)
-
-        for node, res in pv_result["node_results"].items():
-            if not res["lte"] and not res["nr"]:
-                continue
-            with st.expander(f"Node: {node}", expanded=True):
-                for label, cells in (("4G Sectors", res["lte"]), ("5G Sectors", res["nr"])):
-                    if not cells:
-                        continue
-                    st.markdown(f"**{label}**")
-                    rows = []
-                    for cell_id, results in cells:
-                        for r in results:
-                            rows.append({"Sector": cell_id, "Parameter": r["parameter"],
-                                         "Pre": r["pre"], "CIQ": r["ciq"], "Post": r["post"],
-                                         "Status": r["note"], "_color": r["color"]})
-                    df = pd.DataFrame(rows)
-                    color_map = {"green": "#C6EFCE", "red": "#FFC7CE", "amber": "#FFEB9C", "gray": "#E0E0E0"}
-
-                    def _pv_style_row(row):
-                        bg = color_map.get(row["_color"], "white")
-                        return [f"background-color: {bg}"] * len(row)
-
-                    styled = df.drop(columns=["_color"]).style.apply(
-                        lambda row: _pv_style_row(df.loc[row.name]), axis=1)
-                    st.dataframe(styled, use_container_width=True, hide_index=True)
-
-        pv_pdf_bytes = build_parameter_verification_pdf(pv_scope, pv_result["node_results"])
-        st.download_button("Download PDF report", pv_pdf_bytes,
-                            file_name=f"{pv_scope}_Parameter_Verification.pdf",
-                            mime="application/pdf", key="pv_dl_pdf")
+        if top_scope == "NSB" and st.session_state.get("qkx_report_only"):
+            import importlib
+            import mca_completed_logic, nsb_completed_logic, mca_xlsm_surgical
+            importlib.reload(mca_completed_logic)
+            importlib.reload(nsb_completed_logic)
+            importlib.reload(mca_xlsm_surgical)
+            import nsb_report_ui
+            importlib.reload(nsb_report_ui)
+            nsb_report_ui.render(sys.modules[__name__], ciq_wb, mm_objs, controller_objs, edp_index, uid, dstr,
+                                  postcheck_text=postcheck_text, controller_checks_text=controller_checks_text)
