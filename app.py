@@ -4542,7 +4542,7 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
 
 def add_chunked_tables(title, cells, full_param_list):
         if not cells: return
-        # Change this chunk_size to 3 to give the massive 5G numbers room to breathe!
+        # Reduced chunk size to 3 so columns have enough horizontal space
         chunk_size = 3
         chunks = [full_param_list[i:i + chunk_size] for i in range(0, len(full_param_list), chunk_size)]
         
@@ -4564,6 +4564,7 @@ def add_chunked_tables(title, cells, full_param_list):
 
     doc.build(story)
     return buf.getvalue()
+
     
 # ============================================================
 # UI
