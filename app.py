@@ -4395,85 +4395,129 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
         "nodes_missing_onsite": nodes_missing_onsite,
     }
 
-
 def build_parameter_verification_pdf(scope, node_results, has_pre=True):
-    """node_results: {node: {'lte': [(cell_id, [param_result,...]),...], 'nr': [...]}}
-    has_pre=False (N2E/NSB — confirmed against the blueprint, no "pre" column exists anywhere
-    in the N2E_NSB sheet) drops the Pre column entirely, shifting Status to the next index.
-    Returns PDF bytes."""
-    # Confirmed real bug (fixed once, must not regress): COLOR_MAP/TEXT_COLOR_MAP must live
-    # INSIDE this function since they depend on pv_colors, which is only imported here —
-    # defining them at module level raises a NameError at import time, unconditionally.
     from reportlab.lib import colors as pv_colors
     from reportlab.lib.pagesizes import landscape, letter
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import inch
+    import io
 
     COLOR_MAP = {
         "green": pv_colors.HexColor("#C6EFCE"),
         "red": pv_colors.HexColor("#FFC7CE"),
         "amber": pv_colors.HexColor("#FFEB9C"),
-        "gray": pv_colors.HexColor("#E0E0E0"),
     }
-    TEXT_COLOR_MAP = {
-        "green": pv_colors.HexColor("#006100"),
-        "red": pv_colors.HexColor("#9C0006"),
-        "amber": pv_colors.HexColor("#9C6500"),
-        "gray": pv_colors.HexColor("#555555"),
+    
+    blueprint_groups = {
+        "4G Sectors (Category B)": ["EarfcnDL", "EarfcnUL", "TX", "RX", "Bandwidth", "ConfiguredOutputPower", "CellID"],
+        "5G Sectors (Category B)": ["arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "ConfiguredOutputPower", "cellLocalId", "ssbFrequency", "TX", "RX"],
+        "4G Sectors (Category A)": ["rachRootSequence", "PCI", "Cellrange", "TAC"],
+        "5G Sectors (Category A)": ["rachRootSequence", "nRPCI", "Cellrange", "NRTAC", "nCI"]
     }
 
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(letter), topMargin=0.4 * inch, bottomMargin=0.4 * inch,
-                             leftMargin=0.4 * inch, rightMargin=0.4 * inch)
+    doc = SimpleDocTemplate(buf, pagesize=landscape(letter), topMargin=0.3 * inch, bottomMargin=0.3 * inch,
+                             leftMargin=0.3 * inch, rightMargin=0.3 * inch)
     styles = getSampleStyleSheet()
-    story = [Paragraph(f"{scope} Parameter Verification Report", styles["Title"]), Spacer(1, 12)]
+    story = [Paragraph(f"{scope} Parameter Verification Report", styles["Title"]), Spacer(1, 10)]
 
-    if has_pre:
-        header = ["Sector", "Parameter", "Pre", "CIQ", "Post", "Status"]
-        col_widths = [1.5 * inch, 1.4 * inch, 0.9 * inch, 0.9 * inch, 0.9 * inch, 3.4 * inch]
-    else:
-        header = ["Sector", "Parameter", "CIQ", "Post", "Status"]
-        col_widths = [1.5 * inch, 1.4 * inch, 0.9 * inch, 0.9 * inch, 4.3 * inch]
-    status_col = len(header) - 1
+    sub_cols = ["pre", "CIQ", "On site"] if has_pre else ["CIQ", "On site"]
+    sub_col_count = len(sub_cols)
+
+    def build_table_for_group(cells, param_list):
+        if not cells: 
+            return None
+        
+        row0 = ["Sector"]
+        row1 = [""]
+        
+        for p in param_list:
+            row0.extend([p] + [""] * (sub_col_count - 1))
+            row1.extend(sub_cols)
+            
+        row0.append("Comments")
+        row1.append("")
+        
+        data = [row0, row1]
+        style_cmds = [
+            ("BACKGROUND", (0, 0), (-1, 1), pv_colors.HexColor("#1F4E78")),
+            ("TEXTCOLOR", (0, 0), (-1, 1), pv_colors.white),
+            ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 6.5), 
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.5, pv_colors.grey),
+            ("SPAN", (0, 0), (0, 1)), 
+            ("SPAN", (-1, 0), (-1, 1)) 
+        ]
+        
+        col_idx = 1
+        for p in param_list:
+            style_cmds.append(("SPAN", (col_idx, 0), (col_idx + sub_col_count - 1, 0)))
+            col_idx += sub_col_count
+
+        row_idx = 2
+        for cell_id, results in cells:
+            row_data = [cell_id]
+            comments = []
+            
+            res_map = {r["parameter"]: r for r in results}
+            
+            for p in param_list:
+                r = res_map.get(p)
+                if r:
+                    if has_pre:
+                        row_data.append(str(r["pre"]) if r["pre"] is not None else "")
+                    row_data.append(str(r["ciq"]) if r["ciq"] is not None else "")
+                    row_data.append(str(r["post"]) if r["post"] is not None else "")
+                    
+                    if r["color"] in ["red", "amber"]:
+                        comments.append(f"{p}: {r['note']}")
+                        
+                    status_col_offset = 2 if has_pre else 1
+                    col_pos = len(row_data) - 1
+                    bg = COLOR_MAP.get(r["color"], pv_colors.white)
+                    style_cmds.append(("BACKGROUND", (col_pos, row_idx), (col_pos, row_idx), bg))
+                else:
+                    row_data.extend([""] * sub_col_count)
+            
+            row_data.append(" | ".join(comments) if comments else "Match")
+            data.append(row_data)
+            row_idx += 1
+        
+        sector_w = 1.3 * inch
+        comments_w = 2.0 * inch
+        rem_width = 10.4 * inch - sector_w - comments_w
+        data_col_w = rem_width / (len(param_list) * sub_col_count)
+        
+        col_widths = [sector_w] + [data_col_w] * (len(param_list) * sub_col_count) + [comments_w]
+        
+        tbl = Table(data, repeatRows=2, colWidths=col_widths)
+        tbl.setStyle(TableStyle(style_cmds))
+        return tbl
 
     for node, res in node_results.items():
+        if not res["lte"] and not res["nr"]: continue
         story.append(Paragraph(f"Node: {node}", styles["Heading2"]))
-        for label, cells in (("4G Sectors", res.get("lte", [])), ("5G Sectors", res.get("nr", []))):
-            if not cells:
-                continue
-            story.append(Paragraph(label, styles["Heading3"]))
-            data = [header]
-            row_colors = []
-            for cell_id, results in cells:
-                for r in results:
-                    if has_pre:
-                        row = [cell_id, r["parameter"], str(r["pre"]) if r["pre"] is not None else "",
-                               str(r["ciq"]) if r["ciq"] is not None else "",
-                               str(r["post"]) if r["post"] is not None else "", r["note"]]
-                    else:
-                        row = [cell_id, r["parameter"],
-                               str(r["ciq"]) if r["ciq"] is not None else "",
-                               str(r["post"]) if r["post"] is not None else "", r["note"]]
-                    data.append(row)
-                    row_colors.append(r["color"])
-            tbl = Table(data, repeatRows=1, colWidths=col_widths)
-            style_cmds = [
-                ("BACKGROUND", (0, 0), (-1, 0), pv_colors.HexColor("#4472C4")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), pv_colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 7),
-                ("GRID", (0, 0), (-1, -1), 0.5, pv_colors.grey),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ]
-            for i, color_key in enumerate(row_colors, start=1):
-                bg = COLOR_MAP.get(color_key, pv_colors.white)
-                fg = TEXT_COLOR_MAP.get(color_key, pv_colors.black)
-                style_cmds.append(("BACKGROUND", (status_col, i), (status_col, i), bg))
-                style_cmds.append(("TEXTCOLOR", (status_col, i), (status_col, i), fg))
-            tbl.setStyle(TableStyle(style_cmds))
-            story.append(tbl)
-            story.append(Spacer(1, 10))
+        
+        if res["lte"]:
+            story.append(Paragraph("4G Sectors (Category B)", styles["Heading4"]))
+            tbl = build_table_for_group(res["lte"], blueprint_groups["4G Sectors (Category B)"])
+            if tbl: story.extend([tbl, Spacer(1, 8)])
+            
+            story.append(Paragraph("4G Sectors (Category A)", styles["Heading4"]))
+            tbl = build_table_for_group(res["lte"], blueprint_groups["4G Sectors (Category A)"])
+            if tbl: story.extend([tbl, Spacer(1, 8)])
+            
+        if res["nr"]:
+            story.append(Paragraph("5G Sectors (Category B)", styles["Heading4"]))
+            tbl = build_table_for_group(res["nr"], blueprint_groups["5G Sectors (Category B)"])
+            if tbl: story.extend([tbl, Spacer(1, 8)])
+            
+            story.append(Paragraph("5G Sectors (Category A)", styles["Heading4"]))
+            tbl = build_table_for_group(res["nr"], blueprint_groups["5G Sectors (Category A)"])
+            if tbl: story.extend([tbl, Spacer(1, 8)])
 
     doc.build(story)
     return buf.getvalue()
