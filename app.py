@@ -6,11 +6,6 @@ import time
 import zipfile
 from datetime import date
 from pathlib import Path
-from reportlab.lib import colors as pv_colors
-from reportlab.lib.pagesizes import landscape, letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.units import inch
 
 # ============================================================
 # CONFIG
@@ -3326,6 +3321,8 @@ def render_checks_panel_static(container, top_scope, scope_lines):
 # Category B (EarfcnDL/UL, arfcnDL/UL, bSChannelBwDL/UL, cellLocalId, ssbFrequency, Cell ID,
 #   Bandwidth, noOfTx/RxAntennas, configuredOutputPower, TAC, NR TAC, nCI): expected = CIQ
 #   always; Pre != CIQ is amber (expected retune change), not a failure.
+# NOTE: reportlab is imported lazily inside build_parameter_verification_pdf() only — a new
+# feature dependency must never crash the whole app on startup if it isn't installed yet.
 # ============================================================
 
 
@@ -3785,23 +3782,31 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files):
     }
 
 
-COLOR_MAP = {
-    "green": pv_colors.HexColor("#C6EFCE"),
-    "red": pv_colors.HexColor("#FFC7CE"),
-    "amber": pv_colors.HexColor("#FFEB9C"),
-    "gray": pv_colors.HexColor("#E0E0E0"),
-}
-TEXT_COLOR_MAP = {
-    "green": pv_colors.HexColor("#006100"),
-    "red": pv_colors.HexColor("#9C0006"),
-    "amber": pv_colors.HexColor("#9C6500"),
-    "gray": pv_colors.HexColor("#555555"),
-}
-
-
 def build_parameter_verification_pdf(scope, node_results):
     """node_results: {node: {'lte': [(cell_id, [param_result,...]),...], 'nr': [...]}}
     Returns PDF bytes."""
+    # Confirmed real bug: COLOR_MAP/TEXT_COLOR_MAP were defined at MODULE level but referenced
+    # pv_colors, which is only imported inside this function — that raised a NameError at
+    # import time, unconditionally, regardless of whether reportlab was even installed. Moving
+    # both dicts in here, after the lazy imports, is what actually makes the import lazy.
+    from reportlab.lib import colors as pv_colors
+    from reportlab.lib.pagesizes import landscape, letter
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+
+    COLOR_MAP = {
+        "green": pv_colors.HexColor("#C6EFCE"),
+        "red": pv_colors.HexColor("#FFC7CE"),
+        "amber": pv_colors.HexColor("#FFEB9C"),
+        "gray": pv_colors.HexColor("#E0E0E0"),
+    }
+    TEXT_COLOR_MAP = {
+        "green": pv_colors.HexColor("#006100"),
+        "red": pv_colors.HexColor("#9C0006"),
+        "amber": pv_colors.HexColor("#9C6500"),
+        "gray": pv_colors.HexColor("#555555"),
+    }
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(letter), topMargin=0.4 * inch, bottomMargin=0.4 * inch,
                              leftMargin=0.4 * inch, rightMargin=0.4 * inch)
