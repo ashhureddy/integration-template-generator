@@ -4155,9 +4155,7 @@ def build_sector_move_map(ciq_wb):
             }
     return move_map
 
-
 def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node, scope="MCA"):
-    """Returns list of {'parameter','category','pre','ciq','post','color','note'}."""
     has_pre = scope not in NO_PRE_SCOPES
     ldn = f"EUtranCellFDD={cell_id}"
     on_cell = onsite_tables["lte_cell"].get(ldn, {})
@@ -4167,10 +4165,8 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sour
     if has_pre:
         move_info = move_map.get(cell_id)
         if move_info and move_info.get("source_sector"):
-            src_node = move_info.get("source_node")
-            src_tables = source_pre_tables_by_node.get(src_node)
-            if src_tables:
-                pre_cell = src_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
+            # Look up directly in global table
+            pre_cell = pre_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
 
     def sector_lookup(tables, cell):
         ref = cell.get("sectorCarrierRef")
@@ -4222,35 +4218,20 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
     on_cell = onsite_tables["nr_cell"].get(ldn, {})
     pre_cell = pre_tables["nr_cell"].get(ldn, {}) if has_pre else {}
 
-    # KNOWN LIMITATION (MCA only — moot for N2E/NSB, which never use Pre at all): unlike
-    # eUtran Parameters' "Carrier Cell Intention" column, 5G Info has no equivalent new-vs-
-    # existing classification column at all — confirmed by checking its full header list. A
-    # cell explicitly listed in Sector Del_Movement is reliably "existing/moved", so that case
-    # is handled correctly below. For everything else, is_new can't be determined from 5G Info
-    # alone; defaulting to False (treat as existing, use Pre as expected) is the safer
-    # assumption, since PCI/nRPCI errors are more consequential than a newly-added cell being
-    # compared against a nonexistent Pre baseline — but this needs a real classification source
-    # to be fully reliable. Flagging rather than guessing.
     is_new = True if not has_pre else False
-    pre_sector_source_tables = pre_tables
     pre_sector_id = cell_id
     if has_pre:
         move_info = move_map.get(cell_id)
         if move_info and move_info.get("source_sector"):
-            src_node = move_info.get("source_node")
-            src_tables = source_pre_tables_by_node.get(src_node)
-            if src_tables:
-                pre_cell = src_tables["nr_cell"].get(f"NRCellDU={move_info['source_sector']}", pre_cell)
-                pre_sector_source_tables = src_tables
-                pre_sector_id = move_info["source_sector"]
+            # Look up directly in global table
+            pre_cell = pre_tables["nr_cell"].get(f"NRCellDU={move_info['source_sector']}", pre_cell)
+            pre_sector_id = move_info["source_sector"]
 
     def sector_lookup(tables, cell_id_key):
-        # Confirmed real key format: this block's instances are "NRSectorCarrier=<cell_id>",
-        # not the bare cell name.
         return tables["nr_sector"].get(f"NRSectorCarrier={cell_id_key}", {})
 
     on_sec = sector_lookup(onsite_tables, cell_id)
-    pre_sec = sector_lookup(pre_sector_source_tables, pre_sector_id) if has_pre else {}
+    pre_sec = sector_lookup(pre_tables, pre_sector_id) if has_pre else {}
 
     results = []
     for param, cell_key in CATEGORY_A_NR.items():
@@ -4261,9 +4242,6 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
         results.append({"parameter": param, "category": "A", "pre": pre_v, "ciq": ciq_v,
                          "post": on_cell.get(cell_key), "color": color, "note": note})
 
-    # Confirmed real bug: arfcnDL/arfcnUL/bSChannelBwDL/bSChannelBwUL only exist in the
-    # NRSectorCarrier ("Sector") table, not NRCellDU — reading them from the cell table
-    # silently returned None always. cellLocalId/ssbFrequency live on the cell itself.
     SECTOR_LEVEL_B_PARAMS = {"arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL"}
     for param, (cell_key, ciq_key) in CATEGORY_B_NR.items():
         ciq_v = ciq_row.get(ciq_key) if (ciq_row and ciq_key) else None
@@ -4282,7 +4260,7 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
     for label, cell_key in [("TX", "noOfTxAntennas"), ("RX", "noOfRxAntennas")]:
         pre_v = pre_sec.get(cell_key)
         post_v = on_sec.get(cell_key)
-        color, note = verdict(post_v, pre_v, "B")  # no CIQ column confirmed for NR TX/RX yet
+        color, note = verdict(post_v, pre_v, "B")
         results.append({"parameter": label, "category": "B", "pre": pre_v, "ciq": None,
                          "post": post_v, "color": color, "note": note})
 
@@ -4434,7 +4412,11 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
             ("BACKGROUND", (0, 0), (-1, 1), pv_colors.HexColor("#1F4E78")),
             ("TEXTCOLOR", (0, 0), (-1, 1), pv_colors.white),
             ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 6.5), 
+            ("FONTSIZE", (0, 0), (-1, -1), 5.5), 
+            ("LEFTPADDING", (0, 0), (-1, -1), 1.5), 
+            ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("GRID", (0, 0), (-1, -1), 0.5, pv_colors.grey),
@@ -4451,7 +4433,6 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
         for cell_id, results in cells:
             row_data = [cell_id]
             comments = []
-            
             res_map = {r["parameter"]: r for r in results}
             
             for p in param_list:
@@ -4465,7 +4446,6 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
                     if r["color"] in ["red", "amber"]:
                         comments.append(f"{p}: {r['note']}")
                         
-                    status_col_offset = 2 if has_pre else 1
                     col_pos = len(row_data) - 1
                     bg = COLOR_MAP.get(r["color"], pv_colors.white)
                     style_cmds.append(("BACKGROUND", (col_pos, row_idx), (col_pos, row_idx), bg))
@@ -4476,8 +4456,8 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
             data.append(row_data)
             row_idx += 1
         
-        sector_w = 1.3 * inch
-        comments_w = 2.0 * inch
+        sector_w = 1.2 * inch
+        comments_w = 1.9 * inch
         rem_width = 10.4 * inch - sector_w - comments_w
         data_col_w = rem_width / (len(param_list) * sub_col_count)
         
@@ -4511,7 +4491,6 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True):
 
     doc.build(story)
     return buf.getvalue()
-
 
 
 # ============================================================
