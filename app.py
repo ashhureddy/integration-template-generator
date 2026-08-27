@@ -68,7 +68,7 @@ TDIR_STATIC = Path(__file__).parent / "templates" / "Static"
 TDIR_MCA_IDL_CRAN = Path(__file__).parent / "templates" / "MCA" / "IDL_CRAN"
 TPL_NSB_MMBB = TDIR_NSB / "LTE+5G_MMBB_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V13.txt"
 TPL_NSB_TRIMODE = TDIR_NSB / "TRIMODE_Integration_NSB_Procedure_with_LTE_or_5G_Node_as_Primary_CMCLI_Updated_V6.txt"
-TPL_NSB_SMBB_LTE = TDIR_NSB / "LTE_Integration_NSB_Procedure_with_LTE_as_Primary_CMCLI_Updated_V1.txt"
+TPL_NSB_SMBB_LTE = TDIR_NSB / "LTE_Integration_NSB_Procedure_with_LTE_as_Primary_CMCLI_Updated_1.txt"
 
 # ============================================================
 # SHARED HELPERS
@@ -3113,35 +3113,36 @@ def parse_ciq_unlock_inventory(ciq_wb, mm_objs):
 
 
 def _unlock_block(inv, node):
-    """Command lines for one node, matching the Unlock template verbatim.
+    """Command lines for one node, matching the Unlock template.
 
-    Only EUtrancellFDD is enumerated one line per cell (the template leaves
-    'EUtranCellFDDid==' blank to be filled in). Every other MO uses the template's own wildcard
-    form — NRCellDU, NRSectorCarrier, SectorEquipmentFunction, the XMU/AAS/RRU radios and the
-    TermPoints are all '==*', so they are single fixed lines and are NOT expanded per cell.
+    EUtrancellFDD, NRCellDU and NRSectorCarrier are the three MOs the template marks
+    '(generate from CIQ parameters)' — each is enumerated one line per instance from the CIQ,
+    the same way EUtrancellFDD always was. The '==*' shown for NRCellDU/NRSectorCarrier in the
+    template text is a placeholder for that per-instance value, not a literal wildcard.
 
-    Exact spelling is preserved from the template, including the two places that use a COLON
-    rather than '=' ('administrativeState:UNLOCKED' on NRSectorCarrier, and
-    'administrativeState:LOCKED' in the lock section) and the doubled spaces before --force.
-    These are reproduced as-is rather than normalised, so the generated file is byte-comparable
-    against the template.
+    SectorEquipmentFunction, the XMU/AAS/RRU radios and the four TermPoints are marked
+    '(Static command, just the node id will change)' — these stay single fixed '==*' lines.
+    The AAS line is always emitted, not conditional on the node having a CBAND/DOD radio.
 
-    The AAS line is always emitted, as in the template — it is not conditional on the node
-    having a CBAND/DOD radio.
+    Exact spacing/casing is preserved from the template rather than normalised (including the
+    inconsistent spacing across the four TermPoint lines and the colon on NRSectorCarrier's
+    administrativeState), so the generated file is byte-comparable against the template.
     """
     lines = ["######### UNLOCK Commands #########"]
     for c in inv["lte"].get(node, []):
-        lines.append(f"cmedit set {node} EUtrancellFDD.(EUtranCellFDDid=={c}) administrativeState=UNLOCKED")
-    lines.append(f"cmedit set {node} NRCellDU.NRCellDUId==* administrativeState=UNLOCKED  --force")
-    lines.append(f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId==* administrativeState:UNLOCKED --force")
+        lines.append(f"cmedit set {node} EUtrancellFDD.(EUtranCellFDDid=={c}) administrativeState=UNLOCKED  --force")
+    for c in inv["nr"].get(node, []):
+        lines.append(f"cmedit set {node} NRCellDU.NRCellDUId=={c} administrativeState=UNLOCKED  --force")
+    for c in inv["nsc"].get(node, []):
+        lines.append(f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId=={c} administrativeState:UNLOCKED --force")
     lines.append(f"cmedit set {node} SectorEquipmentFunction.sectorEquipmentFunctionId==* administrativeState=UNLOCKED")
     lines.append(f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId==XMU* administrativeState=UNLOCKED")
     lines.append(f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId==AAS* administrativeState=UNLOCKED")
     lines.append(f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId==RRU* administrativeState=UNLOCKED")
-    lines.append(f"cmedit set {node} TermPointToMme.termPointToMmeId==* administrativeState=UNLOCKED --force")
-    lines.append(f"cmedit set {node} TermPointToENB.termPointToENBId==* administrativeState=UNLOCKED --force")
-    lines.append(f"cmedit set {node} TermPointToGNodeB.termPointToGNodeBId==* administrativeState=UNLOCKED --force")
-    lines.append(f"cmedit set {node} TermPointToGNB.termPointToGNBId==* administrativeState=UNLOCKED --force")
+    lines.append(f"cmedit set {node} TermPointToMme.termPointToMmeId==* administrativeState=UNLOCKED  -ALL --force")
+    lines.append(f"cmedit set {node} TermPointToENB.termPointToENBId==* administrativeState=UNLOCKED -ALL --force")
+    lines.append(f"cmedit set {node} TermPointToGNodeB.termPointToGNodeBId==* administrativeState=UNLOCKED  -ALL --force")
+    lines.append(f"cmedit set {node} TermPointToGNB.termPointToGNBId==* administrativeState=UNLOCKED  -ALL --force")
 
     # The Unlocking file carries its own lock section, so the engineer who unlocked the site has
     # the commands to put it back down without switching files. It is part of the template and
@@ -3150,8 +3151,10 @@ def _unlock_block(inv, node):
     lines.append("###lock commands####")
     for c in inv["lte"].get(node, []):
         lines.append(f"cmedit set {node} EUtrancellFDD.(EUtranCellFDDid=={c}) administrativeState=SHUTTINGDOWN  --force")
-    lines.append(f"cmedit set {node} NRCellDU.NRCellDUId==* administrativeState=SHUTTINGDOWN   --force")
-    lines.append(f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId==* administrativeState:LOCKED")
+    for c in inv["nr"].get(node, []):
+        lines.append(f"cmedit set {node} NRCellDU.NRCellDUId=={c} administrativeState=SHUTTINGDOWN   --force")
+    for c in inv["nsc"].get(node, []):
+        lines.append(f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId=={c} administrativeState:LOCKED  --force")
     return lines
 
 
@@ -4853,6 +4856,14 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sour
     ldn = f"EUtranCellFDD={cell_id}"
     on_cell = onsite_tables["lte_cell"].get(ldn, {})
     pre_cell = pre_tables["lte_cell"].get(ldn, {}) if has_pre else {}
+    # Tracks which node's tables pre_cell actually came from, so the sector-level lookup below
+    # (TX/RX/ConfiguredOutputPower, which live on lte_sector, not lte_cell) can be resolved from
+    # the SAME node — own node normally, but the moved sector's SOURCE node once pre_cell is
+    # reassigned below. Using the own node's pre_tables here for a moved sector looked up a
+    # sectorCarrierRef that only exists in the source node's tables, so it silently returned {}
+    # and every moved sector showed Pre as NA for these three parameters even though rach/PCI/
+    # Cellrange (which read pre_cell directly) resolved correctly.
+    pre_cell_tables = pre_tables
 
     is_new = True if not has_pre else ("existing" not in str(ciq_row.get("Carrier Cell Intention", "")).lower())
     if has_pre:
@@ -4864,7 +4875,10 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sour
             src_tables = (source_pre_tables_by_node or {}).get(src_node) \
                          or (all_onsite_by_node or {}).get(src_node)
             if src_tables:
-                pre_cell = src_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
+                _found = src_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}")
+                if _found:
+                    pre_cell = _found
+                    pre_cell_tables = src_tables
         if not pre_cell:
             # C-band / DoD movement: the sector physically moves from one node's pole to
             # another's. In Pre it is still on the OTHER node; in Post it is on the target node
@@ -4875,6 +4889,7 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sour
                 _found = (_other.get("lte_cell") or {}).get(ldn)
                 if _found:
                     pre_cell = _found
+                    pre_cell_tables = _other
                     break
 
     def sector_lookup(tables, cell):
@@ -4882,7 +4897,7 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sour
         return tables["lte_sector"].get(ref, {}) if ref else {}
 
     on_sec = sector_lookup(onsite_tables, on_cell)
-    pre_sec = sector_lookup(pre_tables, pre_cell) if has_pre else {}
+    pre_sec = sector_lookup(pre_cell_tables, pre_cell) if has_pre else {}
 
     results = []
     for param, cell_key in CATEGORY_A_LTE.items():
@@ -4958,6 +4973,10 @@ def _rilink_for_sector(onsite_tables, sector_suffix):
 
 
 _PORT_BLANKS = {"", "N/A", "NA", "NONE", "NOT USED", "-", "--"}
+
+
+def _sort_ports(ports):
+    return sorted(ports, key=lambda p: (p[:1].isdigit(), p))
 
 
 def _ciq_bbu_ports(ciq_row, gen):
@@ -5040,7 +5059,7 @@ def _ciq_radio_ports(ciq_row):
     return out
 
 
-def check_rilinks(cell_id, ciq_row, gen, node, onsite_by_node, onsite_tables):
+def check_rilinks(cell_id, ciq_row, gen, node, onsite_by_node, onsite_tables, ciq_lookup=None):
     """Rilinks verification, driven by the CIQ's RADIO MAPPING rather than by the antenna
     (RetSubUnit) chain.
 
@@ -5065,6 +5084,11 @@ def check_rilinks(cell_id, ciq_row, gen, node, onsite_by_node, onsite_tables):
     RiPort, which is exactly what the node shows. Operational state is deliberately not
     considered: a link can be DISABLED at capture time and still be scripted on the right port.
 
+    Note: 'eUtran Parameters' repeats 'DUS / XMU Port' as a second, unrelated column further
+    along the sheet (confirmed real, not a duplicate of the same data). ciq_row must be built
+    keeping the FIRST occurrence of that header — done once, in run_parameter_verification's
+    row loop — or this reads the wrong block entirely.
+
     Returns {'ciq','post','color','note','radios'}."""
     own = onsite_by_node.get(node) if (onsite_by_node and node in onsite_by_node) else onsite_tables
     own = own or {}
@@ -5086,8 +5110,8 @@ def check_rilinks(cell_id, ciq_row, gen, node, onsite_by_node, onsite_tables):
             if want_data and dp and dp not in want_data:
                 wrong_data.append(f"{port}\u2192{dp}")
 
-    ciq_text = " | ".join(ciq_ports) if ciq_ports else None
-    post_text = " | ".join(found) if found else None
+    ciq_text = " | ".join(_sort_ports(ciq_ports)) if ciq_ports else None
+    post_text = " | ".join(_sort_ports(found)) if found else None
 
     if not ciq_ports:
         color, note = "amber", "CIQ has no BBU/XMU port for this sector"
@@ -5111,7 +5135,8 @@ def check_rilinks(cell_id, ciq_row, gen, node, onsite_by_node, onsite_tables):
 
 
 def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, all_onsite_tables=None,
-                              all_pre_tables=None, node=None, onsite_by_node=None, pre_by_node=None):
+                              all_pre_tables=None, node=None, onsite_by_node=None, pre_by_node=None,
+                              ciq_lookup=None):
     """FDD naming / Rilinks / sector carrier / ISDLONLY / NRCELL CU naming — confirmed against
     blueprint row 1 (temp_blueprint.xlsx, both sheets): CIQ vs On-site only, no Pre column at
     all for this table in either MCA or N2E_NSB. Columns generated per gen ('lte' or 'nr') —
@@ -5136,7 +5161,7 @@ def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, a
     # Rilinks — verified from the CIQ's radio mapping (see check_rilinks). The CIQ states the
     # BBU/XMU RiPort(s) this sector is cabled on and its radio-side DATA port; the onsite RiLink
     # table states what is actually scripted on those ports. Multiple ports join with " | ".
-    _rl = check_rilinks(cell_id, ciq_row, gen, node, onsite_by_node, onsite_tables)
+    _rl = check_rilinks(cell_id, ciq_row, gen, node, onsite_by_node, onsite_tables, ciq_lookup=ciq_lookup)
     results.append({"parameter": "Rilinks", "ciq": _rl["ciq"], "post": _rl["post"],
                      "color": _rl["color"], "note": _rl["note"]})
 
@@ -5442,8 +5467,21 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
     if "eUtran Parameters" in ciq_wb.sheetnames:
         ws = ciq_wb["eUtran Parameters"]
         hdr = [c.value for c in ws[1]]
+        # Confirmed real: 'eUtran Parameters' repeats 'DUS / XMU' / 'DUS / XMU Port' /
+        # 'DUS / XMU Port Expansion' as a SECOND, unrelated column block further along the
+        # sheet (not a duplicate of the same data — confirmed real values differ, e.g. first
+        # block 'D' / port letter on the DUS, second block 'XMU1' / port '10' on an XMU that
+        # this cell isn't actually cascaded through). A plain dict(zip(hdr, row)) silently
+        # keeps the LAST occurrence, so every LTE cell's real scripted port was being
+        # overwritten by this second block's unrelated value. The first occurrence of each
+        # duplicated header is the one that actually describes this cell's own radio.
+        _seen_cols = {}
+        for _i, _h in enumerate(hdr):
+            _hs = str(_h).strip() if _h is not None else ""
+            if _hs and _hs not in _seen_cols:
+                _seen_cols[_hs] = _i
         for row in ws.iter_rows(min_row=2, values_only=True):
-            d = dict(zip(hdr, row))
+            d = {_h: row[_i] for _h, _i in _seen_cols.items() if _i < len(row)}
             if d.get("EutranCellFDDId"):
                 # LTE tac is on the 'eNB Info' tab, not this one — resolve it per node here so
                 # the comparison sees it as a normal CIQ value. Match on eNBId first (this
@@ -5467,6 +5505,10 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
                 nr_ciq[d["NRCellDU"]] = d
 
     move_map = move_map_early
+    # A single lookup so a cell's row can find its co-located sibling regardless of which
+    # sheet (eUtran Parameters vs 5G Info) that sibling lives on — a 4G carrier's
+    # "Co-Located Technology Cell" can name a 5G cell and vice versa.
+    ciq_lookup = {**lte_ciq, **nr_ciq, "__nr_ids__": set(nr_ciq)}
 
     node_results = {n: {"lte": [], "nr": [], "naming_lte": [], "naming_nr": []} for n in node_names}
     for cell_id, ciq_row in lte_ciq.items():
@@ -5481,7 +5523,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
         node_results[node]["naming_lte"].append((cell_id, verify_naming_and_config(
             cell_id, ciq_row, on_t, pre_t, "lte",
             all_onsite_tables=list(onsite_by_node.values()), all_pre_tables=list(pre_by_node.values()),
-            node=node, onsite_by_node=onsite_by_node, pre_by_node=pre_by_node)))
+            node=node, onsite_by_node=onsite_by_node, pre_by_node=pre_by_node, ciq_lookup=ciq_lookup)))
 
     for cell_id, ciq_row in nr_ciq.items():
         node = _owner_node(cell_id)
@@ -5496,7 +5538,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
         node_results[node]["naming_nr"].append((cell_id, verify_naming_and_config(
             cell_id, ciq_row, on_t, pre_t, "nr",
             all_onsite_tables=list(onsite_by_node.values()), all_pre_tables=list(pre_by_node.values()),
-            node=node, onsite_by_node=onsite_by_node, pre_by_node=pre_by_node)))
+            node=node, onsite_by_node=onsite_by_node, pre_by_node=pre_by_node, ciq_lookup=ciq_lookup)))
 
     for node, res in node_results.items():
         res["_wide_lte"] = pivot_param_results(res["lte"], "lte", has_pre)
