@@ -4628,7 +4628,9 @@ CATEGORY_A_NR_CIQ_KEYS = {"rachRootSequence": "rachRootSequence", "nRPCI": "nRPC
                            "Cellrange": "CellRange"}  # confirmed: 5G Info uses "CellRange", not "cellRange"
 CATEGORY_B_LTE = {
     "EarfcnDL": ("earfcndl", "earfcnDl"), "EarfcnUL": ("earfcnul", "earfcnUl"),
-    "Bandwidth": ("dlChannelBandwidth", "dlChannelBandwidth"),
+    # LTE bandwidth is verified per direction, matching the MO/CIQ column names exactly.
+    "dlChannelBandwidth": ("dlChannelBandwidth", "dlChannelBandwidth"),
+    "ulChannelBandwidth": ("ulChannelBandwidth", "ulChannelBandwidth"),
     "CellID": ("cellId", "cellId"),
     # LTE tac is a node-level value on the CIQ's 'eNB Info' tab, injected per row under
     # CIQ_TAC_KEY by run_parameter_verification().
@@ -4704,16 +4706,13 @@ def blueprint_comment(param, color, is_new, gen):
     return group_mismatch_comment([param], "")
 
 
-# Category-B comment groups. The parameter list printed inside [Parameter - ...] is built from
-# the parameters that ACTUALLY mismatched on that row, not from a fixed string naming the whole
-# group — so a row where only EarfcnDL is wrong reads "[Parameter - EarfcnDL]", not the full
-# "BW/Erfcndl/erfcnul/cell id". The second element is the fixed advice appended after it.
+# Category-B comment groups: (parameters, fixed advice tail). See group_mismatch_comment().
 _RETUNE_TAIL = "Verify the Revision history for retune."
 _SWAP_TAIL = "Verify for the Radio swap"
 
 COMMENT_GROUPS_LTE = [
     (("rachRootSequence", "PCI", "Cellrange"), None),  # Category A — is_new-aware wording
-    (("EarfcnDL", "EarfcnUL", "Bandwidth", "CellID"), _RETUNE_TAIL),
+    (("EarfcnDL", "EarfcnUL", "dlChannelBandwidth", "ulChannelBandwidth", "CellID"), _RETUNE_TAIL),
     (("TX", "RX", "ConfiguredOutputPower"), _SWAP_TAIL),
     (("TAC",), ""),
 ]
@@ -4721,18 +4720,23 @@ COMMENT_GROUPS_NR = [
     (("rachRootSequence", "nRPCI", "Cellrange"), None),  # Category A
     (("arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "cellLocalId", "ssbFrequency"),
      _RETUNE_TAIL),
-    (("TX", "RX", "ConfiguredOutputPower"), _SWAP_TAIL),
+    (("ConfiguredOutputPower",), _SWAP_TAIL),
     (("NRTAC", "nCI"), ""),
 ]
 
 
 def group_mismatch_comment(triggered_params, tail):
-    """Category-B mismatch comment. The parameter name is deliberately NOT printed — the cell
-    that mismatched is already highlighted red in its own column, so naming it again in the
-    comment is redundant. Only the advice that belongs to the group is printed."""
+    """Category-B mismatch comment: 'Mismatch found on [Parameter - A/B], <advice>'.
+
+    The parameter list is built from the parameters that ACTUALLY mismatched on that row, not
+    from a fixed string naming the whole group — a row where only EarfcnDL is wrong reads
+    "[Parameter - EarfcnDL]", not "BW/Erfcndl/erfcnul/cell id". The advice tail is the group's
+    fixed text ("Verify the Revision history for retune." / "Verify for the Radio swap"); an
+    empty tail (TAC, NRTAC, nCI) prints the parameter list with no advice."""
     if not triggered_params:
         return ""
-    return f"Mismatch found, {tail}" if tail else "Mismatch found"
+    body = f"Mismatch found on [Parameter - {'/'.join(triggered_params)}]"
+    return f"{body}, {tail}" if tail else body
 
 
 def pivot_param_results(cells, gen, has_pre):
@@ -4835,7 +4839,8 @@ def build_sector_move_map(ciq_wb):
     return move_map
 
 
-def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node, scope="MCA"):
+def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node,
+                      scope="MCA", all_onsite_by_node=None):
     """Returns list of {'parameter','category','pre','ciq','post','color','note'}."""
     has_pre = scope not in NO_PRE_SCOPES
     ldn = f"EUtranCellFDD={cell_id}"
@@ -4847,7 +4852,10 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sour
         move_info = move_map.get(cell_id)
         if move_info and move_info.get("source_sector"):
             src_node = move_info.get("source_node")
-            src_tables = source_pre_tables_by_node.get(src_node)
+            # Same rule for 4G: the moved sector's Pre values come from the SOURCE node's own
+            # cell, not from the target node (where the sector didn't exist before the move).
+            src_tables = (source_pre_tables_by_node or {}).get(src_node) \
+                         or (all_onsite_by_node or {}).get(src_node)
             if src_tables:
                 pre_cell = src_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
         if not pre_cell:
@@ -5200,7 +5208,7 @@ def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, a
 
 
 def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node,
-                     scope="MCA", node_has_pre=False):
+                     scope="MCA", node_has_pre=False, all_onsite_by_node=None):
     has_pre = scope not in NO_PRE_SCOPES
     ldn = f"NRCellDU={cell_id}"
     on_cell = onsite_tables["nr_cell"].get(ldn, {})
@@ -5227,11 +5235,19 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
         move_info = move_map.get(cell_id)
         if move_info and move_info.get("source_sector"):
             src_node = move_info.get("source_node")
-            src_tables = source_pre_tables_by_node.get(src_node)
+            # A moved sector's "Pre" is the SOURCE node's state for the SOURCE cell: 700 that
+            # moved from node 1 to node 2 must have node 1's 700 values compared against node 2's
+            # 700 values in Post. The source node's Pre log is the right source; if it wasn't
+            # uploaded, its onsite capture is tried as a last resort (it still holds the sector
+            # if it was taken before the cell was deleted from that node).
+            src_tables = (source_pre_tables_by_node or {}).get(src_node) \
+                         or (all_onsite_by_node or {}).get(src_node)
             if src_tables:
-                pre_cell = src_tables["nr_cell"].get(f"NRCellDU={move_info['source_sector']}", pre_cell)
-                pre_sector_source_tables = src_tables
-                pre_sector_id = move_info["source_sector"]
+                _src_ldn = f"NRCellDU={move_info['source_sector']}"
+                if _src_ldn in (src_tables.get("nr_cell") or {}):
+                    pre_cell = src_tables["nr_cell"][_src_ldn]
+                    pre_sector_source_tables = src_tables
+                    pre_sector_id = move_info["source_sector"]
         if not pre_cell:
             # Same C-band / DoD movement fallback as the LTE path — Pre lives on the other
             # node's log, Post on the target node, under the same pole ID (same cell name).
@@ -5252,6 +5268,16 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
     on_sec = sector_lookup(onsite_tables, cell_id)
     pre_sec = sector_lookup(pre_sector_source_tables, pre_sector_id) if has_pre else {}
 
+    def nci_of(tables, cell_key):
+        """nCI is reported by BOTH NRCellDU and NRCellCU, but NRCellDU leaves the column EMPTY
+        for a LOCKED / IDLE cell (confirmed real: every N002*/N066* row on DXL02330) while
+        NRCellCU carries it for every cell. NRCellDU is read first and NRCellCU used as the
+        fallback, so a locked cell no longer reports its nCI as NA."""
+        du = (tables.get("nr_cell") or {}).get(f"NRCellDU={cell_key}", {}).get("nCI")
+        if du not in (None, ""):
+            return du
+        return (tables.get("nrcellcu") or {}).get(f"NRCellCU={cell_key}", {}).get("nCI")
+
     results = []
     for param, cell_key in CATEGORY_A_NR.items():
         pre_v = pre_cell.get(cell_key) if has_pre else None
@@ -5270,7 +5296,10 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
     SECTOR_LEVEL_B_PARAMS = {"arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL"}
     for param, (cell_key, ciq_key) in CATEGORY_B_NR.items():
         ciq_v = ciq_row.get(ciq_key) if (ciq_row and ciq_key) else None
-        if param in SECTOR_LEVEL_B_PARAMS:
+        if param == "nCI":
+            pre_v = nci_of(pre_sector_source_tables, pre_sector_id) if has_pre else None
+            post_v = nci_of(onsite_tables, cell_id)
+        elif param in SECTOR_LEVEL_B_PARAMS:
             pre_v = pre_sec.get(cell_key) if has_pre else None
             post_v = on_sec.get(cell_key)
         else:
@@ -5286,15 +5315,9 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
         results.append({"parameter": param, "pre": pre_v, "ciq": ciq_v, "is_new": is_new,
                          "post": post_v, "color": color, "note": note})
 
-    for label, cell_key in [("TX", "noOfTxAntennas"), ("RX", "noOfRxAntennas")]:
-        pre_v = pre_sec.get(cell_key)
-        post_v = on_sec.get(cell_key)
-        color, _ = verdict(post_v, pre_v, "B")  # no CIQ column confirmed for NR TX/RX yet
-        note = blueprint_comment(label, color, is_new, "nr")
-        if has_pre and is_new:
-            pre_v = PRE_NA
-        results.append({"parameter": label, "pre": pre_v, "ciq": None, "is_new": is_new,
-                         "post": post_v, "color": color, "note": note})
+    # 5G has no TX/RX check: there is no noOfTxAntennas/noOfRxAntennas column in the CIQ's
+    # '5G Info' tab to verify against, so nothing meaningful can be asserted. TX/RX remains a
+    # 4G-only parameter; for 5G the radio configuration is covered by ConfiguredOutputPower.
 
     ciq_v = ciq_row.get("configuredMaxTxPower") if ciq_row else None
     pre_v = pre_sec.get("configuredMaxTxPower")
@@ -5433,7 +5456,8 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
             continue
         pre_t = pre_by_node.get(node, empty_tables)
         on_t = onsite_by_node.get(node, empty_tables)
-        results = compare_lte_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node, scope=scope)
+        results = compare_lte_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node,
+                                    scope=scope, all_onsite_by_node=onsite_by_node)
         node_results[node]["lte"].append((cell_id, results))
         node_results[node]["naming_lte"].append((cell_id, verify_naming_and_config(
             cell_id, ciq_row, on_t, pre_t, "lte",
@@ -5447,7 +5471,8 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
         pre_t = pre_by_node.get(node, empty_tables)
         on_t = onsite_by_node.get(node, empty_tables)
         results = compare_nr_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node,
-                                   scope=scope, node_has_pre=(node in pre_by_node))
+                                   scope=scope, node_has_pre=(node in pre_by_node),
+                                   all_onsite_by_node=onsite_by_node)
         node_results[node]["nr"].append((cell_id, results))
         node_results[node]["naming_nr"].append((cell_id, verify_naming_and_config(
             cell_id, ciq_row, on_t, pre_t, "nr",
@@ -5808,8 +5833,10 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=
     naming_nr_groups = [("Rilinks (RiPort)", "Rilinks", c2),
                         ("NR sector carrier", "sector_carrier", c2),
                         ("NRCELL CU naming", "NRCELL_CU_naming", c2)]
-    lte_groups_1 = [("EarfcnDL", "EarfcnDL", c3), ("EarfcnUL", "EarfcnUL", c3), ("TX", "TX", c3),
-                    ("RX", "RX", c3), ("Bandwidth", "Bandwidth", c3),
+    lte_groups_1 = [("EarfcnDL", "EarfcnDL", c3), ("EarfcnUL", "EarfcnUL", c3),
+                    ("dlChannelBandwidth", "dlChannelBandwidth", c3),
+                    ("ulChannelBandwidth", "ulChannelBandwidth", c3),
+                    ("TX", "TX", c3), ("RX", "RX", c3),
                     ("ConfiguredOutputPower", "ConfiguredOutputPower", c3),
                     ("CellID", "CellID", c3), ("TAC", "TAC", c3)]
     lte_groups_2 = [("rachRootSequence", "rachRootSequence", c3), ("PCI", "PCI", c3),
@@ -5818,7 +5845,6 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=
                    ("bSChannelBwDL", "bSChannelBwDL", c3), ("bSChannelBwUL", "bSChannelBwUL", c3),
                    ("ConfiguredOutputPower", "ConfiguredOutputPower", c3),
                    ("cellLocalId", "cellLocalId", c3), ("ssbFrequency", "ssbFrequency", c3),
-                   ("TX", "TX", c3), ("RX", "RX", c3),
                    ("NRTAC", "NRTAC", c3), ("nCI", "nCI", c3)]
     nr_groups_2 = [("rachRootSequence", "rachRootSequence", c3), ("nRPCI", "nRPCI", c3),
                    ("Cellrange", "Cellrange", c3)]
@@ -5834,10 +5860,10 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=
                       comment_groups="row")
     build_wide_table(naming_nr, naming_nr_groups, "5G Naming & Configuration",
                       comment_groups="row")
-    build_wide_table(lte_rows, lte_groups_1, "4G Sectors \u2014 Earfcn / TX-RX / Power / Cell ID / TAC",
+    build_wide_table(lte_rows, lte_groups_1, "4G Sectors \u2014 Earfcn / Channel Bandwidth / TX-RX / Power / Cell ID / TAC",
                       comment_groups=[g for g in COMMENT_GROUPS_LTE if g[1] is not None])
     build_wide_table(nr_rows, nr_groups_1,
-                      "5G Sectors \u2014 arfcn / Bandwidth / Power / cellLocalId / SSB / TX-RX / NRTAC / nCI",
+                      "5G Sectors \u2014 arfcn / bSChannelBw / Power / cellLocalId / SSB / NRTAC / nCI",
                       comment_groups=[g for g in COMMENT_GROUPS_NR if g[1] is not None])
     build_wide_table(lte_rows, lte_groups_2, "4G Sectors \u2014 rachRootSequence / PCI / Cellrange",
                       cat_a_params=CAT_A_LTE_PARAMS)
@@ -6465,15 +6491,19 @@ elif st.session_state.qkx_page == "paramcheck":
                            ("Sector carrier", "sector_carrier"), ("ISDLONLY", "ISDLONLY")]
         NAMING_NR_KEYS = [("Rilinks", "Rilinks"), ("Sector carrier", "sector_carrier"),
                           ("NRCELL CU naming", "NRCELL_CU_naming")]
-        LTE_KEYS_1 = [("EarfcnDL", "EarfcnDL"), ("EarfcnUL", "EarfcnUL"), ("TX", "TX"), ("RX", "RX"),
-                      ("Bandwidth", "Bandwidth"), ("ConfiguredOutputPower", "ConfiguredOutputPower"), ("CellID", "CellID")]
+        LTE_KEYS_1 = [("EarfcnDL", "EarfcnDL"), ("EarfcnUL", "EarfcnUL"),
+                      ("dlChannelBandwidth", "dlChannelBandwidth"),
+                      ("ulChannelBandwidth", "ulChannelBandwidth"), ("TX", "TX"), ("RX", "RX"),
+                      ("ConfiguredOutputPower", "ConfiguredOutputPower"), ("CellID", "CellID"),
+                      ("TAC", "TAC")]
         LTE_KEYS_2 = [("rachRootSequence", "rachRootSequence"), ("PCI", "PCI"),
-                      ("Cellrange", "Cellrange"), ("TAC", "TAC")]
+                      ("Cellrange", "Cellrange")]
         NR_KEYS_1 = [("arfcnDL", "arfcnDL"), ("arfcnUL", "arfcnUL"), ("bSChannelBwDL", "bSChannelBwDL"),
                      ("bSChannelBwUL", "bSChannelBwUL"), ("ConfiguredOutputPower", "ConfiguredOutputPower"),
-                     ("cellLocalId", "cellLocalId"), ("ssbFrequency", "ssbFrequency")]
+                     ("cellLocalId", "cellLocalId"), ("ssbFrequency", "ssbFrequency"),
+                     ("NRTAC", "NRTAC"), ("nCI", "nCI")]
         NR_KEYS_2 = [("rachRootSequence", "rachRootSequence"), ("nRPCI", "nRPCI"),
-                     ("Cellrange", "Cellrange"), ("NRTAC", "NRTAC"), ("nCI", "nCI")]
+                     ("Cellrange", "Cellrange")]
 
         # Site-wide, not node-wise — same as the PDF: every 4G sector in one set of tables and
         # every 5G sector in another, sorted by sector name, regardless of owning node.
@@ -6484,10 +6514,10 @@ elif st.session_state.qkx_page == "paramcheck":
 
         render_wide_naming(pv_naming_lte, "4G Naming & Configuration", NAMING_LTE_KEYS)
         render_wide_naming(pv_naming_nr, "5G Naming & Configuration", NAMING_NR_KEYS)
-        render_wide_params(pv_lte_rows, "4G Sectors — Earfcn / TX-RX / Power / Cell ID", LTE_KEYS_1)
-        render_wide_params(pv_nr_rows, "5G Sectors — arfcn / Bandwidth / Power / cellLocalId / SSB", NR_KEYS_1)
-        render_wide_params(pv_lte_rows, "4G Sectors — rachRootSequence / PCI / Cellrange / TAC", LTE_KEYS_2)
-        render_wide_params(pv_nr_rows, "5G Sectors — rachRootSequence / nRPCI / Cellrange / NRTAC / nCI", NR_KEYS_2)
+        render_wide_params(pv_lte_rows, "4G Sectors — Earfcn / Channel Bandwidth / TX-RX / Power / Cell ID / TAC", LTE_KEYS_1)
+        render_wide_params(pv_nr_rows, "5G Sectors — arfcn / bSChannelBw / Power / cellLocalId / SSB / NRTAC / nCI", NR_KEYS_1)
+        render_wide_params(pv_lte_rows, "4G Sectors — rachRootSequence / PCI / Cellrange", LTE_KEYS_2)
+        render_wide_params(pv_nr_rows, "5G Sectors — rachRootSequence / nRPCI / Cellrange", NR_KEYS_2)
 
         pv_pdf_bytes = build_parameter_verification_pdf(
             pv_scope, pv_result["node_results"], has_pre=pv_has_pre,
