@@ -4002,6 +4002,34 @@ def parse_hget_blocks(text):
         # (instance, single-attribute) pair rather than one row per instance with all attributes
         # as columns. Detect and pivot it into the same {instance: {attr: value}} shape.
         is_pivot = [c for _, c in col_positions] == ['MO', 'Attribute', 'Value']
+
+        # Confirmed real corruption source: some hget queries print columns that were never
+        # asked for, and those columns describe a DIFFERENT MO. 'hget ^EUtranCellFDD pciConflict'
+        # renders one row per conflicting neighbour, carrying that NEIGHBOUR's cellId/enbId/
+        # mcc/mnc alongside this cell's pciConflict. Merging that blindly overwrote each cell's
+        # real cellId with a neighbour's (e.g. DXL04017_3C_1 took 3A_1's 149 instead of its own
+        # 151) or blanked it entirely. Only columns the command actually requested are kept, so
+        # a query can never contribute a value it wasn't asked for. Pivot (MO/Attribute/Value)
+        # tables are exempt — their column names are structural, not attribute names.
+        keep_cols = None
+        if not is_pivot:
+            _pats = [a for a in attrs_str.split('|') if a.strip()]
+            _matched = set()
+            for _, _cn in col_positions[1:]:
+                for _pat in _pats:
+                    try:
+                        if re.search(_pat, _cn, re.I):
+                            _matched.add(_cn)
+                            break
+                    except re.error:
+                        if _pat.lower() in _cn.lower():
+                            _matched.add(_cn)
+                            break
+            # If nothing matched, the command/column naming isn't understood — keep everything
+            # rather than silently discarding the whole block.
+            if _matched:
+                keep_cols = _matched
+
         rows = {}
         k = j
         while k < n and not RULE_RE.match(lines[k].strip()):
@@ -4034,7 +4062,16 @@ def parse_hget_blocks(text):
             else:
                 instance = values.get(col_positions[0][1])
                 if instance:
-                    rows[instance] = values
+                    if keep_cols is not None:
+                        values = {kk: vv for kk, vv in values.items()
+                                   if kk in keep_cols or kk == col_positions[0][1]}
+                    # The same MO can appear on several rows of one table (again, the
+                    # pciConflict output). Merge instead of replacing, and never let a later
+                    # row blank out a value an earlier row already supplied.
+                    tgt = rows.setdefault(instance, {})
+                    for kk, vv in values.items():
+                        if vv is not None or kk not in tgt:
+                            tgt[kk] = vv
 
         yield {
             "mo_type": mo_pattern,
@@ -4055,7 +4092,10 @@ def merge_by_instance(blocks, mo_type_filter):
         if mo_type_filter not in b["mo_type"]:
             continue
         for instance, vals in b["rows"].items():
-            merged.setdefault(instance, {}).update(vals)
+            tgt = merged.setdefault(instance, {})
+            for k, v in vals.items():
+                if v is not None or k not in tgt:
+                    tgt[k] = v
     return merged
 
 
@@ -4064,7 +4104,10 @@ def merge_by_instance_prefix(blocks, instance_prefix):
     for b in blocks:
         for instance, vals in b["rows"].items():
             if instance.startswith(instance_prefix):
-                merged.setdefault(instance, {}).update(vals)
+                tgt = merged.setdefault(instance, {})
+                for k, v in vals.items():
+                    if v is not None or k not in tgt:
+                        tgt[k] = v
     return merged
 
 
@@ -4091,34 +4134,63 @@ def pv_load_node_tables(text):
     retsubunit = {k: v for k, v in retsubunit.items() if ',RetSubUnit=' in k}
     antennanearunit = merge_by_instance_prefix(blocks, 'AntennaUnitGroup=')
     antennanearunit = {k: v for k, v in antennanearunit.items() if ',AntennaNearUnit=' in k and ',RetSubUnit=' not in k}
+    # AntennaUnitGroup=<g>,RfBranch=<k>.rfPortRef names EVERY radio feeding that antenna group,
+    # not just the RET-carrying one that AntennaNearUnit reports. A shared alpha antenna group
+    # routinely carries two or three radios on different bands (confirmed real: group 1 carries
+    # both RRU-1 and RRU-4), so AntennaNearUnit alone cannot identify a cell's radio.
+    rfbranch = merge_by_instance_prefix(blocks, 'AntennaUnitGroup=')
+    rfbranch = {k: v for k, v in rfbranch.items() if ',RfBranch=' in k}
     return {"lte_cell": lte, "nr_cell": nr_cell, "nr_sector": nr_sector, "lte_sector": lte_sector,
-            "rilink": rilink, "nrcellcu": nrcellcu, "retsubunit": retsubunit, "antennanearunit": antennanearunit}
+            "rilink": rilink, "nrcellcu": nrcellcu, "retsubunit": retsubunit,
+            "antennanearunit": antennanearunit, "rfbranch": rfbranch}
 
 
-def _lte_cell_to_rru(all_tables_list, cell_id):
-    """all_tables_list: list of table-dicts to search (own node first, others as fallback for
-    co-located antenna sharing — confirmed real: DXL04017 cells appear in DXL02330's RetSubUnit
-    data). Returns 'RRU-n' or None."""
-    for onsite_tables in all_tables_list:
-        antenna_group = None
-        for mo_name, attrs in onsite_tables.get("retsubunit", {}).items():
+def _lte_cell_antenna_group(all_tables_list, cell_id):
+    """RetSubUnit.userLabel is '<antenna>__<cell1>;<cell2>;...' under AntennaUnitGroup=<g>.
+    Returns (group_id, antenna_label) or (None, None). Antenna wiring is static, so this is
+    often only present in the Pre log — hence the list of table-dicts to search in order."""
+    for tables in all_tables_list:
+        for mo_name, attrs in (tables.get("retsubunit") or {}).items():
             label = attrs.get("userLabel") or ""
-            cells_part = label.split("__", 1)[1] if "__" in label else ""
+            antenna, _, cells_part = label.partition("__")
             cells = [c.strip() for c in cells_part.split(";") if c.strip()]
             if cell_id in cells:
                 m = re.match(r'AntennaUnitGroup=(\d+)', mo_name)
                 if m:
-                    antenna_group = m.group(1)
-                    break
-        if antenna_group is None:
-            continue
-        for mo_name, attrs in onsite_tables.get("antennanearunit", {}).items():
-            if mo_name.startswith(f"AntennaUnitGroup={antenna_group},"):
-                ref = attrs.get("rfPortRef") or ""
-                m = re.search(r'FieldReplaceableUnit=(RRU-\d+)', ref)
-                if m:
-                    return m.group(1)
-    return None
+                    return m.group(1), antenna.strip()
+    return None, None
+
+
+def _rrus_in_antenna_group(all_tables_list, group_id):
+    """Every RRU feeding this antenna group, read from its RfBranch entries (with the
+    AntennaNearUnit's own RRU as a fallback for captures that omit RfBranch)."""
+    rrus = []
+    for tables in all_tables_list:
+        for mo_name, attrs in (tables.get("rfbranch") or {}).items():
+            if not mo_name.startswith(f"AntennaUnitGroup={group_id},"):
+                continue
+            m = re.search(r'FieldReplaceableUnit=(RRU-\d+)', attrs.get("rfPortRef") or "")
+            if m and m.group(1) not in rrus:
+                rrus.append(m.group(1))
+        if rrus:
+            return rrus
+    for tables in all_tables_list:
+        for mo_name, attrs in (tables.get("antennanearunit") or {}).items():
+            if not mo_name.startswith(f"AntennaUnitGroup={group_id},"):
+                continue
+            m = re.search(r'FieldReplaceableUnit=(RRU-\d+)', attrs.get("rfPortRef") or "")
+            if m and m.group(1) not in rrus:
+                rrus.append(m.group(1))
+    return rrus
+
+
+def _lte_cell_to_rru(all_tables_list, cell_id):
+    """Backwards-compatible single-RRU resolution (first radio of the cell's antenna group)."""
+    group_id, _ = _lte_cell_antenna_group(all_tables_list, cell_id)
+    if group_id is None:
+        return None
+    rrus = _rrus_in_antenna_group(all_tables_list, group_id)
+    return rrus[0] if rrus else None
 
 
 
@@ -4149,23 +4221,36 @@ NO_PRE_SCOPES = {"N2E", "NSB"}
 # show, and a blank would be indistinguishable from "log didn't report it". Rendered amber.
 PRE_NA = "NA"
 
+# Category A = "expected is the PRE value for a pre-existing (commercial) sector, and the CIQ
+# value for a newly-added one". Confirmed scope: rachRootSequence, PCI / nRPCI and Cellrange
+# ONLY. TAC, NRTAC and nCI are Category B — Pre is shown for reference but the on-site value is
+# always verified against the CIQ, and any difference is flagged red.
 CATEGORY_A_LTE = {"rachRootSequence": "rachRootSequence", "PCI": "physicalLayerCellId",
-                   "Cellrange": "cellRange", "TAC": "tac"}
+                   "Cellrange": "cellRange"}
+# Confirmed against the real CIQ: 'eUtran Parameters' genuinely has no tac column — the LTE
+# TAC lives on the 'eNB Info' tab ('tac', one row per eNodeB). run_parameter_verification()
+# resolves it per node and injects it into each eUtran row under this synthetic key, so the
+# comparison below can treat it like any other CIQ-sourced value.
+CIQ_TAC_KEY = "__ciq_tac__"
 CATEGORY_A_LTE_CIQ_KEYS = {"rachRootSequence": "rachRootSequence", "PCI": "PCI",
-                            "Cellrange": "cellRange", "TAC": None}  # confirmed: eUtran Parameters has no TAC column
+                            "Cellrange": "cellRange"}
 CATEGORY_A_NR = {"rachRootSequence": "rachRootSequence", "nRPCI": "nRPCI",
-                  "Cellrange": "cellRange", "NRTAC": "nRTAC", "nCI": "nCI"}
+                  "Cellrange": "cellRange"}
 CATEGORY_A_NR_CIQ_KEYS = {"rachRootSequence": "rachRootSequence", "nRPCI": "nRPCI",
-                           "Cellrange": "CellRange", "NRTAC": "nRTAC", "nCI": "nCI"}  # confirmed: 5G Info uses "CellRange", not "cellRange"
+                           "Cellrange": "CellRange"}  # confirmed: 5G Info uses "CellRange", not "cellRange"
 CATEGORY_B_LTE = {
     "EarfcnDL": ("earfcndl", "earfcnDl"), "EarfcnUL": ("earfcnul", "earfcnUl"),
     "Bandwidth": ("dlChannelBandwidth", "dlChannelBandwidth"),
     "CellID": ("cellId", "cellId"),
+    # LTE tac is a node-level value on the CIQ's 'eNB Info' tab, injected per row under
+    # CIQ_TAC_KEY by run_parameter_verification().
+    "TAC": ("tac", CIQ_TAC_KEY),
 }
 CATEGORY_B_NR = {
     "arfcnDL": ("arfcnDL", "arfcnDL"), "arfcnUL": ("arfcnUL", "arfcnUL"),
     "bSChannelBwDL": ("bSChannelBwDL", "bSChannelBwDL"), "bSChannelBwUL": ("bSChannelBwUL", "bSChannelBwUL"),
     "cellLocalId": ("cellLocalId", "cellLocalId"), "ssbFrequency": ("ssbFrequency", "ssbFrequency"),
+    "NRTAC": ("nRTAC", "nRTAC"), "nCI": ("nCI", "nCI"),
 }
 
 
@@ -4182,7 +4267,12 @@ def verdict(post_val, expected_val, category):
     if p is None and e is None:
         return "gray", "No data available"
     if p is None:
-        return "red", "Not found onsite"
+        # The parameter simply wasn't returned by the onsite capture (e.g. the NRCellDU hget
+        # didn't request rachRootSequence). That is a gap in the log, not a configuration
+        # mismatch — it renders as NA in grey and is deliberately kept out of the mismatch
+        # comments, so a missing column can't masquerade as a site fault. A cell that genuinely
+        # doesn't exist onsite is already caught by the FDD naming / NRCELL CU naming checks.
+        return "gray", "Not captured in the onsite log"
     if e is None:
         return "amber", "No baseline to verify against"
     if p == e:
@@ -4194,7 +4284,7 @@ def verdict(post_val, expected_val, category):
 # Blueprint-exact comment text (temp_blueprint.xlsx) — no generic "match"/"expected X got Y".
 # ============================================================
 
-CATEGORY_A_PARAMS = ("rachRootSequence", "PCI", "nRPCI", "Cellrange", "TAC", "NRTAC", "nCI")
+CATEGORY_A_PARAMS = ("rachRootSequence", "PCI", "nRPCI", "Cellrange")
 
 
 def blueprint_comment(param, color, is_new, gen):
@@ -4216,31 +4306,45 @@ def blueprint_comment(param, color, is_new, gen):
         return f"{param} Mismatch found on the {tail} sectors"
     if color == "green":
         return "Matching"
-    if gen == "lte" and param in ("EarfcnDL", "EarfcnUL", "Bandwidth", "CellID"):
-        return "Mismatch found on [Parameter - BW/Erfcndl/erfcnul/cell id], Verify the Revision history for retune."
-    if gen == "lte" and param in ("TX", "RX", "ConfiguredOutputPower"):
-        return "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"
-    if gen == "nr" and param in ("arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "cellLocalId", "ssbFrequency"):
-        return "Mismatch found on [Parameter - BW/arfcndl/arfcnul/celllocalid/SSBFREQUENCY], Verify the Revision history for retune."
-    if gen == "nr" and param == "ConfiguredOutputPower":
-        return "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"
-    return "Mismatch found"
+    if color in ("amber", "gray"):
+        return ""
+    for params, tail in (COMMENT_GROUPS_LTE if gen == "lte" else COMMENT_GROUPS_NR):
+        if tail is None:
+            continue
+        if param in params:
+            return group_mismatch_comment([param], tail)
+    return group_mismatch_comment([param], "")
 
+
+# Category-B comment groups. The parameter list printed inside [Parameter - ...] is built from
+# the parameters that ACTUALLY mismatched on that row, not from a fixed string naming the whole
+# group — so a row where only EarfcnDL is wrong reads "[Parameter - EarfcnDL]", not the full
+# "BW/Erfcndl/erfcnul/cell id". The second element is the fixed advice appended after it.
+_RETUNE_TAIL = "Verify the Revision history for retune."
+_SWAP_TAIL = "Verify for the Radio swap"
 
 COMMENT_GROUPS_LTE = [
-    (("rachRootSequence", "PCI", "Cellrange", "TAC"), None),  # uses per-row is_new-aware text, not a fixed string
-    (("EarfcnDL", "EarfcnUL", "Bandwidth", "CellID"),
-     "Mismatch found on [Parameter - BW/Erfcndl/erfcnul/cell id], Verify the Revision history for retune."),
-    (("TX", "RX", "ConfiguredOutputPower"),
-     "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"),
+    (("rachRootSequence", "PCI", "Cellrange"), None),  # Category A — is_new-aware wording
+    (("EarfcnDL", "EarfcnUL", "Bandwidth", "CellID"), _RETUNE_TAIL),
+    (("TX", "RX", "ConfiguredOutputPower"), _SWAP_TAIL),
+    (("TAC",), ""),
 ]
 COMMENT_GROUPS_NR = [
-    (("rachRootSequence", "nRPCI", "Cellrange", "NRTAC", "nCI"), None),
+    (("rachRootSequence", "nRPCI", "Cellrange"), None),  # Category A
     (("arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "cellLocalId", "ssbFrequency"),
-     "Mismatch found on [Parameter - BW/arfcndl/arfcnul/celllocalid/SSBFREQUENCY], Verify the Revision history for retune."),
-    (("ConfiguredOutputPower",),
-     "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"),
+     _RETUNE_TAIL),
+    (("TX", "RX", "ConfiguredOutputPower"), _SWAP_TAIL),
+    (("NRTAC", "nCI"), ""),
 ]
+
+
+def group_mismatch_comment(triggered_params, tail):
+    """Category-B mismatch comment. The parameter name is deliberately NOT printed — the cell
+    that mismatched is already highlighted red in its own column, so naming it again in the
+    comment is redundant. Only the advice that belongs to the group is printed."""
+    if not triggered_params:
+        return ""
+    return f"Mismatch found, {tail}" if tail else "Mismatch found"
 
 
 def pivot_param_results(cells, gen, has_pre):
@@ -4265,8 +4369,8 @@ def pivot_param_results(cells, gen, has_pre):
             triggered = [p for p in params if p in by_param and by_param[p]["color"] == "red"]
             if not triggered:
                 continue
-            if fixed_text:
-                comments.append(fixed_text)
+            if fixed_text is not None:
+                comments.append(group_mismatch_comment(triggered, fixed_text))
             else:
                 # Category A group: use whichever triggered param's own note (already carries
                 # the correct pre-existing-vs-newly-added blueprint text for this sector).
@@ -4294,6 +4398,32 @@ def pivot_naming_results(cells):
         row["comment"] = " / ".join(dict.fromkeys(comments))
         rows.append(row)
     return rows
+
+
+def build_enb_tac_map(ciq_wb):
+    """{eNodeB Name -> tac, str(eNBId) -> tac} from the CIQ's 'eNB Info' tab. Confirmed real
+    column names: 'eNodeB Name', 'eNBId', 'tac'. Both keys are kept because eUtran Parameters
+    identifies its node by eNBId while everything else in the app keys off the node name."""
+    out = {}
+    if "eNB Info" not in ciq_wb.sheetnames:
+        return out
+    ws = ciq_wb["eNB Info"]
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return out
+    hdr = [str(h).strip() if h is not None else "" for h in rows[0]]
+    for r in rows[1:]:
+        d = dict(zip(hdr, r))
+        tac = d.get("tac")
+        if tac is None:
+            continue
+        name = d.get("eNodeB Name")
+        enbid = d.get("eNBId")
+        if name:
+            out[str(name).strip().upper()] = tac
+        if enbid is not None:
+            out[str(enbid).strip()] = tac
+    return out
 
 
 def build_sector_move_map(ciq_wb):
@@ -4332,6 +4462,17 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sour
             src_tables = source_pre_tables_by_node.get(src_node)
             if src_tables:
                 pre_cell = src_tables["lte_cell"].get(f"EUtranCellFDD={move_info['source_sector']}", pre_cell)
+        if not pre_cell:
+            # C-band / DoD movement: the sector physically moves from one node's pole to
+            # another's. In Pre it is still on the OTHER node; in Post it is on the target node
+            # under the SAME pole ID (same cell name). Sector Del_Movement covers the case where
+            # the move was declared; when it wasn't, fall back to finding the identical cell
+            # name in any other node's Pre log rather than reporting "no Pre data".
+            for _other_node, _other in (source_pre_tables_by_node or {}).items():
+                _found = (_other.get("lte_cell") or {}).get(ldn)
+                if _found:
+                    pre_cell = _found
+                    break
 
     def sector_lookup(tables, cell):
         ref = cell.get("sectorCarrierRef")
@@ -4359,11 +4500,11 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sour
         ciq_v = ciq_row.get(ciq_key) if ciq_key else None
         pre_v = pre_cell.get(cell_key) if has_pre else None
         post_v = on_cell.get(cell_key)
+        # Category B is strictly "on site must equal CIQ" — the Pre column is shown for
+        # reference only. A value that still matches Pre but differs from the CIQ is a real
+        # mismatch (the change hasn't been applied) and is flagged red, not softened to amber.
         color, _ = verdict(post_v, ciq_v, "B")
-        if has_pre and color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
-            color, note = "amber", "Expected change — retune not yet applied onsite, still matches Pre"
-        else:
-            note = blueprint_comment(param, color, is_new, "lte")
+        note = blueprint_comment(param, color, is_new, "lte")
         if has_pre and is_new:
             pre_v = PRE_NA
         results.append({"parameter": param, "pre": pre_v, "ciq": ciq_v, "is_new": is_new,
@@ -4437,9 +4578,12 @@ def _ciq_bbu_ports(ciq_row, gen):
 
 
 def _bbu_port_from_rilink(rl):
-    """riPortRef1 is the BBU/DU side of the RiLink and carries the letter port
-    (e.g. 'FieldReplaceableUnit=DUS-1,RiPort=A'). riPortRef2 is the radio side (DATA-n)."""
-    m = re.search(r'RiPort=([A-Za-z]+\d*)', (rl.get("riPortRef1") or ""))
+    """riPortRef1 is the BBU/DU side of the RiLink and carries the port id. Confirmed real:
+    the RiPort can be ALPHABETICAL when the sector is scripted on the BBU/DUS
+    (e.g. 'FieldReplaceableUnit=DUS-1,RiPort=A') or NUMERICAL when it is scripted on an XMU
+    (e.g. 'FieldReplaceableUnit=XMU-1,RiPort=3') — both forms must be read, so the pattern
+    accepts letters and digits. riPortRef2 is the radio side (DATA-n) and is never used here."""
+    m = re.search(r'RiPort=([A-Za-z0-9]+)', (rl.get("riPortRef1") or ""))
     return m.group(1).strip().upper().replace("_", "") if m else None
 
 
@@ -4455,36 +4599,106 @@ def _rilinks_for_sector(onsite_tables, sector_suffix):
     return out
 
 
-def _find_rilinks_for_cell(cell_id, sector_suffix, gen, node, onsite_by_node, pre_by_node):
-    """Returns (list_of_rilinks, node_they_were_found_on). Own node is always searched FIRST —
-    the sector must be scripted on that node's own port. Only if nothing is found there do we
-    look at the other nodes, which is the real C-band case: a sector's radio can be moved from
-    one node's pole to another node's, so the RiLink legitimately lives on the other node. The
-    node it was found on is returned so it can be surfaced instead of silently accepted.
-    For CRAN F-node sites with more than one pole, extra poles are never introduced here —
-    only sectors present in the CIQ are ever looked up at all, so a second physical pole that
-    the CIQ doesn't list can never leak into the report."""
-    onsite_by_node = onsite_by_node or {}
-    pre_by_node = pre_by_node or {}
-    order = ([node] if node in onsite_by_node else []) + [n for n in onsite_by_node if n != node]
-    rru = None
-    if gen == "lte":
-        own = [onsite_by_node.get(node) or {}, pre_by_node.get(node) or {}]
-        others = [t for n, t in onsite_by_node.items() if n != node] + \
-                 [t for n, t in pre_by_node.items() if n != node]
-        rru = _lte_cell_to_rru(own + others, cell_id)
-        if not rru:
-            return [], None
-    for n in order:
-        t = onsite_by_node.get(n) or {}
-        if gen == "nr":
-            rls = _rilinks_for_sector(t, sector_suffix)
-        else:
-            rls = [c for c in (t.get("rilink") or {}).values()
-                   if f"FieldReplaceableUnit={rru}," in (c.get("riPortRef2") or "")]
-        if rls:
-            return rls, n
-    return [], None
+def _radio_data_port(rl):
+    """riPortRef2's radio-side port, normalised: 'RiPort=DATA_1' -> 'DATA1'."""
+    m = re.search(r'RiPort=([A-Za-z0-9_]+)', (rl.get("riPortRef2") or ""))
+    return m.group(1).strip().upper().replace("_", "") if m else None
+
+
+def _radio_fru(rl):
+    """riPortRef2's radio, e.g. 'RRU-16' or 'AAS-055619_N077A_1'."""
+    m = re.search(r'FieldReplaceableUnit=([^,\s]+)', (rl.get("riPortRef2") or ""))
+    return m.group(1).strip() if m else None
+
+
+def _rilinks_on_bbu_port(onsite_tables, port):
+    """Every RiLink on this node scripted on BBU/XMU RiPort <port>."""
+    want = str(port).strip().upper().replace("_", "")
+    return [rl for rl in (onsite_tables.get("rilink") or {}).values()
+            if _bbu_port_from_rilink(rl) == want]
+
+
+def _ciq_radio_ports(ciq_row):
+    """CIQ 'Radio Port' — the radio-side DATA port(s). 'DATA1/DATA2' means both."""
+    v = ciq_row.get("Radio Port")
+    if v is None:
+        return set()
+    out = set()
+    for part in re.split(r'[,/;|]', str(v)):
+        t = part.strip().upper().replace("_", "").replace(" ", "")
+        if t and t not in _PORT_BLANKS:
+            out.add(t)
+    return out
+
+
+def check_rilinks(cell_id, ciq_row, gen, node, onsite_by_node, onsite_tables):
+    """Rilinks verification, driven by the CIQ's RADIO MAPPING rather than by the antenna
+    (RetSubUnit) chain.
+
+    Why: the antenna chain lives in the Pre log and identifies an AntennaUnitGroup, not a
+    radio — and a group routinely feeds several radios, so it can't say which one is this
+    sector's. Anything derived from it was either unavailable (nodes whose Pre log wasn't
+    uploaded produced no Rilinks result at all) or ambiguous.
+
+    The CIQ already states the radio mapping directly: which BBU/XMU RiPort this sector is
+    cabled on ('DUS / XMU Port' + its expansion for LTE, 'Port 1'..'Port 4' for 5G) and which
+    radio-side DATA port it uses ('Radio Port'). The onsite RiLink table states, for each
+    scripted RiPort, which radio and which DATA port it reaches. So the check is:
+
+        for each RiPort the CIQ specifies for this sector, on THIS node:
+          - is a RiLink scripted on it at all?
+          - does that RiLink reach the radio-side DATA port the CIQ specifies?
+
+    RiPorts are alphabetical on a BBU/DUS and numerical on an XMU; both are handled. More than
+    one RiPort is joined with ' | '. Sectors that share a radio (the CIQ's 'Co-Located
+    Technology Cell' set — e.g. a 4G carrier, its second carrier and the 5G cell on the same
+    RRU) all carry the same CIQ RiPort and therefore all resolve to that same single onsite
+    RiPort, which is exactly what the node shows. Operational state is deliberately not
+    considered: a link can be DISABLED at capture time and still be scripted on the right port.
+
+    Returns {'ciq','post','color','note','radios'}."""
+    own = onsite_by_node.get(node) if (onsite_by_node and node in onsite_by_node) else onsite_tables
+    own = own or {}
+    ciq_ports = _ciq_bbu_ports(ciq_row, gen)
+    want_data = _ciq_radio_ports(ciq_row)
+
+    found, missing, wrong_data, radios = [], [], [], []
+    for port in ciq_ports:
+        rls = _rilinks_on_bbu_port(own, port)
+        if not rls:
+            missing.append(port)
+            continue
+        found.append(port)
+        for rl in rls:
+            fru = _radio_fru(rl)
+            if fru and fru not in radios:
+                radios.append(fru)
+            dp = _radio_data_port(rl)
+            if want_data and dp and dp not in want_data:
+                wrong_data.append(f"{port}\u2192{dp}")
+
+    ciq_text = " | ".join(ciq_ports) if ciq_ports else None
+    post_text = " | ".join(found) if found else None
+
+    if not ciq_ports:
+        color, note = "amber", "CIQ has no BBU/XMU port for this sector"
+    elif not (own.get("rilink") or {}):
+        color, note = "gray", "No RiLink data in this node's onsite log"
+    elif missing and not found:
+        color = "red"
+        note = f"CIQ Port {' | '.join(missing)} is not scripted on {node}"
+    elif missing:
+        color = "red"
+        note = (f"CIQ Port {' | '.join(missing)} is not scripted on {node} "
+                f"(Port {post_text} is)")
+    elif wrong_data:
+        color = "red"
+        note = (f"Scripted on Port {post_text}, but cabled to {', '.join(wrong_data)} \u2014 "
+                f"CIQ Radio Port is {'/'.join(sorted(want_data))}")
+    else:
+        color = "green"
+        note = f"Matching \u2014 scripted on Port {post_text}"
+    return {"ciq": ciq_text, "post": post_text, "color": color, "note": note, "radios": radios}
 
 
 def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, all_onsite_tables=None,
@@ -4510,59 +4724,12 @@ def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, a
         results.append({"parameter": "FDD naming", "ciq": cell_id,
                          "post": cell_id if exists else None, "color": color, "note": note})
 
-    # Rilinks = WHICH BBU (DUS/XMU) letter port the sector is actually scripted on, compared
-    # against the port CIQ specifies for it (e.g. 700 Alpha -> Port A). Onsite it must be that
-    # same port ON THAT NODE. Merely existing + ENABLED is not enough — a RiLink on the wrong
-    # port passes that weaker test while the sector is physically cabled wrong.
-    rls, rl_node = _find_rilinks_for_cell(cell_id, sector_suffix, gen, node, onsite_by_node, pre_by_node)
-    if not rls and onsite_by_node is None:
-        # Backwards-compatible path when the per-node maps weren't passed in.
-        if gen == "nr":
-            rls = _rilinks_for_sector(onsite_tables, sector_suffix)
-        else:
-            rru = _lte_cell_to_rru([onsite_tables, pre_tables] + (all_onsite_tables or []) + (all_pre_tables or []), cell_id)
-            if rru:
-                rls = [c for c in (onsite_tables.get("rilink") or {}).values()
-                       if f"FieldReplaceableUnit={rru}," in (c.get("riPortRef2") or "")]
-        rl_node = node
-
-    # Rilinks compares the RiPort ONLY — which BBU (DUS/XMU) letter port the sector is actually
-    # scripted on, against the port CIQ specifies for it (e.g. the 700 Alpha sector -> Port A),
-    # on that node. Deliberately NOT compared here: the radio-side DATA1/DATA2 port (that is the
-    # separate "sector carrier"/radio-port concept) and operationalState — a link can be
-    # DISABLED at capture time and still be scripted on the correct port, so state is not a
-    # port-correctness signal and must not turn this check red.
-    # A sector cabled on both DATA1 and DATA2 has TWO RiLinks and therefore TWO BBU ports that
-    # must be scripted; both are shown, joined with " | ".
-    ciq_ports = _ciq_bbu_ports(ciq_row, gen)
-    onsite_ports = []
-    for rl in rls:
-        pt = _bbu_port_from_rilink(rl)
-        if pt and pt not in onsite_ports:
-            onsite_ports.append(pt)
-    ciq_port_text = " | ".join(sorted(ciq_ports)) if ciq_ports else None
-    onsite_port_text = " | ".join(sorted(onsite_ports)) if onsite_ports else None
-    moved = bool(rl_node) and bool(node) and rl_node != node
-    post_text = onsite_port_text + (f" @ {rl_node}" if (onsite_port_text and moved) else "") if onsite_port_text else None
-
-    if not rls:
-        color, note = "red", "RiLink not scripted onsite for this sector"
-    elif not onsite_ports:
-        color, note = "amber", "RiLink scripted but the BBU RiPort could not be read from riPortRef1"
-    elif not ciq_ports:
-        color, note = "amber", f"Scripted on Port {onsite_port_text} — CIQ has no BBU port to verify against"
-    elif set(onsite_ports) != set(ciq_ports):
-        color = "red"
-        note = (f"Scripted on Port {onsite_port_text}, CIQ says Port {ciq_port_text} — "
-                f"verify the cabling/script on this node")
-    elif moved:
-        color = "amber"
-        note = (f"Port {onsite_port_text} matches CIQ but the RiLink is on {rl_node}, not {node} — "
-                f"sector moved to another node's pole, confirm this is intended")
-    else:
-        color, note = "green", f"Matching — scripted on Port {onsite_port_text}"
-    results.append({"parameter": "Rilinks", "ciq": ciq_port_text, "post": post_text,
-                     "color": color, "note": note})
+    # Rilinks — verified from the CIQ's radio mapping (see check_rilinks). The CIQ states the
+    # BBU/XMU RiPort(s) this sector is cabled on and its radio-side DATA port; the onsite RiLink
+    # table states what is actually scripted on those ports. Multiple ports join with " | ".
+    _rl = check_rilinks(cell_id, ciq_row, gen, node, onsite_by_node, onsite_tables)
+    results.append({"parameter": "Rilinks", "ciq": _rl["ciq"], "post": _rl["post"],
+                     "color": _rl["color"], "note": _rl["note"]})
 
     # Sector carrier = the sector carrier ID, not the radio DATA port.
     #   LTE -> CIQ 'sectorId' vs the SectorCarrier the cell actually points at onsite
@@ -4601,19 +4768,34 @@ def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, a
                      "post": onsite_sc, "color": color, "note": note})
 
     if gen == "lte":
+        # ISDLONLY is compared CIQ vs on site, like every other naming/config row. The CIQ's
+        # own 'ISDLONLY' column is the expected value (TRUE/FALSE as text); onsite it is
+        # EUtranCellFDD.isDlOnly (true/false). Both sides are normalised to a boolean so the
+        # text-vs-boolean difference can't cause a false mismatch.
+        def _as_bool(v):
+            if v is None:
+                return None
+            t = str(v).strip().lower()
+            if t in ("true", "yes", "y", "1"):
+                return True
+            if t in ("false", "no", "n", "0"):
+                return False
+            return None
+
         onsite_cell = onsite_tables.get("lte_cell", {}).get(f"EUtranCellFDD={cell_id}", {})
-        onsite_sec_ref = onsite_cell.get("sectorCarrierRef")
-        onsite_sec = onsite_tables.get("lte_sector", {}).get(onsite_sec_ref, {}) if onsite_sec_ref else {}
-        onsite_tx = onsite_sec.get("noOfTxAntennas")
-        onsite_isdlonly = onsite_cell.get("isDlOnly")
-        expected_isdlonly = (str(onsite_tx) == "0") if onsite_tx is not None else None
-        if expected_isdlonly is None or onsite_isdlonly is None:
-            color, note = "amber", "No data available to verify"
-        elif bool(onsite_isdlonly) == expected_isdlonly:
+        ciq_isdl = _as_bool(ciq_row.get("ISDLONLY"))
+        onsite_isdl = _as_bool(onsite_cell.get("isDlOnly"))
+        if ciq_isdl is None and onsite_isdl is None:
+            color, note = "gray", "No data available"
+        elif onsite_isdl is None:
+            color, note = "red", "isDlOnly not found onsite"
+        elif ciq_isdl is None:
+            color, note = "amber", "CIQ has no ISDLONLY value to verify against"
+        elif ciq_isdl == onsite_isdl:
             color, note = "green", "Matching"
         else:
-            color, note = "red", "ISDLONLY inconsistent with onsite TX count"
-        results.append({"parameter": "ISDLONLY", "ciq": expected_isdlonly, "post": onsite_isdlonly,
+            color, note = "red", f"ISDLONLY mismatch — CIQ {ciq_isdl}, onsite {onsite_isdl}"
+        results.append({"parameter": "ISDLONLY", "ciq": ciq_isdl, "post": onsite_isdl,
                          "color": color, "note": note})
     # ISDLONLY is an FDD(LTE)-specific concept (EUtranCellFDD.isDlOnly) — no equivalent
     # NRCellDU attribute exists, so it's skipped entirely for NR rather than shown as "no data".
@@ -4629,7 +4811,8 @@ def verify_naming_and_config(cell_id, ciq_row, onsite_tables, pre_tables, gen, a
     return results
 
 
-def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node, scope="MCA"):
+def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, source_pre_tables_by_node,
+                     scope="MCA", node_has_pre=False):
     has_pre = scope not in NO_PRE_SCOPES
     ldn = f"NRCellDU={cell_id}"
     on_cell = onsite_tables["nr_cell"].get(ldn, {})
@@ -4644,6 +4827,11 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
     # assumption, since PCI/nRPCI errors are more consequential than a newly-added cell being
     # compared against a nonexistent Pre baseline — but this needs a real classification source
     # to be fully reliable. Flagging rather than guessing.
+    # 5G Info has no "new vs existing" column (unlike eUtran Parameters' Carrier Cell
+    # Intention) — confirmed by checking its full header list. The one reliable signal is the
+    # Pre log itself: if this node's Pre log WAS uploaded and the cell simply isn't in it, the
+    # cell is newly added. Without a Pre log for the node, absence proves nothing, so the
+    # safer "treat as existing" assumption is kept. Resolved after the move lookup below.
     is_new = True if not has_pre else False
     pre_sector_source_tables = pre_tables
     pre_sector_id = cell_id
@@ -4656,6 +4844,17 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
                 pre_cell = src_tables["nr_cell"].get(f"NRCellDU={move_info['source_sector']}", pre_cell)
                 pre_sector_source_tables = src_tables
                 pre_sector_id = move_info["source_sector"]
+        if not pre_cell:
+            # Same C-band / DoD movement fallback as the LTE path — Pre lives on the other
+            # node's log, Post on the target node, under the same pole ID (same cell name).
+            for _other_node, _other in (source_pre_tables_by_node or {}).items():
+                _found = (_other.get("nr_cell") or {}).get(ldn)
+                if _found:
+                    pre_cell = _found
+                    pre_sector_source_tables = _other
+                    break
+        if node_has_pre and not pre_cell:
+            is_new = True
 
     def sector_lookup(tables, cell_id_key):
         # Confirmed real key format: this block's instances are "NRSectorCarrier=<cell_id>",
@@ -4689,11 +4888,11 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
         else:
             pre_v = pre_cell.get(cell_key) if has_pre else None
             post_v = on_cell.get(cell_key)
+        # Category B is strictly "on site must equal CIQ" — the Pre column is shown for
+        # reference only. A value that still matches Pre but differs from the CIQ is a real
+        # mismatch (the change hasn't been applied) and is flagged red, not softened to amber.
         color, _ = verdict(post_v, ciq_v, "B")
-        if has_pre and color == "red" and ciq_v is not None and pre_v is not None and norm(pre_v) != norm(ciq_v) and norm(post_v) == norm(pre_v):
-            color, note = "amber", "Expected change — retune not yet applied onsite, still matches Pre"
-        else:
-            note = blueprint_comment(param, color, is_new, "nr")
+        note = blueprint_comment(param, color, is_new, "nr")
         if has_pre and is_new:
             pre_v = PRE_NA
         results.append({"parameter": param, "pre": pre_v, "ciq": ciq_v, "is_new": is_new,
@@ -4754,35 +4953,80 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
     has_pre = scope not in NO_PRE_SCOPES
     node_names = [r.get("Node to be built as") for r in mm_objs if r.get("Node to be built as")]
 
+    # Confirmed real gap: a node's 5G cells are named after its gNodeB Name, which for an MMBB
+    # node is NOT the same string as "Node to be built as" (e.g. node DXL02330 carries gNodeB
+    # DXFN014017, and every one of its NRCellDU instances starts with DXFN014017_). Matching
+    # cells to nodes on "Node to be built as" alone silently dropped all of them. Build an
+    # alias map so a cell (or a log filename) can be resolved by any of the node's names.
+    node_alias = {}
+    for r in mm_objs:
+        built = r.get("Node to be built as")
+        if not built:
+            continue
+        for key in ("Node to be built as", "eNodeB Name", "gNodeB Name"):
+            v = r.get(key)
+            if v and str(v).strip() and str(v).strip().upper() != "N/A":
+                node_alias[str(v).strip()] = str(built).strip()
+
+    # Sector Del_Movement's SOURCE nodes are real nodes that are NOT part of this build (the
+    # C-band / DoD sectors are moving off them). Their Pre logs are still needed — that's where
+    # the moved sector's Pre state lives — so they're matched and loaded, but they are never
+    # reported as build nodes and never get result tables of their own.
+    move_map_early = build_sector_move_map(ciq_wb) if has_pre else {}
+    external_pre_nodes = {str(v.get("source_node")).strip() for v in move_map_early.values()
+                          if v.get("source_node")} - set(node_alias)
+
+    match_names = list(node_alias) + sorted(external_pre_nodes)
+
     pre_by_node, onsite_by_node = {}, {}
     unmatched_pre, unmatched_onsite = [], []
     if has_pre:
         for fname, text in pre_files:
-            node = match_file_to_node(fname, node_names)
-            if node:
-                pre_by_node[node] = pv_load_node_tables(text)
+            hit = match_file_to_node(fname, match_names)
+            if hit:
+                pre_by_node[node_alias.get(hit, hit)] = pv_load_node_tables(text)
             else:
                 unmatched_pre.append(fname)
     for fname, text in onsite_files:
-        node = match_file_to_node(fname, node_names)
-        if node:
-            onsite_by_node[node] = pv_load_node_tables(text)
+        hit = match_file_to_node(fname, match_names)
+        if hit:
+            onsite_by_node[node_alias.get(hit, hit)] = pv_load_node_tables(text)
         else:
             unmatched_onsite.append(fname)
 
     nodes_missing_pre = [n for n in node_names if n not in pre_by_node] if has_pre else []
     nodes_missing_onsite = [n for n in node_names if n not in onsite_by_node]
 
+    def _owner_node(cell_id):
+        """Longest alias wins so a shorter node name can't claim a longer one's cell."""
+        for a in sorted(node_alias, key=len, reverse=True):
+            if str(cell_id).startswith(a):
+                return node_alias[a]
+        return None
+
     empty_tables = {"lte_cell": {}, "nr_cell": {}, "nr_sector": {}, "lte_sector": {}, "rilink": {}, "nrcellcu": {}}
     source_pre_by_node = pre_by_node  # for Sector Del_Movement lookups across nodes (MCA only)
 
     lte_ciq, nr_ciq = {}, {}
+    enb_tac = build_enb_tac_map(ciq_wb)
     if "eUtran Parameters" in ciq_wb.sheetnames:
         ws = ciq_wb["eUtran Parameters"]
         hdr = [c.value for c in ws[1]]
         for row in ws.iter_rows(min_row=2, values_only=True):
             d = dict(zip(hdr, row))
             if d.get("EutranCellFDDId"):
+                # LTE tac is on the 'eNB Info' tab, not this one — resolve it per node here so
+                # the comparison sees it as a normal CIQ value. Match on eNBId first (this
+                # sheet's own node key), then on the node name the cell belongs to.
+                _tac = None
+                if d.get("eNBId") is not None:
+                    _tac = enb_tac.get(str(d.get("eNBId")).strip())
+                if _tac is None:
+                    _cell = str(d["EutranCellFDDId"])
+                    _owner = _owner_node(_cell)
+                    if _owner:
+                        _tac = enb_tac.get(str(_owner).strip().upper())
+                d[CIQ_TAC_KEY] = _tac
                 lte_ciq[d["EutranCellFDDId"]] = d
     if "5G Info" in ciq_wb.sheetnames:
         ws = ciq_wb["5G Info"]
@@ -4792,11 +5036,11 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
             if d.get("NRCellDU"):
                 nr_ciq[d["NRCellDU"]] = d
 
-    move_map = build_sector_move_map(ciq_wb) if has_pre else {}
+    move_map = move_map_early
 
     node_results = {n: {"lte": [], "nr": [], "naming_lte": [], "naming_nr": []} for n in node_names}
     for cell_id, ciq_row in lte_ciq.items():
-        node = next((n for n in node_names if cell_id.startswith(n)), None)
+        node = _owner_node(cell_id)
         if not node:
             continue
         pre_t = pre_by_node.get(node, empty_tables)
@@ -4809,12 +5053,13 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
             node=node, onsite_by_node=onsite_by_node, pre_by_node=pre_by_node)))
 
     for cell_id, ciq_row in nr_ciq.items():
-        node = next((n for n in node_names if cell_id.startswith(n)), None)
+        node = _owner_node(cell_id)
         if not node:
             continue
         pre_t = pre_by_node.get(node, empty_tables)
         on_t = onsite_by_node.get(node, empty_tables)
-        results = compare_nr_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node, scope=scope)
+        results = compare_nr_cell(cell_id, ciq_row, pre_t, on_t, move_map, source_pre_by_node,
+                                   scope=scope, node_has_pre=(node in pre_by_node))
         node_results[node]["nr"].append((cell_id, results))
         node_results[node]["naming_nr"].append((cell_id, verify_naming_and_config(
             cell_id, ciq_row, on_t, pre_t, "nr",
@@ -4838,89 +5083,97 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
 
 import io
 
-COMMENT_GROUPS_LTE = [
-    (("rachRootSequence", "PCI", "Cellrange", "TAC"), None),
-    (("EarfcnDL", "EarfcnUL", "Bandwidth", "CellID"),
-     "Mismatch found on [Parameter - BW/Erfcndl/erfcnul/cell id], Verify the Revision history for retune."),
-    (("TX", "RX", "ConfiguredOutputPower"),
-     "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"),
-]
-COMMENT_GROUPS_NR = [
-    (("rachRootSequence", "nRPCI", "Cellrange", "NRTAC", "nCI"), None),
-    (("arfcnDL", "arfcnUL", "bSChannelBwDL", "bSChannelBwUL", "cellLocalId", "ssbFrequency"),
-     "Mismatch found on [Parameter - BW/arfcndl/arfcnul/celllocalid/SSBFREQUENCY], Verify the Revision history for retune."),
-    (("ConfiguredOutputPower",),
-     "Mismatch found on [Parameter - TX/RX/Configpower], Verify for the Radio swap"),
-]
+# COMMENT_GROUPS_LTE / COMMENT_GROUPS_NR are defined once, above, and reused here.
 
 LOGO_B64 = "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"
 
 
-def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=None, site_ids=None):
-    """WIDE layout, one row per sector, each parameter as its own Pre/CIQ/On-site column group
-    side by side, one combined Comments column per table.
+def _pv_display(v):
+    """Every empty cell renders as an explicit NA. A blank cell is indistinguishable from
+    'the log didn't report it', which is exactly the thing the report exists to surface."""
+    if v is None:
+        return "NA"
+    t = str(v).strip()
+    return t if t else "NA"
 
-    LAYOUT RULES (all of these were the cause of the previous "data everywhere" look):
-    - Column widths are derived from the REAL printable width, never from a fixed per-column
-      guess, so nothing can run off the right edge.
-    - A parameter group (its Pre/CIQ/On-site triplet) is never split across two tables; when
-      the groups don't fit, the table continues on a new "(continued)" block instead.
-    - Every page carries the MasTec logo + scope / FA Code / Site ID band, drawn by the page
-      callback rather than flowed into the story, so it repeats on continuation pages too.
-    - Header rows repeat (repeatRows=2) so a table spilling to the next page keeps its labels.
+
+def _pv_collect(node_results, key):
+    """The report is organised by technology, not by node: every 4G sector at the site appears
+    in one 4G table and every 5G sector in one 5G table, regardless of which node owns it.
+    Rows are sorted by sector name so a site's sectors read in a stable, predictable order."""
+    rows = []
+    for _node, res in node_results.items():
+        for r in res.get(key, []) or []:
+            rows.append(r)
+    return sorted(rows, key=lambda r: str(r.get("sector") or ""))
+
+
+def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=None, site_ids=None):
+    """Site-wide (not node-wise) parameter verification report.
+
+    Layout rules, all of which exist to stop the "data everywhere" look:
+    - One row per sector; each parameter is a Pre/CIQ/On-site column group placed side by side.
+    - A parameter group is NEVER split across two tables. When the groups don't fit the page,
+      the table continues in a "(cont.)" block, and the Comments column is repeated on every
+      block so a reader never has to cross-reference back to an earlier chunk.
+    - Column widths are derived from the real printable width, and the number of value columns
+      per block is capped, so columns are always legible and nothing runs off the right edge.
+    - Empty values render as NA rather than blank.
+    - The MasTec logo and the site banner are drawn by the page callback, so they repeat on
+      every page including continuation pages; header rows repeat with repeatRows=2.
     """
     import base64
     from reportlab.lib import colors as pv_colors
     from reportlab.lib.pagesizes import landscape, letter
     from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
-                                     )
+                                     CondPageBreak)
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
     from reportlab.lib.utils import ImageReader
     from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
     COLOR_MAP = {
-        "green": pv_colors.HexColor("#D6F0DC"), "red": pv_colors.HexColor("#FBD3D6"),
-        "amber": pv_colors.HexColor("#FDECC0"), "gray": pv_colors.HexColor("#F0F1F3"),
+        "green": pv_colors.HexColor("#DCF1E2"), "red": pv_colors.HexColor("#FBD8DB"),
+        "amber": pv_colors.HexColor("#FDEDC6"), "gray": pv_colors.HexColor("#ECEEF1"),
     }
     NAVY = pv_colors.HexColor("#012A4E")
     ACCENT = pv_colors.HexColor("#FF5B24")
-    HEADER_BG = NAVY
     SUBHEADER_BG = pv_colors.HexColor("#4B7BB0")
-    GRIDC = pv_colors.HexColor("#D5DCE5")
-    RULEC = pv_colors.HexColor("#012A4E")
+    GRIDC = pv_colors.HexColor("#DBE1E8")
+    RULEC = NAVY
+    ZEBRA = pv_colors.HexColor("#F6F8FB")
 
     PAGESIZE = landscape(letter)
     PAGE_W, PAGE_H = PAGESIZE
-    BAND_H = 0.62 * inch
+    BAND_H = 0.60 * inch
     L_MARGIN = R_MARGIN = 0.30 * inch
 
     styles = getSampleStyleSheet()
-    cell_style = ParagraphStyle("cell", parent=styles["Normal"], fontSize=6, leading=7.2,
+    cell_style = ParagraphStyle("cell", parent=styles["Normal"], fontSize=6.2, leading=7.4,
                                  alignment=TA_CENTER)
-    sector_style = ParagraphStyle("sector", parent=styles["Normal"], fontSize=6, leading=7.2,
+    sector_style = ParagraphStyle("sector", parent=styles["Normal"], fontSize=6.2, leading=7.4,
                                    alignment=TA_LEFT, fontName="Helvetica-Bold")
-    note_style = ParagraphStyle("note", parent=styles["Normal"], fontSize=5.6, leading=6.8,
+    note_style = ParagraphStyle("note", parent=styles["Normal"], fontSize=5.6, leading=6.9,
                                  alignment=TA_LEFT)
-    hdr_style = ParagraphStyle("hdr", parent=styles["Normal"], fontSize=6, leading=7,
+    hdr_style = ParagraphStyle("hdr", parent=styles["Normal"], fontSize=6.2, leading=7.4,
                                 textColor=pv_colors.white, alignment=TA_CENTER,
                                 fontName="Helvetica-Bold")
-    sub_style = ParagraphStyle("sub", parent=hdr_style, fontSize=5.5, leading=6.5)
-    node_style = ParagraphStyle("node", parent=styles["Normal"], fontSize=9.5, leading=12,
-                                 fontName="Helvetica-Bold", textColor=pv_colors.white,
-                                 alignment=TA_LEFT)
-    tbl_title_style = ParagraphStyle("tt", parent=styles["Normal"], fontSize=7.5, leading=9.5,
-                                      fontName="Helvetica-Bold", textColor=NAVY,
-                                      spaceBefore=5, spaceAfter=2)
-    legend_style = ParagraphStyle("lg", parent=styles["Normal"], fontSize=5.8, leading=7,
-                                   textColor=pv_colors.HexColor("#55606E"))
+    sub_style = ParagraphStyle("sub", parent=hdr_style, fontSize=5.4, leading=6.4)
+    tbl_title_style = ParagraphStyle("tt", parent=styles["Normal"], fontSize=8.5, leading=10.5,
+                                      fontName="Helvetica-Bold", textColor=pv_colors.white,
+                                      alignment=TA_LEFT)
+    legend_style = ParagraphStyle("lg", parent=styles["Normal"], fontSize=5.9, leading=7,
+                                   textColor=pv_colors.HexColor("#4A5563"))
 
     def P(text, style=cell_style):
         if text is None or (isinstance(text, str) and text.strip() == ""):
             return Paragraph("", style)
         return Paragraph(str(text).replace("&", "&amp;").replace("<", "&lt;"), style)
 
-    site_id_text = ", ".join([str(s) for s in site_ids]) if site_ids else "N/A"
+    def V(value):
+        return P(_pv_display(value), cell_style)
+
+    site_id_text = ", ".join([str(s) for s in site_ids]) if site_ids else "NA"
     try:
         _logo_reader = ImageReader(io.BytesIO(base64.b64decode(LOGO_B64)))
     except Exception:
@@ -4931,289 +5184,281 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=
         canvas.setFillColor(NAVY)
         canvas.rect(0, PAGE_H - BAND_H, PAGE_W, BAND_H, stroke=0, fill=1)
         canvas.setStrokeColor(ACCENT)
-        canvas.setLineWidth(1.4)
+        canvas.setLineWidth(1.6)
         canvas.line(0, PAGE_H - BAND_H, PAGE_W, PAGE_H - BAND_H)
         x_text = L_MARGIN
         if _logo_reader is not None:
             try:
-                canvas.drawImage(_logo_reader, L_MARGIN, PAGE_H - BAND_H + 0.13 * inch,
-                                 width=0.95 * inch, height=0.36 * inch,
+                canvas.drawImage(_logo_reader, L_MARGIN, PAGE_H - BAND_H + 0.12 * inch,
+                                 width=0.92 * inch, height=0.35 * inch,
                                  mask="auto", preserveAspectRatio=True, anchor="sw")
-                x_text = L_MARGIN + 1.15 * inch
+                x_text = L_MARGIN + 1.10 * inch
             except Exception:
                 pass
         canvas.setFillColor(pv_colors.white)
-        canvas.setFont("Helvetica-Bold", 10)
-        canvas.drawString(x_text, PAGE_H - BAND_H + 0.33 * inch,
-                          f"{scope} — Parameter Verification Report")
-        canvas.setFont("Helvetica", 7)
-        canvas.setFillColor(pv_colors.HexColor("#CBDDF0"))
-        canvas.drawString(x_text, PAGE_H - BAND_H + 0.15 * inch,
-                          f"FA Code: {fa_code or 'N/A'}     Site ID(s): {site_id_text}")
-        canvas.drawRightString(PAGE_W - R_MARGIN, PAGE_H - BAND_H + 0.15 * inch,
+        canvas.setFont("Helvetica-Bold", 9.5)
+        canvas.drawString(x_text, PAGE_H - BAND_H + 0.32 * inch,
+                          f"{scope} \u2014 Parameter Verification Report")
+        canvas.setFont("Helvetica", 6.8)
+        canvas.setFillColor(pv_colors.HexColor("#C7DAEE"))
+        canvas.drawString(x_text, PAGE_H - BAND_H + 0.14 * inch,
+                          f"FA Code: {fa_code or 'NA'}     Site ID(s): {site_id_text}")
+        canvas.setFont("Helvetica", 6.8)
+        canvas.setFillColor(pv_colors.HexColor("#C7DAEE"))
+        canvas.drawRightString(PAGE_W - R_MARGIN, PAGE_H - BAND_H + 0.14 * inch,
                                f"Page {canvas.getPageNumber()}")
+        canvas.setStrokeColor(GRIDC)
+        canvas.setLineWidth(0.5)
+        canvas.line(L_MARGIN, 0.22 * inch, PAGE_W - R_MARGIN, 0.22 * inch)
         canvas.restoreState()
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=PAGESIZE,
-                             topMargin=BAND_H + 0.14 * inch, bottomMargin=0.28 * inch,
+                             topMargin=BAND_H + 0.16 * inch, bottomMargin=0.34 * inch,
                              leftMargin=L_MARGIN, rightMargin=R_MARGIN,
                              title=f"{scope} Parameter Verification")
     story = []
 
-    _legend_items = [("green", "Match"), ("red", "Mismatch"),
-                      ("amber", "Attention / moved / NA (new sector)"), ("gray", "No data")]
+    _legend_items = [("green", "Matching"), ("red", "Mismatch"),
+                      ("amber", "Attention / NA / confirm manually"), ("gray", "No data")]
     legend = Table([[P(lbl, legend_style) for _, lbl in _legend_items]],
-                   colWidths=[1.45 * inch] * len(_legend_items), hAlign="LEFT")
+                   colWidths=[doc.width / len(_legend_items)] * len(_legend_items), hAlign="LEFT")
     _lg = [("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-           ("BOX", (0, 0), (-1, -1), 0.3, GRIDC),
-           ("INNERGRID", (0, 0), (-1, -1), 0.3, GRIDC),
-           ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-           ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]
+           ("BOX", (0, 0), (-1, -1), 0.4, GRIDC),
+           ("INNERGRID", (0, 0), (-1, -1), 0.4, GRIDC),
+           ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+           ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]
     for i, (c, _) in enumerate(_legend_items):
         _lg.append(("BACKGROUND", (i, 0), (i, 0), COLOR_MAP[c]))
     legend.setStyle(TableStyle(_lg))
     story.append(legend)
-    story.append(Spacer(1, 4))
+    story.append(Spacer(1, 6))
 
-    CAT_A_LTE_PARAMS = ("rachRootSequence", "PCI", "Cellrange", "TAC")
-    CAT_A_NR_PARAMS = ("rachRootSequence", "nRPCI", "Cellrange", "NRTAC", "nCI")
+    CAT_A_LTE_PARAMS = ("rachRootSequence", "PCI", "Cellrange")
+    CAT_A_NR_PARAMS = ("rachRootSequence", "nRPCI", "Cellrange")
 
     def _cat_a_comment(row, params):
-        """User-specified wording. Mismatch -> '<PARAMS> Mismatch found on the Pre existing /
-        newly adding sectors'. Match -> 'Matching as per pre' for pre-existing sectors, and
-        NOTHING AT ALL for newly-adding sectors (nothing to compare against)."""
+        """Comment wording for PCI / nRPCI / Cellrange / TAC / NRTAC / nCI / rachRootSequence.
+        Mismatch -> '<PARAMS> Mismatch found on the Pre existing sectors' (or '... on the newly
+        adding sectors'). Match -> 'Matching as per pre' for a pre-existing sector, and no
+        comment at all for a newly-added one, which has no Pre state to have matched."""
         reds = [p for p in params if row.get(f"{p}_color") == "red"]
         if reds:
             tail = "newly adding" if row.get("is_new") else "Pre existing"
             return f"{', '.join(reds)} Mismatch found on the {tail} sectors"
-        # Never claim a match when there was nothing onsite to compare against — a gray/amber
-        # verdict means no data, not agreement.
         if any(row.get(f"{p}_color") in ("gray", "amber", None) for p in params):
             return ""
         return "" if row.get("is_new") else "Matching as per pre"
 
+    def section_title(text):
+        t = Table([[P(text, tbl_title_style)]], colWidths=[doc.width], hAlign="LEFT")
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), NAVY),
+            ("LINEBELOW", (0, 0), (-1, -1), 1.4, ACCENT),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7), ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, -1), 3.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+        ]))
+        return t
+
+    # Cap on value columns per block. 12 keeps every value column at roughly 0.58in, which is
+    # legible at 6.2pt; letting a block grow past this is what made the old tables unreadable.
+    MAX_SUB_COLS = 12
+    SECTOR_W = 1.38 * inch
+    COMMENT_W = 2.00 * inch
+    MAX_SUB = 1.15 * inch
+
     def build_wide_table(wide_rows, param_groups, title, comment_groups=None, cat_a_params=None):
-        """param_groups: [(display_label, key_prefix, sub_cols), ...]
-        sub_cols: e.g. ['pre','ciq','post'] or ['ciq','post']
-        cat_a_params: when set, the Comments column uses the Category-A wording rules above.
-        """
+        """param_groups: [(display_label, key_prefix, sub_cols), ...] with sub_cols
+        ['pre','ciq','post'] or ['ciq','post']."""
         if not wide_rows:
             return
-
-        SECTOR_W = 1.12 * inch
-        COMMENT_W = 1.95 * inch
-        MIN_SUB = 0.40 * inch
-        MAX_SUB = 1.05 * inch
-        MAX_COMMENT_W = 3.10 * inch
-        avail = doc.width - 4
-
         want_comments = bool(comment_groups) or bool(cat_a_params)
-        budget = avail - SECTOR_W - (COMMENT_W if want_comments else 0)
-        max_sub = max(1, int(budget // MIN_SUB))
+        avail = doc.width - 2
 
-        # Balance the groups EVENLY across however many tables are needed, rather than filling
-        # each table to the brim and leaving a one-parameter runt at the end — that runt was
-        # what produced the lopsided "one narrow column + acres of Comments" continuation table.
+        # Split the groups into evenly-sized blocks rather than filling each block to the brim
+        # and leaving a one-parameter runt at the end.
         total_sub = sum(len(g[2]) for g in param_groups)
-        n_tables = max(1, -(-total_sub // max_sub))
-        target = -(-total_sub // n_tables)
-        chunks, cur, cur_n = [], [], 0
+        n_blocks = max(1, -(-total_sub // MAX_SUB_COLS))
+        target = -(-total_sub // n_blocks)
+        blocks, cur, cur_n = [], [], 0
         for g in param_groups:
             n = len(g[2])
-            if cur and cur_n + n > target and len(chunks) < n_tables - 1:
-                chunks.append(cur)
+            if cur and cur_n + n > target and len(blocks) < n_blocks - 1:
+                blocks.append(cur)
                 cur, cur_n = [], 0
             cur.append(g)
             cur_n += n
         if cur:
-            chunks.append(cur)
+            blocks.append(cur)
 
-        shown_params = {kp for _, kp, _ in param_groups}
+        def _comments_for(block_params):
+            """A row's Comments cell only ever mentions parameters that are actually shown in
+            the same block. A block whose columns are Earfcn/TX/RX must not report a TAC
+            mismatch — TAC lives in a different block, and that block reports it itself."""
+            out = []
+            for row in wide_rows:
+                if not want_comments:
+                    out.append("")
+                    continue
+                if cat_a_params:
+                    out.append(_cat_a_comment(row, [p for p in cat_a_params if p in block_params]))
+                elif comment_groups == "row":
+                    out.append(row.get("comment", "") or "")
+                else:
+                    parts = []
+                    for params, fixed_text in comment_groups:
+                        trig = [p for p in params
+                                if p in block_params and row.get(f"{p}_color") == "red"]
+                        if not trig:
+                            continue
+                        parts.append(group_mismatch_comment(trig, fixed_text)
+                                     if fixed_text is not None
+                                     else row.get(f"{trig[0]}_note", "Mismatch found"))
+                    out.append(" / ".join(dict.fromkeys(parts)))
+            return out
 
-        for ch_i, chunk in enumerate(chunks):
-            last = (ch_i == len(chunks) - 1)
-            with_comments = want_comments and last
-            chunk_title = title if ch_i == 0 else f"{title} (continued)"
+        block_comments = [_comments_for({kp for _, kp, _ in blk}) for blk in blocks]
+        any_comment = any(t.strip() for texts in block_comments for t in texts)
+        base_comment_w = (COMMENT_W if any_comment else 0.95 * inch) if want_comments else 0
 
-            n_sub = sum(len(sc) for _, _, sc in chunk)
-            free = avail - SECTOR_W - (COMMENT_W if with_comments else 0)
-            sub_w = min(MAX_SUB, free / n_sub)
-            used = SECTOR_W + n_sub * sub_w + (COMMENT_W if with_comments else 0)
-            slack = max(0, avail - used)
-            if with_comments:
-                # Comments takes at most half the slack (and never more than MAX_COMMENT_W);
-                # the rest widens the data columns so a short table doesn't end up as a sliver
-                # of data next to an acre of empty comment space.
-                extra_c = min(slack * 0.5, MAX_COMMENT_W - COMMENT_W)
-                comment_w = COMMENT_W + max(0, extra_c)
-                sub_w += max(0, (slack - max(0, extra_c))) / n_sub
+        # Never leave a section header stranded at the foot of a page with a row or two under
+        # it — push the whole section to the next page if it can't get a reasonable start here.
+        story.append(CondPageBreak(1.5 * inch))
+        story.append(section_title(title))
+        story.append(Spacer(1, 3))
+
+        for b_i, block in enumerate(blocks):
+            comment_texts = block_comments[b_i]
+            n_sub = sum(len(sc) for _, _, sc in block)
+            comment_w = base_comment_w
+            sub_w = min(MAX_SUB, (avail - SECTOR_W - comment_w) / n_sub)
+            # Any width left over after capping the value columns widens Comments first, then
+            # the Sector column — never left as dead space between columns.
+            slack = max(0.0, avail - (SECTOR_W + n_sub * sub_w + comment_w))
+            if want_comments and any_comment:
+                comment_w += slack * 0.6
+                sector_w = SECTOR_W + slack * 0.4
             else:
-                comment_w = 0
-                sub_w += slack / n_sub
-            # Hard-cap the data columns; anything still left over widens the Sector column
-            # rather than stretching every value cell into a sea of whitespace.
-            sub_w = min(sub_w, MAX_SUB)
-            sector_w = SECTOR_W + max(0, avail - (SECTOR_W + n_sub * sub_w + comment_w))
+                sector_w = SECTOR_W + slack
 
             top_header = [P("Sector", hdr_style)]
             sub_header = [P("", sub_style)]
             col_widths = [sector_w]
-            span_cmds = []
-            group_edges = []
-            pre_cols = []
-            col_idx = 1
-            for label, key_prefix, sub_cols in chunk:
+            span_cmds, group_edges, col_idx = [], [], 1
+            for label, key_prefix, sub_cols in block:
                 span_start = col_idx
                 for sc in sub_cols:
                     top_header.append(P("", hdr_style))
                     sub_header.append(P("ON SITE" if sc == "post" else sc.upper(), sub_style))
                     col_widths.append(sub_w)
-                    if sc == "pre":
-                        pre_cols.append(col_idx)
                     col_idx += 1
                 span_cmds.append(("SPAN", (span_start, 0), (col_idx - 1, 0)))
                 top_header[span_start] = P(label, hdr_style)
                 group_edges.append(col_idx - 1)
-            if with_comments:
+            if want_comments:
                 top_header.append(P("Comments", hdr_style))
                 sub_header.append(P("", sub_style))
                 col_widths.append(comment_w)
 
             data = [top_header, sub_header]
-            row_color_cells = []
+            painted = []
             for r_i, row in enumerate(wide_rows, start=2):
-                data_row = [P(row["sector"], sector_style)]
+                data_row = [P(row.get("sector"), sector_style)]
                 c_i = 1
-                for label, key_prefix, sub_cols in chunk:
+                for label, key_prefix, sub_cols in block:
                     color = row.get(f"{key_prefix}_color")
                     for sc in sub_cols:
                         val = row.get(f"{key_prefix}_{sc}")
-                        data_row.append(P(val))
-                        # A newly-added sector has no Pre baseline: the Pre cell shows NA and is
-                        # always amber, regardless of the parameter's own verdict colour.
-                        if sc == "pre" and norm(val) == PRE_NA:
-                            row_color_cells.append((r_i, c_i, "amber"))
+                        data_row.append(V(val))
+                        # A newly-added sector has no Pre state at all: its Pre cell reads NA
+                        # and is amber, whatever the parameter's own verdict is.
+                        if sc == "pre" and _pv_display(val) == "NA":
+                            painted.append((r_i, c_i, "amber"))
                         elif color:
-                            row_color_cells.append((r_i, c_i, color))
+                            painted.append((r_i, c_i, color))
                         c_i += 1
-                if with_comments and cat_a_params:
-                    data_row.append(P(_cat_a_comment(row, [p for p in cat_a_params if p in shown_params]),
-                                       note_style))
-                elif with_comments and comment_groups == "row":
-                    data_row.append(P(row.get("comment", ""), note_style))
-                elif with_comments:
-                    comments = []
-                    for params, fixed_text in comment_groups:
-                        triggered = [p for p in params if p in shown_params and row.get(f"{p}_color") == "red"]
-                        if not triggered:
-                            continue
-                        comments.append(fixed_text if fixed_text else row.get(f"{triggered[0]}_note", "Mismatch"))
-                    data_row.append(P(" / ".join(dict.fromkeys(comments)), note_style))
+                if want_comments:
+                    data_row.append(P(comment_texts[r_i - 2], note_style))
                 data.append(data_row)
 
             tbl = Table(data, repeatRows=2, colWidths=col_widths, hAlign="LEFT")
-            style_cmds = [
-                ("BACKGROUND", (0, 0), (-1, 0), HEADER_BG),
+            cmds = [
+                ("BACKGROUND", (0, 0), (-1, 0), NAVY),
                 ("BACKGROUND", (0, 1), (-1, 1), SUBHEADER_BG),
                 ("INNERGRID", (0, 0), (-1, -1), 0.25, GRIDC),
                 ("BOX", (0, 0), (-1, -1), 0.8, RULEC),
                 ("LINEBELOW", (0, 1), (-1, 1), 0.8, RULEC),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1.5), ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
-                ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
                 ("SPAN", (0, 0), (0, 1)),
-                ("ROWBACKGROUNDS", (0, 2), (-1, -1), [pv_colors.white, pv_colors.HexColor("#F5F8FC")]),
+                ("ROWBACKGROUNDS", (0, 2), (-1, -1), [pv_colors.white, ZEBRA]),
             ] + span_cmds
-            if with_comments:
-                style_cmds.append(("SPAN", (len(col_widths) - 1, 0), (len(col_widths) - 1, 1)))
-                style_cmds.append(("LINEBEFORE", (len(col_widths) - 1, 0),
-                                    (len(col_widths) - 1, len(data) - 1), 0.8, RULEC))
-            # Vertical rule after each parameter group so the Pre/CIQ/On-site triplets read as
-            # blocks instead of one undifferentiated wall of columns.
+            if want_comments:
+                last = len(col_widths) - 1
+                cmds.append(("SPAN", (last, 0), (last, 1)))
+                cmds.append(("LINEBEFORE", (last, 0), (last, len(data) - 1), 0.8, RULEC))
             for edge in group_edges:
-                style_cmds.append(("LINEAFTER", (edge, 0), (edge, len(data) - 1), 0.6, RULEC))
-            style_cmds.append(("LINEAFTER", (0, 0), (0, len(data) - 1), 0.8, RULEC))
-            for r_i, c_i, color in row_color_cells:
-                style_cmds.append(("BACKGROUND", (c_i, r_i), (c_i, r_i),
-                                    COLOR_MAP.get(color, pv_colors.white)))
-            tbl.setStyle(TableStyle(style_cmds))
-            story.append(P(chunk_title, tbl_title_style))
+                cmds.append(("LINEAFTER", (edge, 0), (edge, len(data) - 1), 0.6, RULEC))
+            cmds.append(("LINEAFTER", (0, 0), (0, len(data) - 1), 0.8, RULEC))
+            for r_i, c_i, color in painted:
+                cmds.append(("BACKGROUND", (c_i, r_i), (c_i, r_i),
+                              COLOR_MAP.get(color, pv_colors.white)))
+            tbl.setStyle(TableStyle(cmds))
+            if b_i:
+                story.append(Spacer(1, 3))
+                story.append(P("(cont.)", legend_style))
+                story.append(Spacer(1, 2))
             story.append(tbl)
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 9))
 
-    def naming_groups():
-        cols = ["ciq", "post"]
-        return [
-            ("FDD naming", "FDD_naming", cols), ("Rilinks (RiPort)", "Rilinks", cols),
-            ("Sector carrier", "sector_carrier", cols), ("ISDLONLY", "ISDLONLY", cols),
-        ]
+    c2 = ["ciq", "post"]
+    c3 = ["pre", "ciq", "post"] if has_pre else ["ciq", "post"]
 
-    def naming_groups_nr():
-        cols = ["ciq", "post"]
-        return [
-            ("Rilinks (RiPort)", "Rilinks", cols), ("NR sector carrier", "sector_carrier", cols),
-            ("NRCELL CU naming", "NRCELL_CU_naming", cols),
-        ]
+    naming_lte_groups = [("FDD naming", "FDD_naming", c2), ("Rilinks (RiPort)", "Rilinks", c2),
+                         ("Sector carrier", "sector_carrier", c2), ("ISDLONLY", "ISDLONLY", c2)]
+    naming_nr_groups = [("Rilinks (RiPort)", "Rilinks", c2),
+                        ("NR sector carrier", "sector_carrier", c2),
+                        ("NRCELL CU naming", "NRCELL_CU_naming", c2)]
+    lte_groups_1 = [("EarfcnDL", "EarfcnDL", c3), ("EarfcnUL", "EarfcnUL", c3), ("TX", "TX", c3),
+                    ("RX", "RX", c3), ("Bandwidth", "Bandwidth", c3),
+                    ("ConfiguredOutputPower", "ConfiguredOutputPower", c3),
+                    ("CellID", "CellID", c3), ("TAC", "TAC", c3)]
+    lte_groups_2 = [("rachRootSequence", "rachRootSequence", c3), ("PCI", "PCI", c3),
+                    ("Cellrange", "Cellrange", c3)]
+    nr_groups_1 = [("arfcnDL", "arfcnDL", c3), ("arfcnUL", "arfcnUL", c3),
+                   ("bSChannelBwDL", "bSChannelBwDL", c3), ("bSChannelBwUL", "bSChannelBwUL", c3),
+                   ("ConfiguredOutputPower", "ConfiguredOutputPower", c3),
+                   ("cellLocalId", "cellLocalId", c3), ("ssbFrequency", "ssbFrequency", c3),
+                   ("TX", "TX", c3), ("RX", "RX", c3),
+                   ("NRTAC", "NRTAC", c3), ("nCI", "nCI", c3)]
+    nr_groups_2 = [("rachRootSequence", "rachRootSequence", c3), ("nRPCI", "nRPCI", c3),
+                   ("Cellrange", "Cellrange", c3)]
 
-    def lte_param_groups_1():
-        c3 = ["pre", "ciq", "post"] if has_pre else ["ciq", "post"]
-        return [("EarfcnDL", "EarfcnDL", c3), ("EarfcnUL", "EarfcnUL", c3), ("TX", "TX", c3),
-                ("RX", "RX", c3), ("Bandwidth", "Bandwidth", c3),
-                ("ConfiguredOutputPower", "ConfiguredOutputPower", c3), ("CellID", "CellID", c3)]
+    naming_lte = _pv_collect(node_results, "_wide_naming_lte")
+    naming_nr = _pv_collect(node_results, "_wide_naming_nr")
+    lte_rows = _pv_collect(node_results, "_wide_lte")
+    nr_rows = _pv_collect(node_results, "_wide_nr")
 
-    def lte_param_groups_2():
-        c3 = ["pre", "ciq", "post"] if has_pre else ["ciq", "post"]
-        return [("rachRootSequence", "rachRootSequence", c3), ("PCI", "PCI", c3),
-                ("Cellrange", "Cellrange", c3), ("TAC", "TAC", c3)]
-
-    def nr_param_groups_1():
-        c3 = ["pre", "ciq", "post"] if has_pre else ["ciq", "post"]
-        return [("arfcnDL", "arfcnDL", c3), ("arfcnUL", "arfcnUL", c3),
-                ("bSChannelBwDL", "bSChannelBwDL", c3), ("bSChannelBwUL", "bSChannelBwUL", c3),
-                ("ConfiguredOutputPower", "ConfiguredOutputPower", c3),
-                ("cellLocalId", "cellLocalId", c3), ("ssbFrequency", "ssbFrequency", c3)]
-
-    def nr_param_groups_2():
-        c3 = ["pre", "ciq", "post"] if has_pre else ["ciq", "post"]
-        return [("rachRootSequence", "rachRootSequence", c3), ("nRPCI", "nRPCI", c3),
-                ("Cellrange", "Cellrange", c3), ("NRTAC", "NRTAC", c3), ("nCI", "nCI", c3)]
-
-    for node, res in node_results.items():
-        node_tbl = Table([[P(f"NODE  {node}", node_style)]], colWidths=[doc.width], hAlign="LEFT")
-        node_tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), NAVY),
-            ("LINEBELOW", (0, 0), (-1, -1), 1.2, ACCENT),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ]))
-        story.append(Spacer(1, 4))
-        story.append(node_tbl)
-        # A node can have 4G cells, 5G cells, or both — 5G table generated whenever 5G cells
-        # are present, even if the node's primary identity is 4G (MMBB).
-        if res.get("naming_lte"):
-            build_wide_table(res["_wide_naming_lte"], naming_groups(), "4G Naming & Configuration",
-                              comment_groups="row")
-        if res.get("naming_nr"):
-            build_wide_table(res["_wide_naming_nr"], naming_groups_nr(), "5G Naming & Configuration",
-                              comment_groups="row")
-        # Blueprint row order: Naming table first, then ALL "Earfcn/TX-RX/etc" tables grouped
-        # together (4G then 5G), THEN all "PCI/TAC" tables (4G then 5G) — type-first ordering.
-        if res.get("lte"):
-            build_wide_table(res["_wide_lte"], lte_param_groups_1(), "4G Sectors",
-                              comment_groups=[COMMENT_GROUPS_LTE[1], COMMENT_GROUPS_LTE[2]])
-        if res.get("nr"):
-            build_wide_table(res["_wide_nr"], nr_param_groups_1(), "5G Sectors",
-                              comment_groups=[COMMENT_GROUPS_NR[1], COMMENT_GROUPS_NR[2]])
-        if res.get("lte"):
-            build_wide_table(res["_wide_lte"], lte_param_groups_2(), "4G Sectors — PCI / Cellrange / TAC / rachRootSequence",
-                              cat_a_params=CAT_A_LTE_PARAMS)
-        if res.get("nr"):
-            build_wide_table(res["_wide_nr"], nr_param_groups_2(), "5G Sectors — nRPCI / Cellrange / NRTAC / nCI / rachRootSequence",
-                              cat_a_params=CAT_A_NR_PARAMS)
+    # Blueprint row order: naming first, then all "Earfcn/TX-RX/power/cell id" tables grouped
+    # together (4G then 5G), then all "PCI/Cellrange/TAC" tables (4G then 5G) — type-first.
+    build_wide_table(naming_lte, naming_lte_groups, "4G Naming & Configuration",
+                      comment_groups="row")
+    build_wide_table(naming_nr, naming_nr_groups, "5G Naming & Configuration",
+                      comment_groups="row")
+    build_wide_table(lte_rows, lte_groups_1, "4G Sectors \u2014 Earfcn / TX-RX / Power / Cell ID / TAC",
+                      comment_groups=[g for g in COMMENT_GROUPS_LTE if g[1] is not None])
+    build_wide_table(nr_rows, nr_groups_1,
+                      "5G Sectors \u2014 arfcn / Bandwidth / Power / cellLocalId / SSB / TX-RX / NRTAC / nCI",
+                      comment_groups=[g for g in COMMENT_GROUPS_NR if g[1] is not None])
+    build_wide_table(lte_rows, lte_groups_2, "4G Sectors \u2014 rachRootSequence / PCI / Cellrange",
+                      cat_a_params=CAT_A_LTE_PARAMS)
+    build_wide_table(nr_rows, nr_groups_2, "5G Sectors \u2014 rachRootSequence / nRPCI / Cellrange",
+                      cat_a_params=CAT_A_NR_PARAMS)
 
     doc.build(story, onFirstPage=_page_furniture, onLaterPages=_page_furniture)
     return buf.getvalue()
+
     
 # ============================================================
 # UI
@@ -5782,8 +6027,8 @@ elif st.session_state.qkx_page == "paramcheck":
                 d = {"Sector": row["sector"]}
                 row_colors = {}
                 for disp, kp in keys:
-                    d[f"{disp} (CIQ)"] = row.get(f"{kp}_ciq")
-                    d[f"{disp} (On site)"] = row.get(f"{kp}_post")
+                    d[f"{disp} (CIQ)"] = _pv_display(row.get(f"{kp}_ciq"))
+                    d[f"{disp} (On site)"] = _pv_display(row.get(f"{kp}_post"))
                     row_colors[f"{disp} (CIQ)"] = row.get(f"{kp}_color")
                     row_colors[f"{disp} (On site)"] = row.get(f"{kp}_color")
                 d["Comments"] = row.get("comment", "")
@@ -5808,10 +6053,13 @@ elif st.session_state.qkx_page == "paramcheck":
                 row_colors = {}
                 for disp, kp in keys:
                     if pv_has_pre:
-                        d[f"{disp} (Pre)"] = row.get(f"{kp}_pre")
-                        row_colors[f"{disp} (Pre)"] = row.get(f"{kp}_color")
-                    d[f"{disp} (CIQ)"] = row.get(f"{kp}_ciq")
-                    d[f"{disp} (On site)"] = row.get(f"{kp}_post")
+                        _pre_txt = _pv_display(row.get(f"{kp}_pre"))
+                        d[f"{disp} (Pre)"] = _pre_txt
+                        # An NA Pre cell is amber wherever it appears — a newly-added sector has
+                        # no Pre state, and a missing one is not evidence of a match.
+                        row_colors[f"{disp} (Pre)"] = "amber" if _pre_txt == "NA" else row.get(f"{kp}_color")
+                    d[f"{disp} (CIQ)"] = _pv_display(row.get(f"{kp}_ciq"))
+                    d[f"{disp} (On site)"] = _pv_display(row.get(f"{kp}_post"))
                     row_colors[f"{disp} (CIQ)"] = row.get(f"{kp}_color")
                     row_colors[f"{disp} (On site)"] = row.get(f"{kp}_color")
                 d["Comments"] = row.get("comment", "")
@@ -5839,16 +6087,19 @@ elif st.session_state.qkx_page == "paramcheck":
         NR_KEYS_2 = [("rachRootSequence", "rachRootSequence"), ("nRPCI", "nRPCI"),
                      ("Cellrange", "Cellrange"), ("NRTAC", "NRTAC"), ("nCI", "nCI")]
 
-        for node, res in pv_result["node_results"].items():
-            if not any(res.get(g) for g in ("lte", "nr", "naming_lte", "naming_nr")):
-                continue
-            with st.expander(f"Node: {node}", expanded=True):
-                render_wide_naming(res.get("_wide_naming_lte", []), "4G Naming & Configuration", NAMING_LTE_KEYS)
-                render_wide_naming(res.get("_wide_naming_nr", []), "5G Naming & Configuration", NAMING_NR_KEYS)
-                render_wide_params(res.get("_wide_lte", []), "4G Sectors", LTE_KEYS_1)
-                render_wide_params(res.get("_wide_nr", []), "5G Sectors", NR_KEYS_1)
-                render_wide_params(res.get("_wide_lte", []), "4G Sectors — PCI/TAC", LTE_KEYS_2)
-                render_wide_params(res.get("_wide_nr", []), "5G Sectors — PCI/TAC", NR_KEYS_2)
+        # Site-wide, not node-wise — same as the PDF: every 4G sector in one set of tables and
+        # every 5G sector in another, sorted by sector name, regardless of owning node.
+        pv_naming_lte = _pv_collect(pv_result["node_results"], "_wide_naming_lte")
+        pv_naming_nr = _pv_collect(pv_result["node_results"], "_wide_naming_nr")
+        pv_lte_rows = _pv_collect(pv_result["node_results"], "_wide_lte")
+        pv_nr_rows = _pv_collect(pv_result["node_results"], "_wide_nr")
+
+        render_wide_naming(pv_naming_lte, "4G Naming & Configuration", NAMING_LTE_KEYS)
+        render_wide_naming(pv_naming_nr, "5G Naming & Configuration", NAMING_NR_KEYS)
+        render_wide_params(pv_lte_rows, "4G Sectors — Earfcn / TX-RX / Power / Cell ID", LTE_KEYS_1)
+        render_wide_params(pv_nr_rows, "5G Sectors — arfcn / Bandwidth / Power / cellLocalId / SSB", NR_KEYS_1)
+        render_wide_params(pv_lte_rows, "4G Sectors — rachRootSequence / PCI / Cellrange / TAC", LTE_KEYS_2)
+        render_wide_params(pv_nr_rows, "5G Sectors — rachRootSequence / nRPCI / Cellrange / NRTAC / nCI", NR_KEYS_2)
 
         pv_pdf_bytes = build_parameter_verification_pdf(
             pv_scope, pv_result["node_results"], has_pre=pv_has_pre,
