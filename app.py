@@ -3132,6 +3132,19 @@ def _unlock_block(inv, node):
     lines.append(f"cmedit set {node} TermPointToENB.termPointToENBId==* administrativeState=UNLOCKED --force")
     lines.append(f"cmedit set {node} TermPointToGNodeB.termPointToGNodeBId==* administrativeState=UNLOCKED --force")
     lines.append(f"cmedit set {node} TermPointToGNB.termPointToGNBId==* administrativeState=UNLOCKED --force")
+
+    # The Unlocking file also carries a lock section, so the engineer who unlocked the site has
+    # the exact commands to put it back down without switching files. Same CIQ-sourced cells as
+    # the unlock commands above — this is NOT the standalone Locking template, which is built
+    # from Pre-checks and additionally covers SectorEquipmentFunction and the radios.
+    lines.append("")
+    lines.append("###lock commands####")
+    for c in inv["lte"].get(node, []):
+        lines.append(f"cmedit set {node} EUtrancellFDD.(EUtranCellFDDid=={c}) administrativeState=SHUTTINGDOWN --force")
+    for c in inv["nr"].get(node, []):
+        lines.append(f"cmedit set {node} NRCellDU.NRCellDUId=={c} administrativeState=SHUTTINGDOWN --force")
+    for c in inv["nsc"].get(node, []):
+        lines.append(f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId=={c} administrativeState=LOCKED")
     return lines
 
 
