@@ -3113,47 +3113,54 @@ def parse_ciq_unlock_inventory(ciq_wb, mm_objs):
 
 
 def _unlock_block(inv, node):
-    """Command lines for one node. The cell-level commands are enumerated one per cell from the
-    CIQ; everything below them is a fixed wildcard command that only needs the node ID."""
-    lines = []
+    """Command lines for one node, matching the Unlock template verbatim.
+
+    Only EUtrancellFDD is enumerated one line per cell (the template leaves
+    'EUtranCellFDDid==' blank to be filled in). Every other MO uses the template's own wildcard
+    form — NRCellDU, NRSectorCarrier, SectorEquipmentFunction, the XMU/AAS/RRU radios and the
+    TermPoints are all '==*', so they are single fixed lines and are NOT expanded per cell.
+
+    Exact spelling is preserved from the template, including the two places that use a COLON
+    rather than '=' ('administrativeState:UNLOCKED' on NRSectorCarrier, and
+    'administrativeState:LOCKED' in the lock section) and the doubled spaces before --force.
+    These are reproduced as-is rather than normalised, so the generated file is byte-comparable
+    against the template.
+
+    The AAS line is always emitted, as in the template — it is not conditional on the node
+    having a CBAND/DOD radio.
+    """
+    lines = ["######### UNLOCK Commands #########"]
     for c in inv["lte"].get(node, []):
         lines.append(f"cmedit set {node} EUtrancellFDD.(EUtranCellFDDid=={c}) administrativeState=UNLOCKED")
-    for c in inv["nr"].get(node, []):
-        lines.append(f"cmedit set {node} NRCellDU.NRCellDUId=={c} administrativeState=UNLOCKED --force")
-    for c in inv["nsc"].get(node, []):
-        lines.append(f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId=={c} administrativeState=UNLOCKED --force")
-
+    lines.append(f"cmedit set {node} NRCellDU.NRCellDUId==* administrativeState=UNLOCKED  --force")
+    lines.append(f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId==* administrativeState:UNLOCKED --force")
     lines.append(f"cmedit set {node} SectorEquipmentFunction.sectorEquipmentFunctionId==* administrativeState=UNLOCKED")
     lines.append(f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId==XMU* administrativeState=UNLOCKED")
-    if inv["cband"].get(node):
-        lines.append(f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId==AAS* administrativeState=UNLOCKED")
+    lines.append(f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId==AAS* administrativeState=UNLOCKED")
     lines.append(f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId==RRU* administrativeState=UNLOCKED")
     lines.append(f"cmedit set {node} TermPointToMme.termPointToMmeId==* administrativeState=UNLOCKED --force")
     lines.append(f"cmedit set {node} TermPointToENB.termPointToENBId==* administrativeState=UNLOCKED --force")
     lines.append(f"cmedit set {node} TermPointToGNodeB.termPointToGNodeBId==* administrativeState=UNLOCKED --force")
     lines.append(f"cmedit set {node} TermPointToGNB.termPointToGNBId==* administrativeState=UNLOCKED --force")
 
-    # The Unlocking file also carries a lock section, so the engineer who unlocked the site has
-    # the exact commands to put it back down without switching files. Same CIQ-sourced cells as
-    # the unlock commands above — this is NOT the standalone Locking template, which is built
-    # from Pre-checks and additionally covers SectorEquipmentFunction and the radios.
-    lines.append("")
+    # The Unlocking file carries its own lock section, so the engineer who unlocked the site has
+    # the commands to put it back down without switching files. It is part of the template and
+    # is always emitted. This is NOT the standalone Locking template, which is built from
+    # Pre-checks and additionally covers SectorEquipmentFunction and the radios.
     lines.append("###lock commands####")
     for c in inv["lte"].get(node, []):
-        lines.append(f"cmedit set {node} EUtrancellFDD.(EUtranCellFDDid=={c}) administrativeState=SHUTTINGDOWN --force")
-    for c in inv["nr"].get(node, []):
-        lines.append(f"cmedit set {node} NRCellDU.NRCellDUId=={c} administrativeState=SHUTTINGDOWN --force")
-    for c in inv["nsc"].get(node, []):
-        lines.append(f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId=={c} administrativeState=LOCKED")
+        lines.append(f"cmedit set {node} EUtrancellFDD.(EUtranCellFDDid=={c}) administrativeState=SHUTTINGDOWN  --force")
+    lines.append(f"cmedit set {node} NRCellDU.NRCellDUId==* administrativeState=SHUTTINGDOWN   --force")
+    lines.append(f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId==* administrativeState:LOCKED")
     return lines
 
 
 def build_unlock_text(inv):
+    """The '######### UNLOCK Commands #########' banner is emitted by _unlock_block() itself so
+    the whole per-node body stays in one place and matches the template line for line."""
     out = [UNLOCK_PREAMBLE, "", ""]
     for node in inv["nodes"]:
         out.append(f"Node ID: {node}")
-        out.append("######### UNLOCK Commands #########")
-        out.append("")
         out += _unlock_block(inv, node)
         out.append("")
     return "\n".join(out).rstrip() + "\n"
