@@ -2815,6 +2815,357 @@ def generate_node_deletion_templates(ciq_wb, mm_objs, edp_index, classification,
     return outputs, summary_rows
 
 
+# ============================================================
+# LOCK / UNLOCK COMMAND TEMPLATES (from Pre-checks)
+# ============================================================
+# Two plain-text command files built entirely from the Pre-checks report, node by node, in the
+# order the nodes first appear in its Summary Status table. Everything is taken from Pre — the
+# point is to lock what is actually on air right now, not what the CIQ says should be.
+#
+# Source of each command, confirmed against a real Pre-checks report:
+#   EUtranCellFDD          Summary Status rows where Technology = LTE
+#   NRCellDU               Summary Status rows where Technology = 5G
+#   NRSectorCarrier        '5G NR Cell DU Status' table, nRSectorCarrierRef column
+#   SectorEquipmentFunction'5G NR Sector Equipment Function' table (covers BOTH technologies —
+#                          numeric ids are the LTE SEFs, name-style ids are the 5G ones)
+#   FieldReplaceableUnit   'Hardware Status Information' table, RRU* and AAS* MOs only
+#
+# The SEF table is the one table with no Node column, so each SEF is attributed to its node
+# through the two RRU-mapping tables ('RRU Cell Mapping' for LTE, '5G Cell to RRU Mapping' for
+# 5G), which name a cell whose node is already known from Summary Status.
+
+PRECHECK_SECTION_HEADERS = (
+    "Summary Notes", "Summary Status", "LTE FDD Cell Status Information",
+    "5G NR Cell DU Status", "5G NR Cell CU Status", "5G NR Sector Carrier",
+    "5G NR Sector Equipment Function", "5G Cell to RRU Mapping",
+    "Hardware Status Information", "RRU Cell Mapping", "DL/UL Loss",
+)
+
+
+def _precheck_sections(text):
+    """Split the Pre-checks text into {section header: [lines]}. Tables repeat their header on
+    every page they spill onto, so the lines of a section are accumulated across all of its
+    occurrences rather than only the first."""
+    out = {}
+    current = None
+    for raw in (text or "").replace("\r", "").split("\n"):
+        line = raw.rstrip()
+        stripped = line.strip()
+        hit = next((h for h in PRECHECK_SECTION_HEADERS if stripped == h), None)
+        if hit:
+            current = hit
+            out.setdefault(current, [])
+            continue
+        if current is not None:
+            out[current].append(line)
+    return out
+
+
+def parse_precheck_lock_inventory(precheck_text):
+    """Everything the lock/unlock templates need, keyed by node and kept in report order.
+    Returns {'nodes': [...], 'lte': {node: [cells]}, 'nr': {node: [cells]},
+             'nsc': {node: [carriers]}, 'sef': {node: [ids]}, 'fru': {node: [MOs]}}."""
+    sections = _precheck_sections(precheck_text)
+    nodes, lte, nr = [], {}, {}
+    cell_node = {}
+
+    for line in sections.get("Summary Status", []):
+        m = re.match(r'^(\S+)\s+(LTE|5G)\s+(\S+)\s+(?:UNLOCKED|LOCKED)\s', line)
+        if not m:
+            continue
+        node, tech, cell = m.group(1), m.group(2), m.group(3)
+        if node not in nodes:
+            nodes.append(node)
+        bucket = (lte if tech == "LTE" else nr).setdefault(node, [])
+        if cell not in bucket:
+            bucket.append(cell)
+        cell_node.setdefault(cell, node)
+
+    def owner(cell):
+        """Node for a cell named in a table that has no Node column of its own."""
+        if cell in cell_node:
+            return cell_node[cell]
+        return next((n for n in sorted(nodes, key=len, reverse=True) if str(cell).startswith(n)), None)
+
+    # NRSectorCarrier — the nRSectorCarrierRef the DU cell actually points at.
+    nsc = {}
+    for line in sections.get("5G NR Cell DU Status", []):
+        parts = line.split()
+        if len(parts) < 3 or parts[1] not in ("UNLOCKED", "LOCKED"):
+            continue
+        cell = parts[0]
+        ref = next((p for p in parts[2:] if p.startswith(cell.split("_")[0]) or p == cell), None)
+        if ref is None:
+            continue
+        node = owner(cell)
+        if node:
+            bucket = nsc.setdefault(node, [])
+            if ref not in bucket:
+                bucket.append(ref)
+
+    # SEF -> node, via the two RRU mapping tables (Cells | SC | SEF | ...).
+    sef_node = {}
+    for sec in ("RRU Cell Mapping", "5G Cell to RRU Mapping"):
+        for line in sections.get(sec, []):
+            parts = line.split()
+            if len(parts) < 3 or parts[0] in ("Cells",):
+                continue
+            node = owner(parts[0])
+            if node:
+                sef_node.setdefault(parts[2], node)
+
+    sef = {}
+    for line in sections.get("5G NR Sector Equipment Function", []):
+        m = re.match(r'^SEF=(\S+)\s+(?:UNLOCKED|LOCKED)\b', line)
+        if not m:
+            continue
+        sef_id = m.group(1)
+        node = sef_node.get(sef_id) or owner(sef_id)
+        if not node:
+            continue
+        bucket = sef.setdefault(node, [])
+        if sef_id not in bucket:
+            bucket.append(sef_id)
+
+    # RRU / AAS field replaceable units.
+    fru = {}
+    for line in sections.get("Hardware Status Information", []):
+        m = re.match(r'^(\S+)\s+((?:RRU|AAS)[-\w]*)\s+(?:UNLOCKED|LOCKED)\b', line)
+        if not m:
+            continue
+        node, mo = m.group(1), m.group(2)
+        if node not in nodes:
+            nodes.append(node)
+        bucket = fru.setdefault(node, [])
+        if mo not in bucket:
+            bucket.append(mo)
+
+    return {"nodes": nodes, "lte": lte, "nr": nr, "nsc": nsc, "sef": sef, "fru": fru}
+
+
+LOCK_HEADER = ("Commands holds locking on the Sectors/Radios/NRSectorCarrier/SectorEquipmentFunction, "
+               "Please use the Integration template to lock the Termpoint to MME's/Gnb's/ENb's & AMF's")
+UNLOCK_HEADER = ("Commands holds unlocking on the Sectors/Radios/NRSectorCarrier/SectorEquipmentFunction, "
+                 "Please use the Integration template to unlock the Termpoint to MME's/Gnb's/ENb's & AMF's")
+
+
+def _lock_block(inv, node, lock):
+    """Command lines for one node. Locking works top-down (cells first, hardware last) so
+    traffic is drained before anything is taken out of service; unlocking is the exact reverse,
+    bringing the hardware up before the cells that ride on it."""
+    lines = []
+    lte_state = "SHUTTINGDOWN" if lock else "UNLOCKED"
+    state = "LOCKED" if lock else "UNLOCKED"
+
+    def cells():
+        return [f"cmedit set {node} EUtrancellFDD.(EUtranCellFDDid=={c}) administrativeState={lte_state}"
+                for c in inv["lte"].get(node, [])]
+
+    def nrcells():
+        return [f"cmedit set {node} NRCellDU.NRCellDUId=={c} administrativeState={lte_state} --force"
+                for c in inv["nr"].get(node, [])]
+
+    def carriers():
+        return [f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId=={c} administrativeState={state} --force"
+                for c in inv["nsc"].get(node, [])]
+
+    def sefs():
+        return [f"cmedit set {node} SectorEquipmentFunction.sectorEquipmentFunctionId=={s} administrativeState={state}"
+                for s in inv["sef"].get(node, [])]
+
+    def frus(prefix):
+        return [f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId=={m} administrativeState={state}"
+                for m in inv["fru"].get(node, []) if m.upper().startswith(prefix)]
+
+    groups = [cells(), nrcells(), carriers(), sefs(), frus("RRU"), frus("AAS")]
+    if not lock:
+        groups = list(reversed(groups))
+    for g in groups:
+        if g:
+            lines += g
+    return lines
+
+
+def build_lock_unlock_text(inv, lock):
+    header = LOCK_HEADER if lock else UNLOCK_HEADER
+    banner = "######### LOCK Commands #########" if lock else "######### UNLOCK Commands #########"
+    out = [header, "", ""]
+    for node in inv["nodes"]:
+        block = _lock_block(inv, node, lock)
+        if not block:
+            continue
+        out.append(f"Node ID: {node}")
+        out.append(banner)
+        out += block
+        out.append("")
+    return "\n".join(out).rstrip() + "\n"
+
+
+def generate_lock_unlock_templates(precheck_text, log):
+    """Locking command file. Pre-checks only — there is nothing on air to lock on a scope with
+    no Pre state, so N2E/NSB never reach here. Unlocking is NOT produced here: it follows a
+    different template of its own, so emitting a mechanically-reversed Locking file would ship
+    something that only looks right. The unlock helpers below are kept because they encode the
+    correct reverse ordering for when that template is specified."""
+    if not precheck_text:
+        return [], []
+    inv = parse_precheck_lock_inventory(precheck_text)
+    if not inv["nodes"]:
+        log("\u2717 Lock/Unlock commands: no nodes found in Pre-checks Summary Status")
+        return [], []
+    node_tag = "_".join(inv["nodes"])
+    outputs, summary_rows = [], []
+    text = build_lock_unlock_text(inv, True)
+    fname = f"Pre existing nodes_Cell_radio_sectorcarrier_Locking_commands_{node_tag}.txt"
+    outputs.append((fname, text))
+    log(f"\u2713 Locking commands generated for {len(inv['nodes'])} node(s)")
+    for node in inv["nodes"]:
+        summary_rows.append({
+            "Item": f"{node} \u00b7 Locking commands",
+            "Source": "Pre-checks",
+            "Value": (f"{len(inv['lte'].get(node, []))} LTE, {len(inv['nr'].get(node, []))} 5G, "
+                       f"{len(inv['nsc'].get(node, []))} NRSectorCarrier, "
+                       f"{len(inv['sef'].get(node, []))} SEF, {len(inv['fru'].get(node, []))} RRU/AAS"),
+            "Note": "",
+        })
+    return outputs, summary_rows
+
+
+UNLOCK_PREAMBLE = (
+    "Deblock of site , Before Unlocking site remember we must have Launch Approval and "
+    "CBAND|DOD Radiation list check.\n"
+    "If Launch approval is not there, Site must be in Locked state, No Need to Unlock at any point\n"
+    "Only Unlock DOD cells and NRsectorcarrier if found to be clear in the Radiation list\n"
+    "If seen partial clear or Not clear ,Please donot UNLOCK DOD cells and NRsectorcarrier at any "
+    "point either to check cellstatus or for any alarm checks."
+)
+
+
+def parse_ciq_unlock_inventory(ciq_wb, mm_objs):
+    """Per-node cells for the Unlocking template, read from the CIQ (NOT from Pre-checks).
+    Unlocking is the post-integration state, so the authority is what the CIQ says should exist
+    once the build is done — a cell being absent from Pre is exactly the newly-added case that
+    still has to be unlocked.
+
+    Node resolution uses the same alias set as everywhere else: a node's 5G cells are named
+    after its gNodeB Name, which for an MMBB node is a different string from 'Node to be built
+    as' (e.g. node FCL05583 carries gNodeB FCWN095583 and every NRCellDU starts with that).
+    Matching on the primary name alone would silently drop every 5G cell.
+
+    Returns {'nodes': [...], 'lte': {node: [cells]}, 'nr': {node: [cells]},
+             'nsc': {node: [carriers]}, 'cband': {node: bool}}."""
+    alias = {}
+    nodes = []
+    for row in mm_objs:
+        built = row.get("Node to be built as")
+        if not built:
+            continue
+        built = str(built).strip()
+        if built not in nodes:
+            nodes.append(built)
+        for key in ("Node to be built as", "eNodeB Name", "gNodeB Name"):
+            v = row.get(key)
+            if v and str(v).strip() and str(v).strip().upper() != "N/A":
+                alias[str(v).strip()] = built
+
+    def owner(cell):
+        for a in sorted(alias, key=len, reverse=True):
+            if str(cell).startswith(a):
+                return alias[a]
+        return None
+
+    lte, nr, nsc, cband = {}, {}, {}, {}
+
+    if "eUtran Parameters" in ciq_wb.sheetnames:
+        for row in sheet_objs(ciq_wb["eUtran Parameters"]):
+            cell = row.get("EutranCellFDDId")
+            if not cell:
+                continue
+            node = owner(cell)
+            if not node:
+                continue
+            bucket = lte.setdefault(node, [])
+            if cell not in bucket:
+                bucket.append(str(cell))
+
+    if "5G Info" in ciq_wb.sheetnames:
+        for row in sheet_objs(ciq_wb["5G Info"]):
+            cell = row.get("NRCellDU")
+            if not cell:
+                continue
+            node = owner(cell)
+            if not node:
+                continue
+            bucket = nr.setdefault(node, [])
+            if cell not in bucket:
+                bucket.append(str(cell))
+            carrier = row.get("NRSectorCarrier") or cell
+            cbucket = nsc.setdefault(node, [])
+            if str(carrier) not in cbucket:
+                cbucket.append(str(carrier))
+            # CBAND/DOD/DOD_BWE all live on band code 077 and all ride AAS radios — the AAS
+            # unlock line is only emitted for a node that actually has one.
+            label, _sector = nr_band_label(cell)
+            if label in ("CBAND", "DOD", "DOD_BWE") or str(label or "").startswith("N077_"):
+                cband[node] = True
+
+    return {"nodes": nodes, "lte": lte, "nr": nr, "nsc": nsc, "cband": cband}
+
+
+def _unlock_block(inv, node):
+    """Command lines for one node. The cell-level commands are enumerated one per cell from the
+    CIQ; everything below them is a fixed wildcard command that only needs the node ID."""
+    lines = []
+    for c in inv["lte"].get(node, []):
+        lines.append(f"cmedit set {node} EUtrancellFDD.(EUtranCellFDDid=={c}) administrativeState=UNLOCKED")
+    for c in inv["nr"].get(node, []):
+        lines.append(f"cmedit set {node} NRCellDU.NRCellDUId=={c} administrativeState=UNLOCKED --force")
+    for c in inv["nsc"].get(node, []):
+        lines.append(f"cmedit set {node} NRSectorCarrier.NRSectorCarrierId=={c} administrativeState=UNLOCKED --force")
+
+    lines.append(f"cmedit set {node} SectorEquipmentFunction.sectorEquipmentFunctionId==* administrativeState=UNLOCKED")
+    lines.append(f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId==XMU* administrativeState=UNLOCKED")
+    if inv["cband"].get(node):
+        lines.append(f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId==AAS* administrativeState=UNLOCKED")
+    lines.append(f"cmedit set {node} FieldReplaceableUnit.FieldReplaceableUnitId==RRU* administrativeState=UNLOCKED")
+    lines.append(f"cmedit set {node} TermPointToMme.termPointToMmeId==* administrativeState=UNLOCKED --force")
+    lines.append(f"cmedit set {node} TermPointToENB.termPointToENBId==* administrativeState=UNLOCKED --force")
+    lines.append(f"cmedit set {node} TermPointToGNodeB.termPointToGNodeBId==* administrativeState=UNLOCKED --force")
+    lines.append(f"cmedit set {node} TermPointToGNB.termPointToGNBId==* administrativeState=UNLOCKED --force")
+    return lines
+
+
+def build_unlock_text(inv):
+    out = [UNLOCK_PREAMBLE, "", ""]
+    for node in inv["nodes"]:
+        out.append(f"Node ID: {node}")
+        out.append("######### UNLOCK Commands #########")
+        out.append("")
+        out += _unlock_block(inv, node)
+        out.append("")
+    return "\n".join(out).rstrip() + "\n"
+
+
+def generate_unlock_template(ciq_wb, mm_objs, log):
+    """Unlocking command file, built from the CIQ."""
+    inv = parse_ciq_unlock_inventory(ciq_wb, mm_objs)
+    if not inv["nodes"]:
+        log("\u2717 Unlocking commands: no nodes in Mixed Mode Info")
+        return [], []
+    node_tag = "_".join(inv["nodes"])
+    text = build_unlock_text(inv)
+    fname = f"UnLocking_commands_{node_tag}.txt"
+    log(f"\u2713 Unlocking commands generated for {len(inv['nodes'])} node(s)")
+    summary_rows = [{
+        "Item": f"{node} \u00b7 Unlocking commands",
+        "Source": "CIQ",
+        "Value": (f"{len(inv['lte'].get(node, []))} LTE, {len(inv['nr'].get(node, []))} 5G, "
+                   f"{len(inv['nsc'].get(node, []))} NRSectorCarrier"),
+        "Note": "AAS unlock line included" if inv["cband"].get(node) else "no CBAND/DOD on node, AAS line omitted",
+    } for node in inv["nodes"]]
+    return [(fname, text)], summary_rows
+
+
 def get_universal_static_outputs(ciq_wb, mm_objs, log):
     """Returns a list of (filename, bytes) for the static reference files that ship alongside
     Final Connections / Pre Fibers for every scope. Integration_Checklist_v3.xlsx and
@@ -3486,6 +3837,14 @@ def generate_mca(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     outputs += del_outputs
     summary_rows += del_summary
 
+    lock_outputs, lock_summary = generate_lock_unlock_templates(precheck_text, log)
+    outputs += lock_outputs
+    summary_rows += lock_summary
+
+    unlock_outputs, unlock_summary = generate_unlock_template(ciq_wb, mm_objs, log)
+    outputs += unlock_outputs
+    summary_rows += unlock_summary
+
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
 
@@ -3586,6 +3945,14 @@ def generate_cenm(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
     del_outputs, del_summary = generate_node_deletion_templates(ciq_wb, mm_objs, edp_index, classification, precheck_text, user_id, date_str, log)
     outputs += del_outputs
     summary_rows += del_summary
+
+    lock_outputs, lock_summary = generate_lock_unlock_templates(precheck_text, log)
+    outputs += lock_outputs
+    summary_rows += lock_summary
+
+    unlock_outputs, unlock_summary = generate_unlock_template(ciq_wb, mm_objs, log)
+    outputs += unlock_outputs
+    summary_rows += unlock_summary
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
@@ -3787,6 +4154,14 @@ def generate_cran(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str
         ciq_wb, mm_objs, edp_index, {"deleted_nodes": raw_deleted_nodes}, precheck_text, user_id, date_str, log)
     outputs += del_outputs
     summary_rows += del_summary
+
+    lock_outputs, lock_summary = generate_lock_unlock_templates(precheck_text, log)
+    outputs += lock_outputs
+    summary_rows += lock_summary
+
+    unlock_outputs, unlock_summary = generate_unlock_template(ciq_wb, mm_objs, log)
+    outputs += unlock_outputs
+    summary_rows += unlock_summary
 
     return summary_rows, pre_line, post_line, siad_rows, outputs, binary_outputs, scope_of_work_lines
 
