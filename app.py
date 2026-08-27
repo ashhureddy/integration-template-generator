@@ -4882,6 +4882,12 @@ def compare_lte_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sour
         pre_v = pre_cell.get(cell_key) if has_pre else None
         ciq_v = ciq_row.get(CATEGORY_A_LTE_CIQ_KEYS[param])
         expected = ciq_v if (is_new or not has_pre) else pre_v
+        # A pre-existing sector whose Pre value simply isn't available (its node's Pre log
+        # wasn't uploaded, or a moved sector's source log is missing) still has to be verified —
+        # leaving it as "no baseline" would let a real mismatch through unflagged. The CIQ is
+        # used as the fallback expectation so any difference in value is still highlighted red.
+        if expected is None:
+            expected = ciq_v
         color, _ = verdict(on_cell.get(cell_key), expected, "A")
         note = blueprint_comment(param, color, is_new, "lte")
         # A newly-added cell has no Pre state at all: show the explicit NA marker so the Pre
@@ -5283,6 +5289,12 @@ def compare_nr_cell(cell_id, ciq_row, pre_tables, onsite_tables, move_map, sourc
         pre_v = pre_cell.get(cell_key) if has_pre else None
         ciq_v = ciq_row.get(CATEGORY_A_NR_CIQ_KEYS[param]) if ciq_row else None
         expected = ciq_v if (is_new or not has_pre) else pre_v
+        # A pre-existing sector whose Pre value simply isn't available (its node's Pre log
+        # wasn't uploaded, or a moved sector's source log is missing) still has to be verified —
+        # leaving it as "no baseline" would let a real mismatch through unflagged. The CIQ is
+        # used as the fallback expectation so any difference in value is still highlighted red.
+        if expected is None:
+            expected = ciq_v
         color, _ = verdict(on_cell.get(cell_key), expected, "A")
         note = blueprint_comment(param, color, is_new, "nr")
         if has_pre and is_new:
