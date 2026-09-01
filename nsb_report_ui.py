@@ -142,6 +142,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     # else renders.
     controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
     cascade_fires = nsb.controller_cascade_fires(controller_in_edp, bool(controller_checks_text))
+    # Confirmed real gap, same shape as N2E: cascade_fires only fires when the controller-checks
+    # file wasn't uploaded at all. A file that WAS uploaded but shows zero scripted alarm ports
+    # doesn't trip it, so scripting/testing/area test below have no Pending path in that case.
+    alarm_unscripted = bool(controller_in_edp and controller_checks_data
+                             and not mcl.external_alarm_scripting_confirmed(controller_checks_data))
 
     # SA Conversion — moved earlier (previously computed later, inside Notes) since the
     # AMF warning check below needs it before the gate.
@@ -746,18 +751,21 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 idl_pending = "IDL connections (MIC PM)"
 
         area_pending = None
-        if integrated_nodes:
-            # Confirmed fix: Area test should include the controller alongside the
-            # nodes for the same 3 conditions as Controller monitored state's
-            # auto-trigger — no 6610 checks, SAU disabled, or External alarm testing
-            # Pending. testing_section computed independently here since it isn't
-            # computed until later in render(), same ordering fix used elsewhere in
-            # this file — cascade_fires/sau_disabled are already safely defined by
-            # this point.
-            _area_testing_section, _, _ = mcl.external_alarm_testing_placement(controller_checks_data) \
-                if controller_checks_data else (None, None, None)
-            _area_include_controller = cascade_fires or sau_disabled or _area_testing_section == "Pending"
-            _area_targets = list(integrated_nodes) + ([controller_id] if _area_include_controller and controller_id else [])
+        # Confirmed fix: Area test should include the controller alongside the
+        # nodes for the same conditions as Controller monitored state's
+        # auto-trigger — no 6610 checks, SAU disabled, External alarm testing
+        # Pending, or the controller's alarms simply aren't scripted yet.
+        # testing_section computed independently here since it isn't computed
+        # until later in render(), same ordering fix used elsewhere in this file —
+        # cascade_fires/sau_disabled/alarm_unscripted are already safely defined
+        # by this point. No longer gated on integrated_nodes: an unscripted
+        # controller with no new node in scope still needs Area test in Pending.
+        _area_testing_section, _, _ = mcl.external_alarm_testing_placement(controller_checks_data) \
+            if controller_checks_data else (None, None, None)
+        _area_include_controller = bool(
+            (cascade_fires or sau_disabled or alarm_unscripted or _area_testing_section == "Pending") and controller_id)
+        if integrated_nodes or _area_include_controller:
+            _area_targets = list(integrated_nodes) + ([controller_id] if _area_include_controller else [])
             area_pending = f"Area test: {'|'.join(_area_targets)}: Area Lite - Failed (MIC PM)"
 
         testing_completed, testing_pending = None, None
@@ -815,12 +823,20 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         else:
             if alarm_notes_line:
                 choices_notes.append(alarm_notes_line)
+            if alarm_unscripted:
+                _l = f"External alarm Scripting on: {controller_id}. (MIC)"
+                choices_pending.append(_l)
+                st.caption(_l)
             if sau_pending:
                 choices_pending.append(sau_pending)
                 st.caption(sau_pending)
             if testing_pending:
                 choices_pending.append(testing_pending)
                 st.caption(testing_pending)
+            elif alarm_unscripted:
+                _l = f"External alarm testing: {controller_id}. (MIC PM)"
+                choices_pending.append(_l)
+                st.caption(_l)
             if area_pending:
                 choices_pending.append(area_pending)
                 st.caption(area_pending)
@@ -1153,8 +1169,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             for row_num in NSB_ROW_MAP["transport_sfp"]["pending"]:
                 _rw(row_num, False)
             _rw(NSB_ROW_MAP["ret_configuration"]["pending"][0], ret_pending)
-            _rw(NSB_ROW_MAP["external_alarm_scripting"]["pending"][0], cascade_fires or bool(alarm_ports_report_lines),
-                [(3, controller_id)] if cascade_fires else None)
+            _rw(NSB_ROW_MAP["external_alarm_scripting"]["pending"][0], cascade_fires or alarm_unscripted or bool(alarm_ports_report_lines),
+                [(3, controller_id)] if (cascade_fires or alarm_unscripted) else None)
             _rw(NSB_ROW_MAP["sau_connections"]["pending"][0], cascade_fires or sau_pending, [(3, controller_id)] if (cascade_fires or sau_pending) else None)
             _rw(NSB_ROW_MAP["sup_connections"]["pending"][0], sup_pending_lines, [(3, "|".join(s.split(":")[-1].strip() for s in sup_pending_lines))] if sup_pending_lines else None)
             _rw(NSB_ROW_MAP["xmu_installation"]["pending"][0], xmu_pending_lines, [(3, "|".join(s.split(":")[-1].strip() for s in xmu_pending_lines))] if xmu_pending_lines else None)
@@ -1163,8 +1179,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw(NSB_ROW_MAP["script_load_6673"]["pending"][0], False)
             _rw(NSB_ROW_MAP["siad_provisioning"]["pending"][0], False)
             _rw(NSB_ROW_MAP["area_test"]["pending"][0], cascade_fires or area_pending,
-                [(3, "|".join(integrated_nodes)), (4, "Failed")] if area_pending else None)
-            _rw(NSB_ROW_MAP["external_alarm_testing"]["pending"][0], cascade_fires or testing_pending, [(3, controller_id)] if (cascade_fires or testing_pending) else None)
+                [(3, "|".join(_area_targets)), (4, "Failed")] if area_pending else None)
+            _rw(NSB_ROW_MAP["external_alarm_testing"]["pending"][0], cascade_fires or alarm_unscripted or testing_pending, [(3, controller_id)] if (cascade_fires or alarm_unscripted or testing_pending) else None)
             _rw(NSB_ROW_MAP["config_6673"]["pending"][0], has_6673, [(3, sidehaul_rows[0]["switch_id"])] if has_6673 and sidehaul_rows else None)
             _rw(NSB_ROW_MAP["port_config_6673_enm"]["pending"][0], has_6673, [(4, sidehaul_rows[0]["switch_id"])] if has_6673 and sidehaul_rows else None)
             _rw(NSB_ROW_MAP["link_failure"]["pending"][0], False)
