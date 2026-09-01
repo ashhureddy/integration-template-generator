@@ -369,7 +369,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # them, no warning per confirmed decision. (Confirmed gap: sau_connections was
         # missing from this set — only 4 of the 5 real cascade items were being forced.)
         cascade_keys = {"controller_integration", "alarm_scripting", "lkf_installation",
-                         "alarm_testing", "sau_connections"}
+                         "alarm_testing", "sau_connections", "area_test"}
         for item in results:
             if item["key"] in cascade_keys:
                 item["section"] = "pending"
@@ -387,6 +387,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
                 # directly rather than depending on the scope_line search succeeding.
                 if item["key"] == "controller_integration" and not item.get("result") and controller_id:
                     item["result"] = {"lines": [f"6610 Controller Integration:\t{controller_id}"]}
+                # area_test's own detect() only fires for a new node or when testing_section/
+                # sau_placement independently resolve to "Pending" — neither is guaranteed just
+                # because the broader cascade fired over unconfirmed alarm scripting, so without
+                # this it's forced checked with result=None and silently renders no preview line.
+                if item["key"] == "area_test" and not item.get("result") and controller_id:
+                    item["result"] = {"lines": [f"Area test:\t{controller_id}"]}
     if sau_placement and not cascade_fires:
         for item in results:
             if item["key"] == "sau_connections":
