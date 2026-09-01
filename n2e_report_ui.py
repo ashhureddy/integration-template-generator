@@ -87,6 +87,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
     # Warnings gate below needs this data before any of the rest of the UI renders.
     controller_checks_data = mcl.extract_controller_checks(controller_checks_text) if controller_checks_text else {}
     cascade_fires = n2e.controller_cascade_fires(controller_in_edp, bool(controller_checks_text))
+    # Confirmed real gap: controller_cascade_fires only fires when the controller-checks file
+    # wasn't uploaded at all. A file that WAS uploaded but shows zero scripted alarm ports
+    # (genuinely "external alarms not scripted") doesn't trip cascade_fires, so scripting/
+    # testing/area test below silently fall through to nothing instead of Pending. Kept as a
+    # separate flag rather than folded into cascade_fires itself, since cascade_fires' narrower
+    # trigger is intentional for Controller Integration/DSS/LKF (confirmed different from MCA).
+    alarm_unscripted = bool(controller_in_edp and controller_checks_data
+                             and not mcl.external_alarm_scripting_confirmed(controller_checks_data))
 
     # Classification — moved earlier (previously computed after the Warnings gate) since
     # the DigitalTilt warning check needs it before the gate.
@@ -622,8 +630,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
         # when External alarm testing is Pending for the 6610, include the controller ID
         # alongside the node(s) in Area test's Pending line too.
         area_completed, area_pending = None, None
-        if integrated_nodes:
-            area_targets = integrated_nodes + ([controller_id] if testing_pending and controller_id else [])
+        _area_include_controller = bool((cascade_fires or alarm_unscripted or testing_pending) and controller_id)
+        if integrated_nodes or _area_include_controller:
+            area_targets = integrated_nodes + ([controller_id] if _area_include_controller else [])
             area_pending = n2e.area_test_line(area_targets, "Failed") + " (MIC PM)"
 
         # 6673 Script load — auto, Completed only.
@@ -704,6 +713,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             st.caption(l1)
             st.caption(l2)
         else:
+            if alarm_unscripted:
+                l1 = f"External alarm Scripting: {controller_id}. (MIC)"
+                choices_pending.append(l1)
+                st.caption(l1)
             if sau_pending:
                 choices_pending.append(sau_pending)
                 st.caption(sau_pending)
@@ -723,7 +736,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             choices_pending.append(area_pending)
             st.caption(area_pending)
 
-        if cascade_fires:
+        if cascade_fires or alarm_unscripted:
             l = f"External alarm testing: {controller_id}. (MIC PM)"
             choices_pending.append(l)
             st.caption(l)
@@ -1097,7 +1110,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             for row_num in _rw_multi_unused:
                 row_writes.append((row_num, False, []))
             _rw_simple(N2E_ROW_MAP["ret_configuration"]["pending"][0], True)  # no value column, template's own fixed "(Tower Crew)"
-            _rw_simple(N2E_ROW_MAP["external_alarm_scripting"]["pending"][0], cascade_fires, controller_id if cascade_fires else None)
+            _rw_simple(N2E_ROW_MAP["external_alarm_scripting"]["pending"][0], cascade_fires or alarm_unscripted, controller_id if (cascade_fires or alarm_unscripted) else None)
             _rw_simple(N2E_ROW_MAP["sau_connections"]["pending"][0], cascade_fires or sau_pending, controller_id if (cascade_fires or sau_pending) else None)
             _rw_simple(N2E_ROW_MAP["sup_connections"]["pending"][0], sup_pending_lines, "|".join(s.split(":")[-1].replace(". (MIC PM)", "").strip() for s in sup_pending_lines))
             _rw_simple(N2E_ROW_MAP["xmu_installation"]["pending"][0], xmu_pending_lines, "|".join(s.split(":")[-1].replace(". (MIC PM)", "").strip() for s in xmu_pending_lines))
@@ -1106,7 +1119,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             # Area test Pending (98): C=node(s) [+ controller when all locked], D="Failed".
             area_p_row = N2E_ROW_MAP["area_test"]["pending"][0]
             row_writes.append((area_p_row, bool(area_pending), [(3, "|".join(area_targets)), (4, "Failed")] if area_pending else []))
-            _rw_simple(N2E_ROW_MAP["external_alarm_testing"]["pending"][0], cascade_fires or testing_pending, controller_id if (cascade_fires or testing_pending) else None)
+            _rw_simple(N2E_ROW_MAP["external_alarm_testing"]["pending"][0], cascade_fires or alarm_unscripted or testing_pending, controller_id if (cascade_fires or alarm_unscripted or testing_pending) else None)
             _rw_simple(N2E_ROW_MAP["config_6673"]["pending"][0], has_6673, sidehaul_rows[0]["switch_id"] if has_6673 and sidehaul_rows else None)
             # 6673 Port Config in ENM (101): C=Slot|Port|Node (never built, left blank), D=Switch ID.
             _rw_simple(N2E_ROW_MAP["port_config_6673_enm"]["pending"][0], has_6673,
