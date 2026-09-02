@@ -509,30 +509,37 @@ def classify_carriers(ciq_wb, mm_objs, precheck_text):
         if is_wll_node_name(node):
             continue  # WLL node — not a real radio node, never gets Integration/added-cell entries
         e_name, g_name = r.get("eNodeB Name"), r.get("gNodeB Name")
+        enb_id, gnb_id = r.get("eNBId"), r.get("gNBId")
         added_here = []
         for row in eutran_objs:
             cell = row.get("EutranCellFDDId")
             if not cell:
                 continue
-            if e_name and str(cell).startswith(str(e_name)):
+            # Name-prefix match OR eNBId match — a node ending in a letter its cell names
+            # drop (e.g. node 'FNL09826R', cells 'FNL09826_3A_1') never matches by prefix.
+            is_this_node = (e_name and str(cell).startswith(str(e_name))) or \
+                (is_populated(enb_id) and is_populated(row.get("eNBId")) and str(row.get("eNBId")).strip() == str(enb_id).strip())
+            if is_this_node:
                 label, sector = band_label(cell)
                 if label and sector:
                     target_band_sectors.setdefault((node, label), set()).add(sector)
             if cell in handled_cells or cell in pre_cells:
                 continue
-            if e_name and str(cell).startswith(str(e_name)):
+            if is_this_node:
                 added_here.append(cell)
         for row in fiveg_objs:
             cell = row.get("NRCellDU")
             if not cell:
                 continue
-            if g_name and str(cell).startswith(str(g_name)):
+            is_this_node = (g_name and str(cell).startswith(str(g_name))) or \
+                (is_populated(gnb_id) and is_populated(row.get("gNBId")) and str(row.get("gNBId")).strip() == str(gnb_id).strip())
+            if is_this_node:
                 label, sector = band_label(cell)
                 if label and sector:
                     target_band_sectors.setdefault((node, label), set()).add(sector)
             if cell in handled_cells or cell in pre_cells:
                 continue
-            if g_name and str(cell).startswith(str(g_name)):
+            if is_this_node:
                 added_here.append(cell)
         if added_here:
             result["added"][node] = added_here
@@ -3056,6 +3063,7 @@ def parse_ciq_unlock_inventory(ciq_wb, mm_objs):
              'nsc': {node: [carriers]}, 'cband': {node: bool}}."""
     alias = {}
     nodes = []
+    enbid_to_node, gnbid_to_node = {}, {}
     for row in mm_objs:
         built = row.get("Node to be built as")
         if not built:
@@ -3067,8 +3075,18 @@ def parse_ciq_unlock_inventory(ciq_wb, mm_objs):
             v = row.get(key)
             if v and str(v).strip() and str(v).strip().upper() != "N/A":
                 alias[str(v).strip()] = built
+        if is_populated(row.get("eNBId")):
+            enbid_to_node[str(row.get("eNBId")).strip()] = built
+        if is_populated(row.get("gNBId")):
+            gnbid_to_node[str(row.get("gNBId")).strip()] = built
 
-    def owner(cell):
+    def owner(cell, enb_id=None, gnb_id=None):
+        # eNBId/gNBId match takes priority — a node ending in a letter its cell names drop
+        # (e.g. node 'FNL09826R', cells 'FNL09826_3A_1') never matches by name-prefix.
+        if is_populated(enb_id) and str(enb_id).strip() in enbid_to_node:
+            return enbid_to_node[str(enb_id).strip()]
+        if is_populated(gnb_id) and str(gnb_id).strip() in gnbid_to_node:
+            return gnbid_to_node[str(gnb_id).strip()]
         for a in sorted(alias, key=len, reverse=True):
             if str(cell).startswith(a):
                 return alias[a]
@@ -3081,7 +3099,7 @@ def parse_ciq_unlock_inventory(ciq_wb, mm_objs):
             cell = row.get("EutranCellFDDId")
             if not cell:
                 continue
-            node = owner(cell)
+            node = owner(cell, enb_id=row.get("eNBId"))
             if not node:
                 continue
             bucket = lte.setdefault(node, [])
@@ -3093,7 +3111,7 @@ def parse_ciq_unlock_inventory(ciq_wb, mm_objs):
             cell = row.get("NRCellDU")
             if not cell:
                 continue
-            node = owner(cell)
+            node = owner(cell, gnb_id=row.get("gNBId"))
             if not node:
                 continue
             bucket = nr.setdefault(node, [])
@@ -3614,14 +3632,19 @@ def generate_n2e(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     for row in mm_objs:
         node = row.get("Node to be built as")
         e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        enb_id, gnb_id = row.get("eNBId"), row.get("gNBId")
         cells = []
         for r in eutran_objs:
             c = r.get("EutranCellFDDId")
-            if c and e_name and str(c).startswith(str(e_name)):
+            # Name-prefix OR eNBId match — a node ending in a letter its cell names drop
+            # (e.g. node 'FNL09826R', cells 'FNL09826_3A_1') never matches by prefix.
+            if c and ((e_name and str(c).startswith(str(e_name))) or
+                      (is_populated(enb_id) and is_populated(r.get("eNBId")) and str(r.get("eNBId")).strip() == str(enb_id).strip())):
                 cells.append(c)
         for r in fiveg_objs:
             c = r.get("NRCellDU")
-            if c and g_name and str(c).startswith(str(g_name)):
+            if c and ((g_name and str(c).startswith(str(g_name))) or
+                      (is_populated(gnb_id) and is_populated(r.get("gNBId")) and str(r.get("gNBId")).strip() == str(gnb_id).strip())):
                 cells.append(c)
         if cells:
             added[node] = cells
@@ -3760,14 +3783,17 @@ def generate_nsb(ciq_wb, edp_index, controller_objs, mm_objs, user_id, date_str,
     for row in mm_objs:
         node = row.get("Node to be built as")
         e_name, g_name = row.get("eNodeB Name"), row.get("gNodeB Name")
+        enb_id, gnb_id = row.get("eNBId"), row.get("gNBId")
         cells = []
         for r in eutran_objs:
             c = r.get("EutranCellFDDId")
-            if c and e_name and str(c).startswith(str(e_name)):
+            if c and ((e_name and str(c).startswith(str(e_name))) or
+                      (is_populated(enb_id) and is_populated(r.get("eNBId")) and str(r.get("eNBId")).strip() == str(enb_id).strip())):
                 cells.append(c)
         for r in fiveg_objs:
             c = r.get("NRCellDU")
-            if c and g_name and str(c).startswith(str(g_name)):
+            if c and ((g_name and str(c).startswith(str(g_name))) or
+                      (is_populated(gnb_id) and is_populated(r.get("gNBId")) and str(r.get("gNBId")).strip() == str(gnb_id).strip())):
                 cells.append(c)
         if cells:
             added[node] = cells
@@ -5414,6 +5440,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
     # cells to nodes on "Node to be built as" alone silently dropped all of them. Build an
     # alias map so a cell (or a log filename) can be resolved by any of the node's names.
     node_alias = {}
+    enbid_to_node, gnbid_to_node = {}, {}
     for r in mm_objs:
         built = r.get("Node to be built as")
         if not built:
@@ -5422,6 +5449,10 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
             v = r.get(key)
             if v and str(v).strip() and str(v).strip().upper() != "N/A":
                 node_alias[str(v).strip()] = str(built).strip()
+        if is_populated(r.get("eNBId")):
+            enbid_to_node[str(r.get("eNBId")).strip()] = str(built).strip()
+        if is_populated(r.get("gNBId")):
+            gnbid_to_node[str(r.get("gNBId")).strip()] = str(built).strip()
 
     # Sector Del_Movement's SOURCE nodes are real nodes that are NOT part of this build (the
     # C-band / DoD sectors are moving off them). Their Pre logs are still needed — that's where
@@ -5452,8 +5483,14 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
     nodes_missing_pre = [n for n in node_names if n not in pre_by_node] if has_pre else []
     nodes_missing_onsite = [n for n in node_names if n not in onsite_by_node]
 
-    def _owner_node(cell_id):
-        """Longest alias wins so a shorter node name can't claim a longer one's cell."""
+    def _owner_node(cell_id, enb_id=None, gnb_id=None):
+        """Longest alias wins so a shorter node name can't claim a longer one's cell.
+        eNBId/gNBId match takes priority — a node ending in a letter its cell names drop
+        (e.g. node 'FNL09826R', cells 'FNL09826_3A_1') never matches by name-prefix."""
+        if is_populated(enb_id) and str(enb_id).strip() in enbid_to_node:
+            return enbid_to_node[str(enb_id).strip()]
+        if is_populated(gnb_id) and str(gnb_id).strip() in gnbid_to_node:
+            return gnbid_to_node[str(gnb_id).strip()]
         for a in sorted(node_alias, key=len, reverse=True):
             if str(cell_id).startswith(a):
                 return node_alias[a]
@@ -5491,7 +5528,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
                     _tac = enb_tac.get(str(d.get("eNBId")).strip())
                 if _tac is None:
                     _cell = str(d["EutranCellFDDId"])
-                    _owner = _owner_node(_cell)
+                    _owner = _owner_node(_cell, enb_id=d.get("eNBId"))
                     if _owner:
                         _tac = enb_tac.get(str(_owner).strip().upper())
                 d[CIQ_TAC_KEY] = _tac
@@ -5512,7 +5549,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
 
     node_results = {n: {"lte": [], "nr": [], "naming_lte": [], "naming_nr": []} for n in node_names}
     for cell_id, ciq_row in lte_ciq.items():
-        node = _owner_node(cell_id)
+        node = _owner_node(cell_id, enb_id=ciq_row.get("eNBId"))
         if not node:
             continue
         pre_t = pre_by_node.get(node, empty_tables)
@@ -5526,7 +5563,7 @@ def run_parameter_verification(ciq_wb, mm_objs, pre_files, onsite_files, scope="
             node=node, onsite_by_node=onsite_by_node, pre_by_node=pre_by_node, ciq_lookup=ciq_lookup)))
 
     for cell_id, ciq_row in nr_ciq.items():
-        node = _owner_node(cell_id)
+        node = _owner_node(cell_id, gnb_id=ciq_row.get("gNBId"))
         if not node:
             continue
         pre_t = pre_by_node.get(node, empty_tables)
