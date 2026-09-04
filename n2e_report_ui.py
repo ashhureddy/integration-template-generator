@@ -453,11 +453,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
 
         # GPS Installation — Post-checks Sync Status 2 TimeSyncIO. Now uses the same
         # visible checkbox pattern as Integration, instead of silently appending.
+        # Confirmed rule: 'not detected' (missing_nodes) judged by GPS Status/Product
+        # Designation presence, NOT TimeSyncIO presence -> keeps using the existing
+        # 'GPS Installation' checkbox/row (that's what this row always meant). 'Disabled'
+        # (module detected, sync off) is a NEW case with no dedicated row -> goes to the
+        # Pending buffer instead, per confirmed decision.
         gps_completed_line, gps_pending_line = None, None
         if postcheck_text:
             post_sync = mcl.extract_sync_status_2(postcheck_text)
             post_gps = mcl.extract_gps_status(postcheck_text)
-            enabled_nodes, disabled_nodes = n2e.gps_sync_status(mm_objs, post_sync)
+            enabled_nodes, _unused_disabled = n2e.gps_sync_status(mm_objs, post_sync)
+            gps_disabled_nodes, gps_missing_nodes = n2e.gps_disabled_or_missing(mm_objs, post_gps, post_sync)
             if enabled_nodes:
                 gtype = post_gps.get(enabled_nodes[0], "")
                 candidate_line = n2e.gps_installation_line(enabled_nodes, gtype)
@@ -465,9 +471,11 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 if gps_checked:
                     gps_completed_line = candidate_line
                     choices_completed.append(gps_completed_line)
-            if disabled_nodes:
-                gps_pending_line = f"GPS Installation: {'|'.join(disabled_nodes)} (Tower Crew)"
-            if not enabled_nodes and not disabled_nodes:
+            if gps_missing_nodes:
+                gps_pending_line = f"GPS installation on {'|'.join(gps_missing_nodes)} (Tower Crew)"
+            if gps_disabled_nodes:
+                bucket_pending.append(f"GPS disabled on {'|'.join(gps_disabled_nodes)} (Tower Crew)")
+            if not enabled_nodes and not gps_disabled_nodes and not gps_missing_nodes:
                 st.caption(f"GPS Installation: no TimeSyncIO state found in Post-checks for "
                            f"{'|'.join(row.get('Node to be built as') for row in mm_objs)} \u2014 check Post-checks parsing.")
         else:
@@ -1097,8 +1105,10 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             row_writes.append((ngs_p_row, bool(ngs_pending), [(3, ngs_p_bands), (4, ngs_p_node)] if ngs_pending else []))
             # GPS Pending (82): C=node(s), D=type value directly (no "Version:" label
             # column here, confirmed different structure from the Completed row).
+            # Confirmed: this row is the 'not detected' (missing_nodes) case — 'disabled'
+            # has no dedicated row and goes through the Pending buffer instead.
             gps_p_row = N2E_ROW_MAP["gps_installation"]["pending"][0]
-            row_writes.append((gps_p_row, bool(gps_pending_line), [(3, "|".join(disabled_nodes))] if gps_pending_line else []))
+            row_writes.append((gps_p_row, bool(gps_pending_line), [(3, "|".join(gps_missing_nodes))] if gps_pending_line else []))
             lkf_p_final = lkf_pending
             lkf_p_value = (lkf_p_final.replace("LKF Installation:", "").replace("(MIC)", "").strip()
                            if lkf_p_final else None)
