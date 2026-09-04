@@ -474,7 +474,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             if gps_missing_nodes:
                 gps_pending_line = f"GPS installation on {'|'.join(gps_missing_nodes)} (Tower Crew)"
             if gps_disabled_nodes:
-                bucket_pending.append(f"GPS disabled on {'|'.join(gps_disabled_nodes)} (Tower Crew)")
+                n2e_pending_from_warnings.append(f"GPS disabled on {'|'.join(gps_disabled_nodes)} (Tower Crew)")
             if not enabled_nodes and not gps_disabled_nodes and not gps_missing_nodes:
                 st.caption(f"GPS Installation: no TimeSyncIO state found in Post-checks for "
                            f"{'|'.join(row.get('Node to be built as') for row in mm_objs)} \u2014 check Post-checks parsing.")
