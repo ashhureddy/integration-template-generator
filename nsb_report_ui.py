@@ -416,7 +416,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                     ngs_pending = f"NGS activation: {ngs_bands} {ngs_node} (MIC)"
 
         gps_completed_line, gps_pending_line = None, None
-        enabled_nodes, disabled_nodes, gtype = [], [], ""
+        enabled_nodes, gps_disabled_nodes, gps_missing_nodes, gtype = [], [], [], ""
         if postcheck_text:
             post_sync = mcl.extract_sync_status_2(postcheck_text)
             post_gps = mcl.extract_gps_status(postcheck_text)
@@ -425,8 +425,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 state = post_sync.get(node)
                 if state == "ENABLED":
                     enabled_nodes.append(node)
-                elif state == "DISABLED":
-                    disabled_nodes.append(node)
+            # Confirmed rule (shared with MCA/N2E): 'not detected' judged by GPS Status/
+            # Product Designation presence, NOT TimeSyncIO presence. 'Disabled' = Product
+            # Designation present AND TimeSyncIO=DISABLED. Missing keeps using the
+            # existing 'GPS Installation' Pending row (that's what it always meant);
+            # disabled has no dedicated row -> goes to the Pending buffer.
+            for row in mm_objs:
+                node = row.get("Node to be built as")
+                gtype_row = post_gps.get(node)
+                if not gtype_row:
+                    gps_missing_nodes.append(node)
+                elif post_sync.get(node) == "DISABLED":
+                    gps_disabled_nodes.append(node)
             if enabled_nodes:
                 gtype = post_gps.get(enabled_nodes[0], "")
                 candidate_line = f"GPS Installation: {'|'.join(enabled_nodes)}  Version: {gtype}"
@@ -434,13 +444,17 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
                 if gps_checked:
                     gps_completed_line = candidate_line
                     choices_completed.append(gps_completed_line)
-            if disabled_nodes:
+            _gps_regional_market = None
+            if gps_missing_nodes or gps_disabled_nodes:
                 nsb_calltest_path = Path(__file__).parent / "templates" / "Static" / "Calltest_sheet.xlsx"
-                regional_market = None
                 if nsb_calltest_path.exists() and mm_objs:
                     nsb_prefix_to_market, _ = mcl.load_calltest_table(nsb_calltest_path, tab_name="NSB")
-                    regional_market = mcl.determine_market(mm_objs[0].get("Node to be built as"), nsb_prefix_to_market)
-                gps_pending_line = f"GPS Installation: {'|'.join(disabled_nodes)} ({mcl.gps_pending_stakeholder(regional_market)})"
+                    _gps_regional_market = mcl.determine_market(mm_objs[0].get("Node to be built as"), nsb_prefix_to_market)
+                _gps_stakeholder = mcl.gps_pending_stakeholder(_gps_regional_market)
+            if gps_missing_nodes:
+                gps_pending_line = f"GPS installation on {'|'.join(gps_missing_nodes)} ({_gps_stakeholder})"
+            if gps_disabled_nodes:
+                nsb_pending_from_warnings.append(f"GPS disabled on {'|'.join(gps_disabled_nodes)} ({_gps_stakeholder})")
         else:
             st.caption("GPS Installation: Post-checks not uploaded \u2014 can't determine sync status.")
 
@@ -1139,7 +1153,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, edp_index, user_id, date_str,
             _rw(NSB_ROW_MAP["dss_activation"]["pending"][0], dss_pending,
                 [(3, " & ".join(mcl.sort_bands_lte_first(dss_pending_bands_combined))), (6, dss_stakeholder)] if dss_pending_bands_combined else None)
             _rw(NSB_ROW_MAP["ngs_activation"]["pending"][0], ngs_pending, [(3, ngs_bands), (4, ngs_node)] if ngs_pending else None)
-            _rw(NSB_ROW_MAP["gps_installation"]["pending"][0], gps_pending_line, [(3, "|".join(disabled_nodes))] if gps_pending_line else None)
+            _rw(NSB_ROW_MAP["gps_installation"]["pending"][0], gps_pending_line, [(3, "|".join(gps_missing_nodes))] if gps_pending_line else None)
             lkf_p_value = (lkf_pending.replace("LKF Installation:", "").replace("(MIC)", "").strip()
                            if lkf_pending else None)
             _rw(NSB_ROW_MAP["lkf_installation"]["pending"][0], bool(lkf_pending), [(3, lkf_p_value)] if lkf_p_value else None)
