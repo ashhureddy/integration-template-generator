@@ -86,6 +86,23 @@ def gps_sync_status(mm_objs, post_sync_status):
     return enabled, disabled
 
 
+def gps_disabled_or_missing(mm_objs, post_gps_status, post_sync_status):
+    """Confirmed rule (shared with MCA/NSB): 'not detected' judged by GPS Status/Product
+    Designation presence (post_gps_status), not by TimeSyncIO presence.
+      - No Product Designation row for node -> not detected/fetching -> missing bucket
+      - Product Designation present AND TimeSyncIO=DISABLED -> disabled bucket
+    Returns (disabled_nodes, missing_nodes)."""
+    disabled, missing = [], []
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        gtype = post_gps_status.get(node)
+        if not gtype:
+            missing.append(node)
+        elif post_sync_status.get(node) == "DISABLED":
+            disabled.append(node)
+    return disabled, missing
+
+
 # ============================================================
 # SUP / XMU — confirmed real logic, verified against real ALL00640 Post-checks data
 # (SUP-1 ... ENABLED, XMU03-1-1 ... ENABLED both present in the real Hardware Status table).
