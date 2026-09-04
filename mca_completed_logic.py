@@ -992,14 +992,28 @@ def gps_unconfirmed_type_check(mm_objs, post_gps_status):
     return f"GPS needs to be upgraded for : {'|'.join(hits)}"
 
 
-def gps_sync_disabled_check(mm_objs, post_sync_status):
-    """Every node, Post-checks TimeSyncIO row. All disabled nodes merge into ONE Pending
-    line reusing the existing 'GPS Installation:' Pending label - no warning."""
-    hits = [row.get("Node to be built as") for row in mm_objs
-            if post_sync_status.get(row.get("Node to be built as")) == "DISABLED"]
-    if not hits:
-        return None
-    return f"GPS Installation: {'|'.join(hits)}"
+def gps_disabled_or_missing_check(mm_objs, post_gps_status, post_sync_status):
+    """Every node, cross-referencing GPS Status table presence (post_gps_status) against
+    Post-checks TimeSyncIO row (post_sync_status).
+
+    Confirmed rule: 'not detected' is judged by GPS Status/Product Designation
+    presence, NOT by TimeSyncIO presence.
+      - No Product Designation row at all for the node -> module not detected/fetching
+        -> 'GPS installation on {node} ({stakeholder})'
+      - Product Designation present AND TimeSyncIO=DISABLED -> module detected but
+        sync disabled -> 'GPS disabled on {node} ({stakeholder})'
+      - Product Designation present AND TimeSyncIO=ENABLED -> fine, not reported here.
+    Returns (disabled_hits, missing_hits) as separate node lists; caller formats lines
+    with its own stakeholder resolution so NCSC/MIC PM routing stays scope-local."""
+    disabled_hits, missing_hits = [], []
+    for row in mm_objs:
+        node = row.get("Node to be built as")
+        gtype = post_gps_status.get(node)
+        if not gtype:
+            missing_hits.append(node)
+        elif post_sync_status.get(node) == "DISABLED":
+            disabled_hits.append(node)
+    return disabled_hits, missing_hits
 
 
 # ============================================================
