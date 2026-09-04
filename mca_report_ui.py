@@ -339,9 +339,12 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if gps_unconfirmed:
             gps_extra_pending.append(gps_unconfirmed)
         post_sync = mcl.extract_sync_status_2(postcheck_text)
-        gps_sync_line = mcl.gps_sync_disabled_check(mm_objs, post_sync)
-        if gps_sync_line:
-            gps_extra_pending.append(f"{gps_sync_line} ({mcl.gps_pending_stakeholder(market)})")
+        gps_disabled_hits, gps_missing_hits = mcl.gps_disabled_or_missing_check(mm_objs, post_gps, post_sync)
+        _gps_stakeholder = mcl.gps_pending_stakeholder(market)
+        if gps_disabled_hits:
+            gps_extra_pending.append(f"GPS disabled on {'|'.join(gps_disabled_hits)} ({_gps_stakeholder})")
+        if gps_missing_hits:
+            gps_extra_pending.append(f"GPS installation on {'|'.join(gps_missing_hits)} ({_gps_stakeholder})")
 
     # ---- EDP Publish fallback: 6610 present in CIQ but NOT published in EDP -> this
     # replaces the old generic message entirely; 6610 Controller Integration does NOT
