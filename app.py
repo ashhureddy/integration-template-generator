@@ -6456,17 +6456,42 @@ elif st.session_state.qkx_page == "paramcheck":
                    "Upload the CIQ, then all Onsite logs for every node at the site — "
                    "each file is matched to its node automatically by filename.")
 
-    with st.container(border=True):
-        pv_ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"], key="pv_ciq")
-        if pv_has_pre:
-            pv_pre_files = st.file_uploader("Pre logs (.log / .txt) — one or more, one per node",
-                                             type=["log", "txt"], accept_multiple_files=True, key="pv_pre")
-        else:
-            pv_pre_files = []
-        pv_onsite_files = st.file_uploader("Onsite logs (.log / .txt) — one or more, one per node",
-                                            type=["log", "txt"], accept_multiple_files=True, key="pv_onsite")
-        pv_ready = pv_ciq_file and pv_onsite_files and (pv_pre_files if pv_has_pre else True)
-        pv_run = st.button("Verify parameters", type="primary", key="pv_run", disabled=not pv_ready)
+    pv_col_input, pv_col_cmds = st.columns([1, 2])
+
+    with pv_col_input:
+        with st.container(border=True):
+            pv_ciq_file = st.file_uploader("CIQ (.xlsx / .xls)", type=["xlsx", "xls"], key="pv_ciq")
+            if pv_has_pre:
+                pv_pre_files = st.file_uploader("Pre logs (.log / .txt) — one or more, one per node",
+                                                 type=["log", "txt"], accept_multiple_files=True, key="pv_pre")
+            else:
+                pv_pre_files = []
+            pv_onsite_files = st.file_uploader("Onsite logs (.log / .txt) — one or more, one per node",
+                                                type=["log", "txt"], accept_multiple_files=True, key="pv_onsite")
+            pv_ready = pv_ciq_file and pv_onsite_files and (pv_pre_files if pv_has_pre else True)
+            pv_run = st.button("Verify parameters", type="primary", key="pv_run", disabled=not pv_ready)
+
+    with pv_col_cmds:
+        st.caption("Please run the below commands in PuTTY, save the log as "
+                   "`<NodeID>_onsite.txt`, and provide the inputs here for parameter verification.")
+        pv_onsite_cmds = """St cell
+get . rfportref
+hget ^EUtranCellFDD ^dlChannelBandwidth$|^ulChannelBandwidth$|^cellBarred$|^sectorCarrierRef$|^primaryPlmnReserved$|^availabilityStatus$|^administrativeState$|^operationalState$|^earfcnul$|^earfcndl$|^tac$|^physicalLayerCellId$
+hget ^RiLink  ^availabilityStatus$|^linkRate$|^linkTag$|^operationalState$|^riLinkId$|^riPortRef1$|^riPortRef2$|^transportType$
+
+hget ^SectorCarrier ^configuredMaxTxPower$|^noOfRxAntennas$|^noOfTxAntennas$|^reservedBy$|^sectorFunctionRef$
+hget Sector state|configuredMaxTxPower|availableHwOutputPower|noof[rt]x|sectorFunctionRef|bSChannelBw.L|arfcn|txDirection
+
+hget ^EUtranCellFDD ^dlChannelBandwidth$|^ulChannelBandwidth$|^cellBarred$|^sectorCarrierRef$|^primaryPlmnReserved$|^availabilityStatus$|^administrativeState$|^operationalState$|^earfcnul$|^earfcndl$|^tac$|^physicalLayerCellId$
+
+hget ^NRCellCU|syncsignal cellLocalId|nCI|cellState|serviceState
+hget Sector state|configuredMaxTxPower|availableHwOutputPower|noof[rt]x|sectorFunctionRef|bSChannelBw.L|arfcn|txDirection
+hget ^NRCellDU|syncsignal administrativeState|cellBarred|cellRange|cellReservedForOperator|cellState|nRSectorCarrierRef|operationalState|serviceState|cellLocalId|nCI|nRPCI|nRSectorCarrierRef|nRTAC|rachRootSequence
+get . ssbfrequency$
+
+hget ^EUtranCellFDD ^dlChannelBandwidth$|^ulChannelBandwidth$|^cellBarred$|^sectorCarrierRef$|^primaryPlmnReserved$|^availabilityStatus$|^administrativeState$|^operationalState$|^earfcnul$|^earfcndl$|^cellId$|^freqBand$|^physicalLayerCellId$|^isdlonly$|^crsGain$|^rachRootSequence$|^tac$|^transmissionMode$
+get . cellrange"""
+        st.code(pv_onsite_cmds, language="text")
 
     if pv_run:
         with st.spinner("Parsing logs and comparing against CIQ..."):
