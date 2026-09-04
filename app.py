@@ -6446,11 +6446,7 @@ elif st.session_state.qkx_page == "paramcheck":
     if st.button("← Back", key="pv_back"):
         _qkx_go("home")
     st.subheader(f"Parameter Verification — {pv_scope}")
-    if pv_has_pre:
-        st.caption("Compares CIQ vs Pre logs vs Onsite logs, flags mismatches. "
-                   "Upload the CIQ, then all Pre logs and Onsite logs for every node at the site — "
-                   "each file is matched to its node automatically by filename.")
-    else:
+    if not pv_has_pre:
         st.caption("Compares CIQ vs Onsite logs, flags mismatches. "
                    f"{pv_scope} has no pre-existing state to compare against, so no Pre log is needed. "
                    "Upload the CIQ, then all Onsite logs for every node at the site — "
