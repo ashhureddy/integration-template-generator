@@ -5878,12 +5878,20 @@ def build_parameter_verification_pdf(scope, node_results, has_pre=True, fa_code=
                 c_i = 1
                 for label, key_prefix, sub_cols in block:
                     color = row.get(f"{key_prefix}_color")
+                    is_cat_a = key_prefix in (cat_a_params or ())
                     for sc in sub_cols:
                         val = row.get(f"{key_prefix}_{sc}")
                         data_row.append(V(val))
                         # A newly-added sector has no Pre state at all: its Pre cell reads NA
                         # and is amber, whatever the parameter's own verdict is.
                         if sc == "pre" and _pv_display(val) == "NA":
+                            painted.append((r_i, c_i, "amber"))
+                        # Category B is verified on-site-vs-CIQ only, so a real Pre value can
+                        # differ from CIQ while the row is still all-green (site matches plan).
+                        # Flag that on the Pre cell itself so a retune doesn't read as a plain
+                        # match — CIQ/On-site keep the row's green, only Pre goes amber.
+                        elif sc == "pre" and color == "green" and not is_cat_a \
+                                and norm(val) != norm(row.get(f"{key_prefix}_ciq")):
                             painted.append((r_i, c_i, "amber"))
                         elif color:
                             painted.append((r_i, c_i, color))
