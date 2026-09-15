@@ -23,6 +23,9 @@ from pathlib import Path
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "Static" / "Legacy_MCA_Macro_Template_v6_1.xlsm"
 STAKEHOLDER_OPTIONS = ["MIC", "MIC PM", "AT&T", "Tower Crew"]
+# Port Conversion line prefix WITHOUT the with/without MPST word — every downstream match
+# uses this so both "with MPST" and "without MPST" lines are detected identically.
+PORT_CONV_PREFIX = "Port speed 1G to 10G conversion"
 
 
 def _get_controller_id(controller_objs):
@@ -283,6 +286,22 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         if all_completed_nodes:
             scope_lines = scope_lines + [f"Port speed 1G to 10G conversion with MPST: {'|'.join(all_completed_nodes)}."]
 
+    # ---- Port Conversion: With MPST / Without MPST. The line text was previously
+    # hardcoded to "with MPST"; a real conversion can be done either way, so the engineer
+    # picks whenever Port Conversion actually triggered. Default is "With MPST", which
+    # reproduces the previous wording exactly; "Without MPST" drops the MPST wording
+    # entirely -> "Port speed 1G to 10G conversion : <nodes>.". Everything downstream
+    # matches on PORT_CONV_PREFIX and splits on the LAST colon, so both forms work.
+    mpst_word = "with"
+    if any(l.startswith(PORT_CONV_PREFIX) for l in scope_lines):
+        _mpst_pick = st.selectbox("Port Conversion \u2014 MPST", ["With MPST", "Without MPST"],
+                                    key="port_conv_mpst")
+        mpst_word = "with" if _mpst_pick == "With MPST" else "without"
+        _pc_label = f"{PORT_CONV_PREFIX} with MPST:" if mpst_word == "with" else f"{PORT_CONV_PREFIX} :"
+        scope_lines = [(f"{_pc_label} {l.rsplit(':', 1)[-1].strip()}"
+                         if l.startswith(PORT_CONV_PREFIX) else l)
+                        for l in scope_lines]
+
     # ---- 6610 cascade: if a 6610 is present/EDP-published but the controller-checks file
     # doesn't confirm alarm scripting, 4 items move to Pending together, no warning. ----
     # Confirmed real gap: there's no way to indicate a 6610 was already pre-existing
@@ -366,6 +385,14 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     ctx = _build_ctx(app, ciq_wb, mm_objs, precheck_text, scope_lines, idl_build_type,
                       _effective_controller_id, controller_in_edp and not controller_pre_existing, testing_section, sau_placement)
     results = mca_checklist.evaluate_checklist(ctx)
+
+    # Port Conversion's checklist label is hardcoded "with MPST" — keep it in sync with
+    # the engineer's choice so the on-screen row can't contradict the report line (the
+    # report line itself comes from the scope_line, not this label).
+    if mpst_word == "without":
+        for item in results:
+            if item["key"] == "port_conversion":
+                item["label"] = f"{PORT_CONV_PREFIX} :"
 
     if cascade_fires:
         # Force these 5 items to Pending, drop them from wherever the normal detection put
@@ -1008,8 +1035,8 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # broad hw-string comparison (report_detect.detect_node_board_changes) LKF's board-swap
     # trigger already uses — confirmed this catches same-generation model changes (e.g.
     # 5216->6630, both G2) that the narrower generation-based Port Conversion check misses. ----
-    port_conv_nodes = sorted({l.split("MPST: ")[-1].rstrip(".") for l in scope_lines
-                               if l.startswith("Port speed 1G to 10G conversion with MPST:")}
+    port_conv_nodes = sorted({l.rsplit(":", 1)[-1].strip().rstrip(".") for l in scope_lines
+                               if l.startswith(PORT_CONV_PREFIX)}
                               | {r["node"] for r in port_conv_swap_completed})
     board_swap_node_set = {n for n, _p, _q in board_swaps} if board_swaps and \
         isinstance(board_swaps[0], tuple) else set()
@@ -1655,12 +1682,18 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # broken path with an explicit write instead. Re-derives the node list directly
         # from scope_lines (not a variable from earlier in the function) to avoid any
         # scoping risk if postcheck_text was falsy.
-        pc_lines = [l for l in scope_lines if l.startswith("Port speed 1G to 10G conversion with MPST:")]
-        if pc_lines:
-            pc_nodes = pc_lines[0].split("MPST:")[-1].strip().rstrip(".")
+        # Row 46's template label is fixed text "Port speed 1G to 10G conversion with
+        # MPST:", so it can only carry the "with MPST" form. When "Without MPST" is
+        # chosen the dedicated row is left unchecked and the full line goes to the
+        # Completed buffer instead, where its own label travels with it.
+        pc_lines = [l for l in scope_lines if l.startswith(PORT_CONV_PREFIX)]
+        pc_buffer_lines = []
+        if pc_lines and mpst_word == "with":
+            pc_nodes = pc_lines[0].rsplit(":", 1)[-1].strip().rstrip(".")
             row_writes.append((46, True, [(3, pc_nodes)]))
         else:
             row_writes.append((46, False, []))
+            pc_buffer_lines = [l.rstrip(".") for l in pc_lines]
 
         # DSS Activation (completed=59, pending=122) — restored toggle, confirmed real gap.
         dss_c_bands = dss_completed_line.split("DSS Activation:")[-1].strip() if dss_completed_line else None
@@ -1785,6 +1818,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
         # true overflow (integration/moved_sectors/retune/fdd_renaming) — captured above,
         # right before build_xlsm_row_writes truncated each item's own reserved rows.
         buffer_completed_lines = gps_install_lines[1:] + gps_upgrade_lines_found + sfp_c_lines[3:] + rs_c_display[3:] \
+            + pc_buffer_lines \
             + _overflow_completed_lines \
             + ([additional_completed.strip()] if additional_completed.strip() else [])
         buffer_pending_lines = gps_p_lines[1:] + sfp_p_lines[4:] + rs_p_display[3:] + bucket_pending \
