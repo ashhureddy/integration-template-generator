@@ -1234,6 +1234,17 @@ def lkf_node_triggers(new_nodes, board_swap_nodes, precheck_text, mm_objs):
 
     for row in mm_objs:
         node = row.get("Node to be built as")
+        # 5th trigger: a node converting SMBB -> MMBB/TMBB needs an LKF regardless of
+        # whether the board itself was swapped. Deliberately checked BEFORE (and
+        # independently of) the eNBId/gNBId test below, which misses this case whenever
+        # the CIQ declares the target BBU Mode but leaves one identity column blank.
+        # Pre-side mode comes from the Pre-checks cells (same rule as _identity_tag_from_
+        # checks / pre_node_label), Post-side from the CIQ's own "BBU Mode" column.
+        bbu_mode = str(row.get("BBU Mode") or "").strip().upper()
+        _sec, pre_mode_tag = _identity_tag_from_checks(precheck_text, node)
+        if pre_mode_tag == "SMBB" and bbu_mode in ("MMBB", "TMBB"):
+            triggered.add(node)
+            continue
         has_enb, has_gnb = qx.is_populated(row.get("eNBId")), qx.is_populated(row.get("gNBId"))
         if not (has_enb and has_gnb):
             continue  # target isn't MMBB/TMBB, 4th trigger doesn't apply
