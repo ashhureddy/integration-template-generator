@@ -564,6 +564,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     xmu_present_in_ciq = mcl.xmu_in_ciq(post_line)
     all_site_nodes = {row.get("Node to be built as") for row in mm_objs if row.get("Node to be built as")}
     sup_completed_lines, sup_pending_lines = [], []
+    sup_shortfall = []
     xmu_completed_lines, xmu_pending_lines = [], []
     if postcheck_text:
         sup_expecting_nodes = mcl.nodes_expecting_sup(mm_objs, ciq_wb) & all_site_nodes
@@ -574,8 +575,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             for node, state in sup_state.items():
                 (sup_completed_lines if state == "ENABLED" else sup_pending_lines).append(
                     f"SUP Connections: {node}" + ("" if state == "ENABLED" else " (MIC PM)"))
-            for node in sorted(sup_missing):
-                sup_pending_lines.append(f"SUP Connections: {node} (MIC PM)")
+            # A node missing its OWN SUP row isn't necessarily short a SUP — one SUP can
+            # accommodate 2 XMU/5216 boards pooled across a shared cabinet (same rule as
+            # N2E/NSB's sup_capacity_warning, ported here since MCA never called it).
+            # Only flag missing nodes as Pending when the site is actually short on SUPs;
+            # otherwise the shared cabinet SUP already covers them.
+            sup_shortfall = mcl.sup_capacity_warning(postcheck_text, all_site_nodes)
+            if sup_shortfall:
+                for node in sorted(sup_missing):
+                    sup_pending_lines.append(f"SUP Connections: {node} (MIC PM)")
 
         if xmu_present_in_ciq:
             xmu_state = mcl._hardware_component_state(postcheck_text, "XMU")
@@ -590,7 +598,7 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # design: warning-only for most items (never touches report placement), except
     # Radio Swap (which changes Completed/Pending placement itself) and the
     # board-swap-triggered Transport SFP case (which is both Pending AND a warning). ----
-    warnings = []
+    warnings = list(sup_shortfall)
 
     # Confirmed real bug fix: PCI (LTE) / nRPCI+cellRange (5G) were being checked
     # CIQ-vs-Post for EVERY cell uniformly via lte_sector_param_warnings/
