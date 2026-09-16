@@ -292,11 +292,15 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
     # reproduces the previous wording exactly; "Without MPST" drops the MPST wording
     # entirely -> "Port speed 1G to 10G conversion : <nodes>.". Everything downstream
     # matches on PORT_CONV_PREFIX and splits on the LAST colon, so both forms work.
+    # The actual selectbox is rendered later, beside the Port Conversion checklist
+    # checkbox itself (not here) — this only reads back its current session_state value
+    # (same pre-read pattern used for the NGS dropdowns), since the scope line has to be
+    # finalized before results/ctx are built, which happens well before that checkbox
+    # renders.
+    port_conv_triggered = any(l.startswith(PORT_CONV_PREFIX) for l in scope_lines)
     mpst_word = "with"
-    if any(l.startswith(PORT_CONV_PREFIX) for l in scope_lines):
-        _mpst_pick = st.selectbox("Port Conversion \u2014 MPST", ["With MPST", "Without MPST"],
-                                    key="port_conv_mpst")
-        mpst_word = "with" if _mpst_pick == "With MPST" else "without"
+    if port_conv_triggered:
+        mpst_word = "with" if st.session_state.get("port_conv_mpst", "With MPST") == "With MPST" else "without"
         _pc_label = f"{PORT_CONV_PREFIX} with MPST:" if mpst_word == "with" else f"{PORT_CONV_PREFIX} :"
         scope_lines = [(f"{_pc_label} {l.rsplit(':', 1)[-1].strip()}"
                          if l.startswith(PORT_CONV_PREFIX) else l)
@@ -1095,6 +1099,9 @@ def render(app, ciq_wb, mm_objs, controller_objs, precheck_text, pre_line, post_
             with cols[i % 2]:
                 choice, stakeholder = _simple_item_row(item)
                 choices[item["key"]] = choice
+                if item["key"] == "port_conversion" and port_conv_triggered:
+                    st.selectbox("Port Conversion \u2014 MPST", ["With MPST", "Without MPST"],
+                                 key="port_conv_mpst")
 
         gps_c_checked, gps_c_lines = _checked_group("GPS Installation / Upgrade", gps_extra_completed, "chk_gps_c")
         sfp_c_checked, sfp_c_lines = _checked_group("Transport SFP Installation on", transport_sfp_lines, "chk_sfp_c")
