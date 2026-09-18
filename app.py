@@ -1188,8 +1188,8 @@ def generate_final_connections(ciq_wb, mm_objs):
 #  - DU type -> generation: 6630/5216 -> G2, 6648/6651 -> G3, 6672 -> G4.
 #  - The site's generation combination (order-independent) is matched against the confirmed
 #    15-template registry. Combinations with both a Preferred and Alternate variant
-#    (G2+G3, G3+G3, G3+G3+G3) generate BOTH files. The 4 known-unsupported 3-BBU
-#    combinations (G2+G2+G4, G2+G3+G4, G3+G3+G4, G3+G4+G4) return "IDL template not found".
+#    (G2+G3, G3+G3, G3+G3+G3, G2+G2+G3, G2+G3+G3) generate BOTH files. The known-unsupported
+#    3-BBU combinations (G2+G2+G4, G3+G3+G4, G3+G4+G4) return "IDL template not found".
 #  - Node ordering for same-generation nodes follows CIQ row order, top = 1st.
 #  - Placeholder filling is generic rather than hardcoded per template: for each node we build
 #    a set of candidate slot-prefixes (global row-position ordinal, per-generation-group
@@ -1367,13 +1367,14 @@ IDL_TEMPLATE_REGISTRY = {
     ("G3", "G4"): [("G4+G3_Buildtype_T.txt", "IDLe")],
     ("G4", "G4"): [("G4+G4_Buildtype_R.txt", "Preferred")],
     ("G2", "G2", "G2"): [("G2+G2+G2_Buildtype_D.txt", "")],
-    ("G2", "G2", "G3"): [("G2+ G2+G3_Buildtype_E.txt", "")],
-    ("G2", "G3", "G3"): [("G2+G3+G3_Buildtype_F.txt", "")],
+    ("G2", "G2", "G3"): [("G2+ G2+G3_Buildtype_E.txt", "Preferred"), ("G2+ G2+G3_Buildtype_EE.txt", "Alternate")],
+    ("G2", "G3", "G3"): [("G2+G3+G3_Buildtype_F.txt", "Preferred"), ("G2+G3+G3_Buildtype_FF.txt", "Alternate")],
     ("G3", "G3", "G3"): [("G3+ G3+ G3_Buildtype_GG.txt", "Preferred"), ("G3+ G3+ G3_Buildtype_G.txt", "Alternate")],
     ("G2", "G4", "G4"): [("G2+G4+G4_Buildtype_U.txt", "")],
     ("G4", "G4", "G4"): [("G4+G4+G4_Buildtype_RR.txt", "")],
     ("G3", "G4", "G4"): [("G3 + G4 + G4_Buildtype_TT.txt", "")],
-    # ("G2","G2","G4"), ("G2","G3","G4"), ("G3","G3","G4") -> no template exists;
+    ("G2", "G3", "G4"): [("G2+G3+G4_Buildtype_UU.txt", "")],
+    # ("G2","G2","G4"), ("G3","G3","G4") -> no template exists;
     # falls through to the "IDL Template not found" branch below.
 }
 
